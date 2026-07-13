@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { news, players, standings, teams } from "@/lib/demo-data";
 import { getAIProvider } from "@/lib/ai";
 import { runIngestion } from "@/lib/ingestion";
+import { getOfficialNews } from "@/lib/ingestion/official-feed";
 import { rateLimit } from "@/lib/rate-limit";
-import { getSportsDataProvider } from "@/lib/sports-data";
+import { getSportsDataProvider, MockSportsDataProvider } from "@/lib/sports-data";
 import { bookmarkSchema, followSchema, profileSchema, searchSchema } from "@/lib/validation";
 
 type Context = { params: Promise<{ path: string[] }> };
@@ -12,13 +13,10 @@ const protectedBySecret = (request: NextRequest) => process.env.CRON_SECRET && r
 
 export async function GET(request: NextRequest, { params }: Context) {
   const { path } = await params; const route = path.join("/"); const sports = getSportsDataProvider();
-  if (route === "news") return NextResponse.json({ data: news, nextCursor: null, demo: true });
-  if (route === "feed/for-you") return NextResponse.json({ data: [...news].sort((a,b)=>b.hotness+b.reliability-a.hotness-a.reliability), strategy: "trending_fallback" });
+  if (route === "news") { try { const data = await getOfficialNews(); return NextResponse.json({ data, nextCursor: null, demo: false, sources: ["VFF", "VPF"] }, { headers: { "cache-control": "public, s-maxage=300, stale-while-revalidate=900" } }); } catch { return NextResponse.json({ data: news, nextCursor: null, demo: true, warning: "official_feed_unavailable" }); } }
+  if (route === "feed/for-you") { let source = news; try { source = await getOfficialNews(); } catch { /* use safe demo fallback */ } return NextResponse.json({ data: [...source].sort((a,b)=>b.hotness+b.reliability-a.hotness-a.reliability), strategy: "trending_fallback", demo: source === news }); }
   if (route === "search") { const rate = rateLimit(`search:${clientKey(request)}`, 30); if (!rate.allowed) return NextResponse.json({ error: "Quá nhiều yêu cầu" }, { status: 429 }); const parsed = searchSchema.safeParse({ q: request.nextUrl.searchParams.get("q") ?? "", type: request.nextUrl.searchParams.get("type") ?? "all" }); if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 }); const q = parsed.data.q.toLowerCase(); return NextResponse.json({ news: news.filter((x)=>`${x.title} ${x.summary}`.toLowerCase().includes(q)), teams: teams.filter((x)=>x.name.toLowerCase().includes(q)), players: players.filter((x)=>x.name.toLowerCase().includes(q)) }); }
-  if (route === "matches/live") return NextResponse.json({ data: await sports.getLiveMatches(), demo: true });
-  if (route === "fixtures") return NextResponse.json({ data: await sports.getFixtures(), timezone: "Asia/Ho_Chi_Minh" });
-  if (route === "results") return NextResponse.json({ data: await sports.getResults() });
-  if (route === "standings") return NextResponse.json({ data: standings, season: "2025/26" });
+  if (["matches/live", "fixtures", "results", "standings"].includes(route)) { try { const data = route === "matches/live" ? await sports.getLiveMatches() : route === "fixtures" ? await sports.getFixtures() : route === "results" ? await sports.getResults() : await sports.getStandings(); return NextResponse.json({ data, provider: sports.name, demo: sports.name === "mock", timezone: "Asia/Ho_Chi_Minh" }, { headers: { "cache-control": route === "matches/live" ? "public, s-maxage=15, stale-while-revalidate=30" : "public, s-maxage=300, stale-while-revalidate=900" } }); } catch { const fallback = new MockSportsDataProvider(); const data = route === "matches/live" ? await fallback.getLiveMatches() : route === "fixtures" ? await fallback.getFixtures() : route === "results" ? await fallback.getResults() : standings; return NextResponse.json({ data, provider: "mock", demo: true, warning: "sports_provider_unavailable" }); } }
   if (route.startsWith("teams/")) return NextResponse.json({ data: teams.find((x)=>x.slug===path[1]) ?? null });
   if (route.startsWith("players/")) return NextResponse.json({ data: players.find((x)=>x.id===path[1]) ?? null });
   return NextResponse.json({ error: "Không tìm thấy endpoint" }, { status: 404 });

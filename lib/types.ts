@@ -31,6 +31,7 @@ export interface NewsItem {
   hotness: number;
   reliability: number;
   sources: string[];
+  originalUrl?: string;
   imageTone: string;
   featured?: boolean;
 }
