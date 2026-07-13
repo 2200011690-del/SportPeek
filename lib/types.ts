@@ -31,9 +31,20 @@ export interface NewsItem {
   hotness: number;
   reliability: number;
   sources: string[];
+  sourceDetails?: NewsSourceDetail[];
   originalUrl?: string;
+  originalLanguage?: "vi" | "en";
+  translatedByAI?: boolean;
+  trendingReasons?: string[];
   imageTone: string;
   featured?: boolean;
+}
+
+export interface NewsSourceDetail {
+  name: string;
+  url: string;
+  reliability: number;
+  language: "vi" | "en";
 }
 
 export interface Match {
