@@ -23,7 +23,7 @@ function matchStatus(short: string): Match["status"] { if (["1H","HT","2H","ET",
 export class ApiFootballProvider implements SportsDataProvider {
   readonly name = "api-football";
   private readonly baseUrl = process.env.API_FOOTBALL_BASE_URL ?? "https://v3.football.api-sports.io";
-  private readonly key = process.env.SPORTS_DATA_API_KEY ?? "";
+  private readonly key = (process.env.SPORTS_DATA_API_KEY ?? "").trim();
   private readonly season = Number(process.env.API_FOOTBALL_SEASON ?? "2025");
 
   private async request<T>(path: string, ttlMs: number): Promise<T> {
@@ -52,7 +52,7 @@ export class ApiFootballProvider implements SportsDataProvider {
   async getPlayers(): Promise<PlayerRecord[]> { return demoPlayers; }
 }
 
-type FootballDataTeam = { id: number; name: string; shortName?: string; tla?: string; area?: { name?: string }; venue?: string };
+type FootballDataTeam = { id: number; name?: string | null; shortName?: string | null; tla?: string | null; area?: { name?: string }; venue?: string };
 type FootballDataMatch = {
   id: number;
   utcDate: string;
@@ -77,6 +77,10 @@ function footballDataStatus(status: string): Match["status"] {
   return "scheduled";
 }
 
+function footballDataTeamName(team: FootballDataTeam): string {
+  return team.name?.trim() || team.shortName?.trim() || team.tla?.trim() || "Chưa xác định";
+}
+
 function addDays(date: Date, amount: number): Date {
   const result = new Date(date); result.setUTCDate(result.getUTCDate() + amount); return result;
 }
@@ -84,7 +88,7 @@ function addDays(date: Date, amount: number): Date {
 export class FootballDataProvider implements SportsDataProvider {
   readonly name = "football-data";
   private readonly baseUrl = process.env.FOOTBALL_DATA_BASE_URL ?? "https://api.football-data.org/v4";
-  private readonly key = process.env.SPORTS_DATA_API_KEY ?? "";
+  private readonly key = (process.env.SPORTS_DATA_API_KEY ?? "").trim();
 
   private async request<T>(path: string, ttlMs: number): Promise<T> {
     if (!this.key) throw new Error("Thiếu SPORTS_DATA_API_KEY");
@@ -108,7 +112,7 @@ export class FootballDataProvider implements SportsDataProvider {
     return items.map((item) => {
       const fullTime = item.score.fullTime ?? {};
       return {
-        id: String(item.id), competition: item.competition.name, home: item.homeTeam.name, away: item.awayTeam.name,
+        id: String(item.id), competition: item.competition.name, home: footballDataTeamName(item.homeTeam), away: footballDataTeamName(item.awayTeam),
         homeScore: fullTime.home ?? fullTime.homeTeam ?? null, awayScore: fullTime.away ?? fullTime.awayTeam ?? null,
         startTime: new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh", hour12: false }).format(new Date(item.utcDate)),
         status: footballDataStatus(item.status), minute: item.minute ?? undefined, venue: item.venue ?? "Chưa công bố",
@@ -130,19 +134,19 @@ export class FootballDataProvider implements SportsDataProvider {
     const code = footballDataCompetitionCodes()[0] ?? "PL";
     const payload = await this.request<{ standings: Array<{ type: string; table: FootballDataStanding[] }> }>(`/competitions/${encodeURIComponent(code)}/standings`, 30 * 60_000);
     const table = payload.standings?.find((standing) => standing.type === "TOTAL")?.table ?? payload.standings?.[0]?.table ?? [];
-    return table.map((row) => ({ position: row.position, team: row.team.name, played: row.playedGames, won: row.won, drawn: row.draw, lost: row.lost, goalDifference: row.goalDifference, points: row.points, form: (row.form?.split(",") ?? []).slice(-5).filter((value): value is "W"|"D"|"L" => ["W", "D", "L"].includes(value)) }));
+    return table.map((row) => ({ position: row.position, team: footballDataTeamName(row.team), played: row.playedGames, won: row.won, drawn: row.draw, lost: row.lost, goalDifference: row.goalDifference, points: row.points, form: (row.form?.split(",") ?? []).slice(-5).filter((value): value is "W"|"D"|"L" => ["W", "D", "L"].includes(value)) }));
   }
   async getTeams(): Promise<Team[]> {
     const code = footballDataCompetitionCodes()[0] ?? "PL";
     const payload = await this.request<{ teams: FootballDataTeam[] }>(`/competitions/${encodeURIComponent(code)}/teams`, 24 * 60 * 60_000);
-    return (payload.teams ?? []).map((team) => ({ id: String(team.id), name: team.name, shortName: team.tla ?? team.shortName ?? team.name.slice(0, 3).toUpperCase(), slug: team.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), country: team.area?.name ?? "", accent: "#8cff4e", stadium: team.venue ?? "" }));
+    return (payload.teams ?? []).map((team) => { const name = footballDataTeamName(team); return { id: String(team.id), name, shortName: team.tla ?? team.shortName ?? name.slice(0, 3).toUpperCase(), slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), country: team.area?.name ?? "", accent: "#8cff4e", stadium: team.venue ?? "" }; });
   }
   async getPlayers(): Promise<PlayerRecord[]> { return demoPlayers; }
 }
 
-export function isRealSportsDataEnabled(): boolean { return ["api-football", "football-data"].includes(process.env.SPORTS_DATA_PROVIDER ?? "") && Boolean(process.env.SPORTS_DATA_API_KEY); }
+export function isRealSportsDataEnabled(): boolean { return ["api-football", "football-data"].includes(process.env.SPORTS_DATA_PROVIDER ?? "") && Boolean(process.env.SPORTS_DATA_API_KEY?.trim()); }
 export function getSportsDataProvider(): SportsDataProvider {
-  if (!process.env.SPORTS_DATA_API_KEY) return new MockSportsDataProvider();
+  if (!process.env.SPORTS_DATA_API_KEY?.trim()) return new MockSportsDataProvider();
   if (process.env.SPORTS_DATA_PROVIDER === "football-data") return new FootballDataProvider();
   if (process.env.SPORTS_DATA_PROVIDER === "api-football") return new ApiFootballProvider();
   return new MockSportsDataProvider();

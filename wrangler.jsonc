@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sportpeek",
+  "compatibility_date": "2026-07-13",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "main": "./worker/index.ts",
+  "assets": {
+    "directory": "dist/client",
+    "not_found_handling": "none",
+    "binding": "ASSETS"
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  "vars": {
+    "NEXT_PUBLIC_APP_URL": "https://sportpeek.2200011690.workers.dev",
+    "NEXT_PUBLIC_SUPABASE_URL": "https://atlvqdryzgsohbjglxng.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_r5Ul01CZq9gJ-NhtbBP6DA_YmfNGYJg",
+    "AI_PROVIDER": "mock",
+    "SPORTS_DATA_PROVIDER": "football-data",
+    "FOOTBALL_DATA_BASE_URL": "https://api.football-data.org/v4",
+    "FOOTBALL_DATA_COMPETITIONS": "PL,CL,PD,SA,BL1,FL1,DED,PPL,BSA,ELC,WC",
+    "NEWS_PROVIDER": "aggregated-rss"
+  }
+}

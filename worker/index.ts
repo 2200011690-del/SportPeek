@@ -27,6 +27,14 @@ interface ExecutionContext {
 
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Vinext server modules read configuration through `process.env`, while
+    // Cloudflare supplies runtime variables and secrets through the Worker
+    // `env` binding. Bridge string bindings before dispatching the request so
+    // server-only secrets remain runtime-only and are never bundled.
+    for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
+      if (typeof value === "string") process.env[key] = value;
+    }
+
     const url = new URL(request.url);
 
     if (url.pathname === "/_vinext/image") {

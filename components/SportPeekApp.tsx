@@ -22,14 +22,14 @@ const navItems = [
   { href: "/", label: "Tổng quan", icon: Home },
   { href: "/for-you", label: "Dành cho bạn", icon: Sparkles },
   { href: "/news", label: "Tin mới nhất", icon: Newspaper },
-  { href: "/live", label: "Trực tiếp", icon: Radio, badge: "2" },
+  { href: "/live", label: "Trực tiếp", icon: Radio },
   { href: "/fixtures", label: "Lịch thi đấu", icon: CalendarDays },
   { href: "/results", label: "Kết quả", icon: Goal },
   { href: "/standings", label: "Bảng xếp hạng", icon: Trophy },
   { href: "/transfers", label: "Chuyển nhượng", icon: Activity },
 ];
 
-const getInitials = (name: string) => name.split(" ").map((word) => word[0]).slice(-2).join("").toUpperCase();
+const getInitials = (name: string) => (name?.trim() || "TBD").split(" ").map((word) => word[0]).slice(-2).join("").toUpperCase();
 
 function TeamMark({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg" }) {
   const team = teams.find((item) => item.name === name);
@@ -86,10 +86,12 @@ export function StandingsTable({ full = false }: { full?: boolean }) {
 }
 
 function AppSidebar({ route, open, onClose }: { route: string; open: boolean; onClose: () => void }) {
+  const { matchItems } = useRuntimeData();
+  const liveCount = matchItems.filter((match) => match.status === "live").length;
   return <><div className={`drawer-backdrop ${open ? "show" : ""}`} onClick={onClose} /><aside className={`app-sidebar ${open ? "open" : ""}`}>
     <div className="brand"><span className="brand-symbol"><span /></span><span>SPORT<b>PEEK</b></span></div>
     <button className="sidebar-close" onClick={onClose} aria-label="Đóng menu"><X size={20} /></button>
-    <nav aria-label="Điều hướng chính">{navItems.map((item) => { const Icon = item.icon; const active = route === item.href || (item.href !== "/" && route.startsWith(item.href)); return <Link key={item.href} href={item.href} className={active ? "active" : ""}><Icon size={19} /><span>{item.label}</span>{item.badge && <em>{item.badge}</em>}</Link>; })}</nav>
+    <nav aria-label="Điều hướng chính">{navItems.map((item) => { const Icon = item.icon; const active = route === item.href || (item.href !== "/" && route.startsWith(item.href)); return <Link key={item.href} href={item.href} className={active ? "active" : ""}><Icon size={19} /><span>{item.label}</span>{item.href === "/live" && liveCount > 0 && <em>{liveCount}</em>}</Link>; })}</nav>
     <div className="sidebar-section"><span>Theo dõi</span>{teams.slice(0, 4).map((team) => <Link href={`/teams/${team.slug}`} key={team.id}><TeamMark name={team.name} size="sm" /><span>{team.name}</span></Link>)}</div>
     <div className="sidebar-upgrade"><Zap size={20} /><strong>Cá nhân hóa feed</strong><p>Theo dõi đội bóng và giải đấu bạn quan tâm.</p><Link href="/login">Đăng nhập ngay</Link></div>
     <div className="sidebar-bottom"><Link href="/settings"><Settings size={18} />Cài đặt</Link><Link href="/sources"><ShieldCheck size={18} />Nguồn tin</Link></div>
@@ -115,16 +117,19 @@ function SearchCommand({ open, onClose }: { open: boolean; onClose: () => void }
 }
 
 function BreakingTicker() {
-  return <div className="breaking-ticker"><span className="ticker-label"><Zap size={14} />MỚI NHẤT</span><div className="ticker-copy"><strong>Dữ liệu minh họa:</strong> Lịch thi đấu vòng kế tiếp vừa được cập nhật</div><span className="ticker-time">2 phút trước</span><div className="ticker-arrows"><button aria-label="Tin trước"><ChevronLeft size={16} /></button><button aria-label="Tin sau"><ChevronRight size={16} /></button></div></div>;
+  const { newsItems, newsReal } = useRuntimeData();
+  const latest = newsItems[0];
+  return <div className="breaking-ticker"><span className="ticker-label"><Zap size={14} />MỚI NHẤT</span><div className="ticker-copy"><strong>{newsReal ? "Tin mới:" : "Cập nhật:"}</strong> {latest?.title ?? "Bản tin thể thao đang được cập nhật"}</div><span className="ticker-time">{latest?.publishedAt ?? "vừa xong"}</span><div className="ticker-arrows"><button aria-label="Tin trước"><ChevronLeft size={16} /></button><button aria-label="Tin sau"><ChevronRight size={16} /></button></div></div>;
 }
 
 function HomePage({ bookmarks, onBookmark }: { bookmarks: Set<string>; onBookmark: (id: string) => void }) {
   const { newsItems, matchItems } = useRuntimeData();
-  return <><BreakingTicker /><div className="home-grid"><main className="main-feed"><div className="welcome-row"><div><span className="eyebrow">THỨ HAI · 13 THÁNG 7</span><h1>Chào buổi tối, người hâm mộ.</h1><p>Những diễn biến đáng chú ý được tổng hợp và kiểm chứng cho bạn.</p></div><div className="signal"><span><i />Hệ thống ổn định</span><strong>128</strong><small>tin đã phân tích hôm nay</small></div></div>
+  const today = new Intl.DateTimeFormat("vi-VN", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date()).toUpperCase();
+  return <><BreakingTicker /><div className="home-grid"><main className="main-feed"><div className="welcome-row"><div><span className="eyebrow">{today}</span><h1>Chào buổi tối, người hâm mộ.</h1><p>Những diễn biến đáng chú ý được tổng hợp và kiểm chứng cho bạn.</p></div><div className="signal"><span><i />Hệ thống ổn định</span><strong>{newsItems.length}</strong><small>tin trong bản tổng hợp hiện tại</small></div></div>
     <section><SectionHeading eyebrow="ĐIỂM TIN" title="Đáng chú ý nhất" action="Xem tất cả" /><div className="featured-grid">{newsItems.slice(0, 2).map((item) => <NewsCard key={item.id} item={item} featured bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div></section>
     <section><SectionHeading eyebrow="CẬP NHẬT LIÊN TỤC" title="Tin mới nhất" action="Mở bảng tin" /><div className="news-stack">{newsItems.slice(2, 7).map((item) => <NewsListItem item={item} key={item.id} />)}</div></section>
     <section className="popular-section"><SectionHeading eyebrow="KHÁM PHÁ" title="Đội bóng phổ biến" /><div className="team-strip">{teams.slice(0, 6).map((team) => <Link href={`/teams/${team.slug}`} key={team.id}><TeamMark name={team.name} /><span>{team.name}</span><small>{team.country}</small></Link>)}</div></section>
-  </main><aside className="right-rail"><section className="rail-card live-rail"><SectionHeading eyebrow="ĐANG DIỄN RA" title="Trực tiếp" action="Tất cả" href="/live" />{matchItems.filter((match) => match.status === "live").map((match) => <MatchCard key={match.id} match={match} compact />)}</section><section className="rail-card"><SectionHeading eyebrow="HÔM NAY" title="Lịch thi đấu" action="Lịch đầy đủ" href="/fixtures" />{matchItems.filter((match) => match.status === "scheduled").slice(0, 3).map((match) => <MatchCard key={match.id} match={match} compact />)}</section><section className="rail-card"><SectionHeading eyebrow="PREMIER LEAGUE" title="Bảng xếp hạng" action="Chi tiết" href="/standings" /><StandingsTable /></section><section className="rail-card topics"><SectionHeading eyebrow="XU HƯỚNG" title="Chủ đề nổi bật" /><div>{["# Kỳ chuyển nhượng", "# Đại chiến cuối tuần", "# Tài năng trẻ", "# Chiến thuật pressing", "# V.League"].map((topic, index) => <Link href={`/search?q=${encodeURIComponent(topic)}`} key={topic}><span>{topic}</span><em>{14 - index * 2} tin</em></Link>)}</div></section></aside></div></>;
+  </main><aside className="right-rail"><section className="rail-card live-rail"><SectionHeading eyebrow="ĐANG DIỄN RA" title="Trực tiếp" action="Tất cả" href="/live" />{matchItems.filter((match) => match.status === "live").map((match) => <MatchCard key={match.id} match={match} compact />)}</section><section className="rail-card"><SectionHeading eyebrow="HÔM NAY" title="Lịch thi đấu" action="Lịch đầy đủ" href="/fixtures" />{matchItems.filter((match) => match.status === "scheduled").slice(0, 3).map((match) => <MatchCard key={match.id} match={match} compact />)}</section><section className="rail-card"><SectionHeading eyebrow="PREMIER LEAGUE" title="Bảng xếp hạng" action="Chi tiết" href="/standings" /><StandingsTable /></section><section className="rail-card topics"><SectionHeading eyebrow="XU HƯỚNG" title="Chủ đề nổi bật" /><div>{["# Kỳ chuyển nhượng", "# Đại chiến cuối tuần", "# Tài năng trẻ", "# Chiến thuật pressing", "# V.League"].map((topic) => <Link href={`/search?q=${encodeURIComponent(topic)}`} key={topic}><span>{topic}</span><em>Khám phá</em></Link>)}</div></section></aside></div></>;
 }
 
 function PageHero({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {
@@ -148,7 +153,7 @@ function ForYouPage({ followed, onFollow, bookmarks, onBookmark }: { followed: S
 function LivePage({ mode }: { mode: "live" | "fixtures" | "results" }) {
   const { matchItems, sportsReal } = useRuntimeData();
   const filtered = mode === "live" ? matchItems.filter((item) => item.status !== "finished") : matchItems.filter((item) => item.status === (mode === "fixtures" ? "scheduled" : "finished"));
-  const labels = mode === "live" ? ["TRUNG TÂM TRẬN ĐẤU", "Trận đấu trực tiếp", "Theo dõi tỉ số, sự kiện và nhịp độ trận đấu từ provider dữ liệu thể thao."] : mode === "fixtures" ? ["LỊCH THI ĐẤU", "Lịch thi đấu", "Múi giờ hiển thị: Asia/Ho_Chi_Minh (GMT+7)."] : ["KẾT QUẢ", "Kết quả trận đấu", "Kết quả và dữ liệu trận đấu đã hoàn tất từ nguồn minh họa."];
+  const labels = mode === "live" ? ["TRUNG TÂM TRẬN ĐẤU", "Trận đấu trực tiếp", "Theo dõi tỉ số, sự kiện và nhịp độ trận đấu từ nhà cung cấp dữ liệu thể thao."] : mode === "fixtures" ? ["LỊCH THI ĐẤU", "Lịch thi đấu", "Múi giờ hiển thị: Asia/Ho_Chi_Minh (GMT+7)."] : ["KẾT QUẢ", "Kết quả trận đấu", "Kết quả và dữ liệu trận đấu đã hoàn tất từ nhà cung cấp dữ liệu."];
   return <div className="page-content"><PageHero eyebrow={labels[0]} title={labels[1]} description={sportsReal ? "Dữ liệu thật từ football-data.org; gói miễn phí có thể cập nhật tỉ số chậm." : labels[2]}>{mode === "live" && <div className="live-count"><i />{filtered.filter((item)=>item.status==="live").length} trận đang diễn ra</div>}</PageHero>{mode !== "live" && <div className="date-nav"><button><ChevronLeft size={18} /></button><button className="active">Hôm nay<small>{new Intl.DateTimeFormat("vi-VN",{day:"2-digit",month:"2-digit"}).format(new Date())}</small></button><button>Ngày mai</button><button><ChevronRight size={18} /></button><button className="calendar-button"><CalendarDays size={17} />Chọn ngày</button></div>}<FilterBar /><div className="match-groups">{[...new Set(filtered.map((item)=>item.competition))].map((competitionName) => { const group = filtered.filter((item) => item.competition === competitionName); return <section className="match-group" key={competitionName}><div className="competition-title"><span className="competition-icon">SP</span><div><strong>{competitionName}</strong><span>{sportsReal ? "Nguồn football-data.org" : "Dữ liệu dự phòng"}</span></div><ChevronRight size={18} /></div><div className="match-grid">{group.map((match) => <MatchCard key={match.id} match={match} />)}</div></section>; })}</div></div>;
 }
 
