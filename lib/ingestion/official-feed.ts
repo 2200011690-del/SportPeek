@@ -74,9 +74,31 @@ function valueOfLink(link: RssItem["link"], fallback: string): string {
   return link?.["@_href"] ?? link?.["#text"] ?? fallback;
 }
 
-function normalizeDate(value?: string): Date {
-  const parsed = value ? new Date(value) : new Date();
-  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+export function normalizePublishedDate(value?: string, now = new Date(), assumeVietnamTime = false): Date | null {
+  if (!value) return null;
+  const normalized = value.replace(/[\u00a0\u202f]/g, " ").trim();
+  const vietnameseLocal = assumeVietnamTime && normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)$/i);
+  let parsed: Date;
+  if (vietnameseLocal) {
+    const [, month, day, year, rawHour, minute, second = "0", period] = vietnameseLocal;
+    let hour = Number(rawHour) % 12;
+    if (period.toUpperCase() === "PM") hour += 12;
+    parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), hour - 7, Number(minute), Number(second)));
+  } else if (/\bBST$/i.test(normalized)) {
+    const wallClock = new Date(normalized.replace(/\bBST$/i, "GMT"));
+    parsed = new Date(wallClock.getTime() - 60 * 60_000);
+  } else if (/\bEST$/i.test(normalized)) {
+    const wallClock = new Date(normalized.replace(/\bEST$/i, "GMT"));
+    const daylightSaving = wallClock.getUTCMonth() >= 2 && wallClock.getUTCMonth() <= 10;
+    parsed = new Date(wallClock.getTime() + (daylightSaving ? 4 : 5) * 60 * 60_000);
+  } else {
+    parsed = new Date(normalized);
+  }
+  if (Number.isNaN(parsed.getTime())) return null;
+  // A few publisher feeds occasionally expose a future timestamp because of
+  // timezone mistakes. Do not let those entries look newer than real news.
+  if (parsed.getTime() > now.getTime() + 10 * 60_000) return now;
+  return parsed;
 }
 
 async function fetchFeed(feed: FeedConfig): Promise<RawArticle[]> {
@@ -96,12 +118,14 @@ async function fetchFeed(feed: FeedConfig): Promise<RawArticle[]> {
     const url = valueOfLink(item.link, feed.url);
     if (!title || !url.startsWith("http")) return [];
     const guid = typeof item.guid === "string" ? item.guid : item.guid?.["#text"];
+    const published = normalizePublishedDate(item.pubDate ?? item.published ?? item.updated, new Date(), feed.language === "vi");
+    if (!published) return [];
     return [{
       id: contentHash({ title, url: guid ?? url }),
       title,
       excerpt: cleanText(item.description).slice(0, 520) || "Đọc nội dung đầy đủ tại nguồn gốc.",
       url,
-      published: normalizeDate(item.pubDate ?? item.published ?? item.updated),
+      published,
       category: cleanText(Array.isArray(item.category) ? item.category[0] : item.category) || "Thể thao",
       source: feed,
       translatedByAI: false,
@@ -140,7 +164,7 @@ function importanceFromText(article: RawArticle): number {
 
 function toNewsItem(cluster: RawArticle[], index: number): NewsItem {
   const sources = [...new Map(cluster.map((article) => [article.source.name, article.source])).values()];
-  const lead = [...cluster].sort((a, b) => Number(b.translatedByAI) - Number(a.translatedByAI) || b.source.reliability - a.source.reliability || b.published.getTime() - a.published.getTime())[0];
+  const lead = [...cluster].sort((a, b) => Number(b.translatedByAI) - Number(a.translatedByAI) || b.published.getTime() - a.published.getTime() || b.source.reliability - a.source.reliability)[0];
   const ageHours = Math.max(0, (Date.now() - lead.published.getTime()) / 3_600_000);
   const averageReliability = sources.reduce((sum, source) => sum + source.reliability, 0) / sources.length;
   const official = sources.some((source) => source.official);
@@ -161,6 +185,7 @@ function toNewsItem(cluster: RawArticle[], index: number): NewsItem {
     competition: lead.topic ?? (international ? "Bóng đá quốc tế" : "Thể thao Việt Nam"),
     team: international ? "Bóng đá quốc tế" : "Thể thao Việt Nam",
     publishedAt: formatDistanceToNowStrict(lead.published, { addSuffix: true, locale: vi }),
+    publishedTimestamp: lead.published.toISOString(),
     hotness,
     reliability,
     sources: sources.map((source) => source.name),
@@ -212,9 +237,14 @@ export async function getAggregatedNews(): Promise<{ data: NewsItem[]; sources: 
   const deduplicated = [...new Map(articles.map((article) => [article.url, article])).values()];
   let aiTranslation = false;
   try { aiTranslation = await translateInternational(deduplicated); } catch { aiTranslation = false; }
-  const data = clusterArticles(deduplicated).map(toNewsItem).sort((a, b) => b.hotness - a.hotness || b.reliability - a.reliability).slice(0, 60);
+  // The main newsroom promises "latest", so recency is the primary order.
+  // Hotness remains visible and is used separately for the home highlights.
+  const data = clusterArticles(deduplicated).map(toNewsItem).sort((a, b) => {
+    const newest = Date.parse(b.publishedTimestamp ?? "") - Date.parse(a.publishedTimestamp ?? "");
+    return (Number.isNaN(newest) ? 0 : newest) || b.hotness - a.hotness || b.reliability - a.reliability;
+  }).slice(0, 60);
   const sources = [...new Set(deduplicated.map((article) => article.source.name))];
-  const result = { data, sources, aiTranslation, expiresAt: Date.now() + 5 * 60_000 };
+  const result = { data, sources, aiTranslation, expiresAt: Date.now() + 90_000 };
   cache.set(key, result);
   return result;
 }

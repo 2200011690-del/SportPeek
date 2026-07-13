@@ -118,15 +118,16 @@ function SearchCommand({ open, onClose }: { open: boolean; onClose: () => void }
 
 function BreakingTicker() {
   const { newsItems, newsReal } = useRuntimeData();
-  const latest = newsItems[0];
+  const latest = [...newsItems].sort((a, b) => Date.parse(b.publishedTimestamp ?? "") - Date.parse(a.publishedTimestamp ?? ""))[0] ?? newsItems[0];
   return <div className="breaking-ticker"><span className="ticker-label"><Zap size={14} />MỚI NHẤT</span><div className="ticker-copy"><strong>{newsReal ? "Tin mới:" : "Cập nhật:"}</strong> {latest?.title ?? "Bản tin thể thao đang được cập nhật"}</div><span className="ticker-time">{latest?.publishedAt ?? "vừa xong"}</span><div className="ticker-arrows"><button aria-label="Tin trước"><ChevronLeft size={16} /></button><button aria-label="Tin sau"><ChevronRight size={16} /></button></div></div>;
 }
 
 function HomePage({ bookmarks, onBookmark }: { bookmarks: Set<string>; onBookmark: (id: string) => void }) {
   const { newsItems, matchItems } = useRuntimeData();
+  const highlightedNews = [...newsItems].sort((a, b) => b.hotness - a.hotness || b.reliability - a.reliability);
   const today = new Intl.DateTimeFormat("vi-VN", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date()).toUpperCase();
   return <><BreakingTicker /><div className="home-grid"><main className="main-feed"><div className="welcome-row"><div><span className="eyebrow">{today}</span><h1>Chào buổi tối, người hâm mộ.</h1><p>Những diễn biến đáng chú ý được tổng hợp và kiểm chứng cho bạn.</p></div><div className="signal"><span><i />Hệ thống ổn định</span><strong>{newsItems.length}</strong><small>tin trong bản tổng hợp hiện tại</small></div></div>
-    <section><SectionHeading eyebrow="ĐIỂM TIN" title="Đáng chú ý nhất" action="Xem tất cả" /><div className="featured-grid">{newsItems.slice(0, 2).map((item) => <NewsCard key={item.id} item={item} featured bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div></section>
+    <section><SectionHeading eyebrow="ĐIỂM TIN" title="Đáng chú ý nhất" action="Xem tất cả" /><div className="featured-grid">{highlightedNews.slice(0, 2).map((item) => <NewsCard key={item.id} item={item} featured bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div></section>
     <section><SectionHeading eyebrow="CẬP NHẬT LIÊN TỤC" title="Tin mới nhất" action="Mở bảng tin" /><div className="news-stack">{newsItems.slice(2, 7).map((item) => <NewsListItem item={item} key={item.id} />)}</div></section>
     <section className="popular-section"><SectionHeading eyebrow="KHÁM PHÁ" title="Đội bóng phổ biến" /><div className="team-strip">{teams.slice(0, 6).map((team) => <Link href={`/teams/${team.slug}`} key={team.id}><TeamMark name={team.name} /><span>{team.name}</span><small>{team.country}</small></Link>)}</div></section>
   </main><aside className="right-rail"><section className="rail-card live-rail"><SectionHeading eyebrow="ĐANG DIỄN RA" title="Trực tiếp" action="Tất cả" href="/live" />{matchItems.filter((match) => match.status === "live").map((match) => <MatchCard key={match.id} match={match} compact />)}</section><section className="rail-card"><SectionHeading eyebrow="HÔM NAY" title="Lịch thi đấu" action="Lịch đầy đủ" href="/fixtures" />{matchItems.filter((match) => match.status === "scheduled").slice(0, 3).map((match) => <MatchCard key={match.id} match={match} compact />)}</section><section className="rail-card"><SectionHeading eyebrow="PREMIER LEAGUE" title="Bảng xếp hạng" action="Chi tiết" href="/standings" /><StandingsTable /></section><section className="rail-card topics"><SectionHeading eyebrow="XU HƯỚNG" title="Chủ đề nổi bật" /><div>{["# Kỳ chuyển nhượng", "# Đại chiến cuối tuần", "# Tài năng trẻ", "# Chiến thuật pressing", "# V.League"].map((topic) => <Link href={`/search?q=${encodeURIComponent(topic)}`} key={topic}><span>{topic}</span><em>Khám phá</em></Link>)}</div></section></aside></div></>;
@@ -251,9 +252,13 @@ export default function SportPeekApp({ route }: { route: string }) {
   useEffect(() => { const key = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSearchOpen(true); } }; window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key); }, []);
   useEffect(() => {
     let active = true;
+    let loading = false;
     const load = async () => {
+      if (loading) return;
+      loading = true;
+      try {
       const requests = await Promise.allSettled([
-        fetch("/api/news").then((response) => response.json() as Promise<RuntimeResponse<NewsItem[]>>),
+        fetch("/api/news", { cache: "no-store" }).then((response) => response.json() as Promise<RuntimeResponse<NewsItem[]>>),
         fetch("/api/matches/live").then((response) => response.json() as Promise<RuntimeResponse<Match[]>>),
         fetch("/api/fixtures").then((response) => response.json() as Promise<RuntimeResponse<Match[]>>),
         fetch("/api/results").then((response) => response.json() as Promise<RuntimeResponse<Match[]>>),
@@ -265,9 +270,11 @@ export default function SportPeekApp({ route }: { route: string }) {
       const tableResponse = requests[4].status === "fulfilled" ? requests[4].value : null;
       const mergedMatches = [...new Map(sportsResponses.flatMap((result) => result.data ?? []).map((match) => [match.id, match])).values()];
       setRuntimeData({ newsItems: newsResponse?.data?.length ? newsResponse.data : news, matchItems: mergedMatches.length ? mergedMatches : matches, standingRows: tableResponse?.data?.length ? tableResponse.data : standings, newsReal: newsResponse?.demo === false, sportsReal: sportsResponses.some((result) => result.provider !== "mock" && result.demo === false), newsSources: newsResponse?.sources ?? [], aiTranslation: newsResponse?.aiTranslation === true });
+      } finally { loading = false; }
     };
     void load();
-    return () => { active = false; };
+    const refreshTimer = window.setInterval(() => { void load(); }, 120_000);
+    return () => { active = false; window.clearInterval(refreshTimer); };
   }, []);
   const toggleBookmark = async (id: string) => { setBookmarks((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }); try { await fetch("/api/bookmarks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newsClusterId: id, action: bookmarks.has(id) ? "remove" : "save" }) }); } catch { /* optimistic demo state remains usable */ } };
   const toggleFollow = async (id: string) => { setFollowed((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }); try { await fetch("/api/follows", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ entityType: "team", entityId: id, action: followed.has(id) ? "unfollow" : "follow" }) }); } catch { /* optimistic demo state remains usable */ } };

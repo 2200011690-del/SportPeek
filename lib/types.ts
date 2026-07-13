@@ -28,6 +28,7 @@ export interface NewsItem {
   competition: string;
   team: string;
   publishedAt: string;
+  publishedTimestamp?: string;
   hotness: number;
   reliability: number;
   sources: string[];
