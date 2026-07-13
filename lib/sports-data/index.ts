@@ -1,0 +1,4 @@
+import { matches, standings, teams, players } from "@/lib/demo-data";
+export interface SportsDataProvider { getLiveMatches(): Promise<typeof matches>; getFixtures(): Promise<typeof matches>; getResults(): Promise<typeof matches>; getStandings(): Promise<typeof standings>; getTeams(): Promise<typeof teams>; getPlayers(): Promise<typeof players>; }
+export class MockSportsDataProvider implements SportsDataProvider { async getLiveMatches(){return matches.filter((m)=>m.status==="live")} async getFixtures(){return matches.filter((m)=>m.status==="scheduled")} async getResults(){return matches.filter((m)=>m.status==="finished")} async getStandings(){return standings} async getTeams(){return teams} async getPlayers(){return players} }
+export function getSportsDataProvider(): SportsDataProvider { return new MockSportsDataProvider(); }
