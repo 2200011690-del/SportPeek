@@ -79,19 +79,20 @@ Migration chính: [`supabase/migrations/202607130001_sportpeek_schema.sql`](./su
 
 ## Biến môi trường
 
-| Biến | Phạm vi | Bắt buộc |
-|---|---|---|
-| `NEXT_PUBLIC_APP_URL` | URL canonical | Có khi deploy |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase public URL | Chỉ khi dùng Supabase |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public anon key + RLS | Chỉ khi dùng Supabase |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only admin/worker | Chỉ cho worker/admin |
-| `AI_PROVIDER` | `mock`, `openai`, `gemini` | Không, mặc định mock |
-| `OPENAI_API_KEY`, `OPENAI_MODEL` | OpenAI adapter | Không |
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | Gemini adapter | Không |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot | Không |
-| `CRON_SECRET` | Bảo vệ cron/AI endpoint | Có khi bật cron |
-| `ADMIN_EMAILS` | Allowlist khởi tạo admin | Có cho production |
-| `SPORTS_DATA_PROVIDER`, `SPORTS_DATA_API_KEY` | Live sports provider | Không, mặc định mock |
+| Biến                                          | Phạm vi                         | Bắt buộc              |
+| --------------------------------------------- | ------------------------------- | --------------------- |
+| `NEXT_PUBLIC_APP_URL`                         | URL canonical                   | Có khi deploy         |
+| `NEXT_PUBLIC_SUPABASE_URL`                    | Supabase public URL             | Chỉ khi dùng Supabase |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`        | Publishable key + RLS           | Chỉ khi dùng Supabase |
+| `SUPABASE_SECRET_KEY`                         | Server-only admin/worker        | Chỉ cho worker/admin  |
+| `SUPABASE_SERVICE_ROLE_KEY`                   | Legacy server-only admin/worker | Chỉ cho project cũ    |
+| `AI_PROVIDER`                                 | `mock`, `openai`, `gemini`      | Không, mặc định mock  |
+| `OPENAI_API_KEY`, `OPENAI_MODEL`              | OpenAI adapter                  | Không                 |
+| `GEMINI_API_KEY`, `GEMINI_MODEL`              | Gemini adapter                  | Không                 |
+| `TELEGRAM_BOT_TOKEN`                          | Telegram bot                    | Không                 |
+| `CRON_SECRET`                                 | Bảo vệ cron/AI endpoint         | Có khi bật cron       |
+| `ADMIN_EMAILS`                                | Allowlist khởi tạo admin        | Có cho production     |
+| `SPORTS_DATA_PROVIDER`, `SPORTS_DATA_API_KEY` | Live sports provider            | Không, mặc định mock  |
 
 Không commit `.env.local`. Tuyệt đối không đặt `SUPABASE_SERVICE_ROLE_KEY` trong biến `NEXT_PUBLIC_*`.
 
