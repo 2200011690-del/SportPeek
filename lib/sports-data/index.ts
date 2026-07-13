@@ -14,6 +14,7 @@ type ApiFixture = { fixture: { id: number; date: string; status: { short: string
 type ApiStanding = { rank: number; team: ApiTeam; points: number; goalsDiff: number; form?: string; all: { played: number; win: number; draw: number; lose: number } };
 type ApiEnvelope<T> = { response: T; errors?: unknown[] | Record<string, unknown>; results?: number };
 const memoryCache = new Map<string, { expiresAt: number; value: unknown }>();
+const pendingRequests = new Map<string, Promise<unknown>>();
 
 function formatDate(date: Date): string { return date.toISOString().slice(0, 10); }
 function configuredLeagueIds(): number[] { return (process.env.API_FOOTBALL_LEAGUE_IDS ?? "39,2,140,135").split(",").map(Number).filter(Number.isFinite); }
@@ -51,5 +52,98 @@ export class ApiFootballProvider implements SportsDataProvider {
   async getPlayers(): Promise<PlayerRecord[]> { return demoPlayers; }
 }
 
-export function isRealSportsDataEnabled(): boolean { return process.env.SPORTS_DATA_PROVIDER === "api-football" && Boolean(process.env.SPORTS_DATA_API_KEY); }
-export function getSportsDataProvider(): SportsDataProvider { return isRealSportsDataEnabled() ? new ApiFootballProvider() : new MockSportsDataProvider(); }
+type FootballDataTeam = { id: number; name: string; shortName?: string; tla?: string; area?: { name?: string }; venue?: string };
+type FootballDataMatch = {
+  id: number;
+  utcDate: string;
+  status: string;
+  minute?: number | null;
+  venue?: string | null;
+  competition: { name: string; code?: string };
+  homeTeam: FootballDataTeam;
+  awayTeam: FootballDataTeam;
+  score: { fullTime?: { home?: number | null; away?: number | null; homeTeam?: number | null; awayTeam?: number | null } };
+};
+type FootballDataStanding = { position: number; team: FootballDataTeam; playedGames: number; form?: string | null; won: number; draw: number; lost: number; points: number; goalDifference: number };
+type FootballDataError = { message?: string; errorCode?: number };
+
+function footballDataCompetitionCodes(): string[] {
+  return (process.env.FOOTBALL_DATA_COMPETITIONS ?? "PL,CL,PD,SA,BL1,FL1,DED,PPL,BSA,ELC,WC").split(",").map((code) => code.trim().toUpperCase()).filter(Boolean);
+}
+
+function footballDataStatus(status: string): Match["status"] {
+  if (["LIVE", "IN_PLAY", "PAUSED"].includes(status)) return "live";
+  if (status === "FINISHED") return "finished";
+  return "scheduled";
+}
+
+function addDays(date: Date, amount: number): Date {
+  const result = new Date(date); result.setUTCDate(result.getUTCDate() + amount); return result;
+}
+
+export class FootballDataProvider implements SportsDataProvider {
+  readonly name = "football-data";
+  private readonly baseUrl = process.env.FOOTBALL_DATA_BASE_URL ?? "https://api.football-data.org/v4";
+  private readonly key = process.env.SPORTS_DATA_API_KEY ?? "";
+
+  private async request<T>(path: string, ttlMs: number): Promise<T> {
+    if (!this.key) throw new Error("Thiếu SPORTS_DATA_API_KEY");
+    const cacheKey = `football-data:${path}`;
+    const cached = memoryCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.value as T;
+    const pending = pendingRequests.get(cacheKey);
+    if (pending) return pending as Promise<T>;
+    const request = (async () => {
+      const response = await fetch(`${this.baseUrl}${path}`, { headers: { "X-Auth-Token": this.key, accept: "application/json" }, signal: AbortSignal.timeout(12_000) });
+      const payload = await response.json() as T & FootballDataError;
+      if (!response.ok) throw new Error(`football-data.org HTTP ${response.status}: ${payload.message ?? "Yêu cầu bị từ chối"}`);
+      memoryCache.set(cacheKey, { value: payload, expiresAt: Date.now() + ttlMs });
+      return payload;
+    })();
+    pendingRequests.set(cacheKey, request);
+    try { return await request; } finally { pendingRequests.delete(cacheKey); }
+  }
+
+  private mapMatches(items: FootballDataMatch[]): Match[] {
+    return items.map((item) => {
+      const fullTime = item.score.fullTime ?? {};
+      return {
+        id: String(item.id), competition: item.competition.name, home: item.homeTeam.name, away: item.awayTeam.name,
+        homeScore: fullTime.home ?? fullTime.homeTeam ?? null, awayScore: fullTime.away ?? fullTime.awayTeam ?? null,
+        startTime: new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh", hour12: false }).format(new Date(item.utcDate)),
+        status: footballDataStatus(item.status), minute: item.minute ?? undefined, venue: item.venue ?? "Chưa công bố",
+      };
+    });
+  }
+
+  private async windowMatches(): Promise<Match[]> {
+    const today = new Date();
+    const query = new URLSearchParams({ competitions: footballDataCompetitionCodes().join(","), dateFrom: formatDate(addDays(today, -1)), dateTo: formatDate(addDays(today, 7)) });
+    const payload = await this.request<{ matches: FootballDataMatch[] }>(`/matches?${query}`, 60_000);
+    return this.mapMatches(payload.matches ?? []);
+  }
+
+  async getLiveMatches(): Promise<Match[]> { return (await this.windowMatches()).filter((match) => match.status === "live"); }
+  async getFixtures(): Promise<Match[]> { return (await this.windowMatches()).filter((match) => match.status === "scheduled"); }
+  async getResults(): Promise<Match[]> { return (await this.windowMatches()).filter((match) => match.status === "finished"); }
+  async getStandings(): Promise<Standing[]> {
+    const code = footballDataCompetitionCodes()[0] ?? "PL";
+    const payload = await this.request<{ standings: Array<{ type: string; table: FootballDataStanding[] }> }>(`/competitions/${encodeURIComponent(code)}/standings`, 30 * 60_000);
+    const table = payload.standings?.find((standing) => standing.type === "TOTAL")?.table ?? payload.standings?.[0]?.table ?? [];
+    return table.map((row) => ({ position: row.position, team: row.team.name, played: row.playedGames, won: row.won, drawn: row.draw, lost: row.lost, goalDifference: row.goalDifference, points: row.points, form: (row.form?.split(",") ?? []).slice(-5).filter((value): value is "W"|"D"|"L" => ["W", "D", "L"].includes(value)) }));
+  }
+  async getTeams(): Promise<Team[]> {
+    const code = footballDataCompetitionCodes()[0] ?? "PL";
+    const payload = await this.request<{ teams: FootballDataTeam[] }>(`/competitions/${encodeURIComponent(code)}/teams`, 24 * 60 * 60_000);
+    return (payload.teams ?? []).map((team) => ({ id: String(team.id), name: team.name, shortName: team.tla ?? team.shortName ?? team.name.slice(0, 3).toUpperCase(), slug: team.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), country: team.area?.name ?? "", accent: "#8cff4e", stadium: team.venue ?? "" }));
+  }
+  async getPlayers(): Promise<PlayerRecord[]> { return demoPlayers; }
+}
+
+export function isRealSportsDataEnabled(): boolean { return ["api-football", "football-data"].includes(process.env.SPORTS_DATA_PROVIDER ?? "") && Boolean(process.env.SPORTS_DATA_API_KEY); }
+export function getSportsDataProvider(): SportsDataProvider {
+  if (!process.env.SPORTS_DATA_API_KEY) return new MockSportsDataProvider();
+  if (process.env.SPORTS_DATA_PROVIDER === "football-data") return new FootballDataProvider();
+  if (process.env.SPORTS_DATA_PROVIDER === "api-football") return new ApiFootballProvider();
+  return new MockSportsDataProvider();
+}
