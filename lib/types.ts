@@ -51,6 +51,15 @@ export interface NewsSourceDetail {
   reliability: number;
   language: "vi" | "en";
   excerpt?: string;
+  articleId?: string;
+  title?: string;
+  publishedAt?: string;
+  fetchedAt?: string;
+  isOfficialSource?: boolean;
+  imageUrl?: string;
+  sourceLogoUrl?: string;
+  canonicalUrl?: string;
+  author?: string;
 }
 
 export interface Match {

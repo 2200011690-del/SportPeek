@@ -8,9 +8,13 @@ import {
   BadgeCheck, Globe2, ListFilter, Rss, Video,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { competitions, matches, news, players, standings, teams } from "@/lib/demo-data";
+import { competitions, matches, players, standings, teams } from "@/lib/demo-data";
 import { hotnessLabel } from "@/lib/scoring";
+import { fetchStoryDetail, loadingStoryReaderState, type StoryReaderState } from "@/lib/stories/client";
+import { storyToNewsItem } from "@/lib/stories/presenter";
+import { isSafeExternalUrl, type RawArticle, type StoryCluster } from "@/lib/stories/schema";
 import type { Match, NewsItem } from "@/lib/types";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import {
@@ -33,7 +37,7 @@ type AppStatus = {
 type NewsAIStatus = { provider: "cloudflare" | "openai" | "off"; state: "ok" | "off" | "error"; translatedCount: number };
 type SourceFilter = "all" | "vi" | "international" | "official" | "youtube" | "rss";
 type RuntimeData = { newsItems: NewsItem[]; matchItems: Match[]; standingRows: typeof standings; newsReal: boolean; sportsReal: boolean; newsSources: string[]; aiTranslation: boolean; aiStatus: NewsAIStatus; loading: boolean; lastUpdated: string | null; status: AppStatus };
-type RuntimeResponse<T> = { data: T; demo?: boolean; provider?: string; sources?: string[]; aiTranslation?: boolean; aiStatus?: NewsAIStatus };
+type RuntimeResponse<T> = { status?: string; data: T; demo?: boolean; provider?: string; sources?: string[]; aiTranslation?: boolean; aiStatus?: NewsAIStatus; error?: { code: string; message: string } | null };
 const createAppStatus = (rssActive: boolean, sportsActive: boolean, aiStatus: NewsAIStatus, sourceCount: number): AppStatus => ({
   rss: rssActive ? { state: "ok", label: `RSS · ${sourceCount} nguồn` } : { state: "degraded", label: "RSS gián đoạn" },
   ai: aiStatus.state === "ok"
@@ -58,7 +62,7 @@ type StoredSettings = { displayName: string; language: "vi" | "en"; timezone: st
 const DEFAULT_DEVICE_SETTINGS: StoredSettings = { displayName: "Người hâm mộ", language: "vi", timezone: "Asia/Ho_Chi_Minh", notifications: [true, true, true, true, false, false] };
 
 async function fetchRuntime<T>(url: string): Promise<RuntimeResponse<T>> {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(12_000) });
   if (!response.ok) throw new Error(`${url} trả về HTTP ${response.status}`);
   return response.json() as Promise<RuntimeResponse<T>>;
 }
@@ -304,14 +308,14 @@ function NewsPage({ bookmarks, onBookmark }: { bookmarks: Set<string>; onBookmar
     : aiStatus.state === "error"
       ? ["Cloudflare AI đang tạm gián đoạn", "SportPeek vẫn hiển thị bản gốc và không tạo bản dịch giả khi AI lỗi hoặc hết hạn mức."]
       : ["Tin quốc tế đang hiển thị bản gốc", "AI chưa được bật trong môi trường này."];
-  return <div className="page-content"><PageHero eyebrow="NEWSROOM" title="Tin nóng Việt Nam & thế giới" description="Tổng hợp nhiều báo thể thao, gộp các bài cùng sự kiện và xếp hạng mức quan tâm bằng tín hiệu minh bạch."><div className="hero-stat"><strong>{newsSources.length || newsItems.length}</strong><span>{loading ? "đang kết nối" : newsReal ? "nguồn đang hoạt động" : "tin dự phòng"}</span></div></PageHero><div className="personalization-banner"><div className="ai-orb"><Languages size={22} /></div><div><strong>{aiMessage[0]}</strong><p>{aiMessage[1]}</p></div><Link href="/sources">Xem phương pháp<ArrowRight size={15} /></Link></div><FilterBar search query={query} onQueryChange={updateFilter(setQuery)} competition={competition} onCompetitionChange={updateFilter(setCompetition)} competitionOptions={competitionOptions} team={team} onTeamChange={updateFilter(setTeam)} teamOptions={teamOptions} minHotness={minHotness} onMinHotnessChange={updateFilter(setMinHotness)} />{loading ? <DataLoadingState /> : pagination.items.length ? <><div className="results-summary">Hiển thị {pagination.items.length} trong {filtered.length} tin phù hợp</div><div className="news-page-grid">{pagination.items.map((item) => <NewsCard key={item.id} item={item} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div><Pagination page={pagination.page} totalPages={pagination.totalPages} onPageChange={setPage} /></> : <EmptyState title="Không có tin phù hợp" description="Hãy thử bỏ bớt bộ lọc hoặc dùng từ khóa khác." />}</div>;
+  return <div className="page-content"><PageHero eyebrow="NEWSROOM" title="Tin nóng Việt Nam & thế giới" description="Tổng hợp nhiều báo thể thao, gộp các bài cùng sự kiện và xếp hạng mức quan tâm bằng tín hiệu minh bạch."><div className="hero-stat"><strong>{newsSources.length || newsItems.length}</strong><span>{loading ? "đang kết nối" : newsReal ? "nguồn đang hoạt động" : "nguồn tạm gián đoạn"}</span></div></PageHero><div className="personalization-banner"><div className="ai-orb"><Languages size={22} /></div><div><strong>{aiMessage[0]}</strong><p>{aiMessage[1]}</p></div><Link href="/sources">Xem phương pháp<ArrowRight size={15} /></Link></div><FilterBar search query={query} onQueryChange={updateFilter(setQuery)} competition={competition} onCompetitionChange={updateFilter(setCompetition)} competitionOptions={competitionOptions} team={team} onTeamChange={updateFilter(setTeam)} teamOptions={teamOptions} minHotness={minHotness} onMinHotnessChange={updateFilter(setMinHotness)} />{loading ? <DataLoadingState /> : pagination.items.length ? <><div className="results-summary">Hiển thị {pagination.items.length} trong {filtered.length} tin phù hợp</div><div className="news-page-grid">{pagination.items.map((item) => <NewsCard key={item.id} item={item} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div><Pagination page={pagination.page} totalPages={pagination.totalPages} onPageChange={setPage} /></> : <EmptyState title={newsReal ? "Không có tin phù hợp" : "Nguồn tin đang tạm gián đoạn"} description={newsReal ? "Hãy thử bỏ bớt bộ lọc hoặc dùng từ khóa khác." : "SportPeek không chèn dữ liệu giả. Hãy thử tải lại sau khi các nguồn RSS hoạt động."} />}</div>;
 }
 
 function ForYouPage({ followed, onFollow, bookmarks, onBookmark }: { followed: Set<string>; onFollow: (id: string) => void; bookmarks: Set<string>; onBookmark: (id: string) => void }) {
   const { newsItems, newsReal, loading } = useRuntimeData();
   const followedNames = teams.filter((team) => followed.has(team.id)).map((team) => team.name);
   const recommendations = personalizedNewsItems(newsItems, followedNames).slice(0, 12);
-  return <div className="page-content"><PageHero eyebrow="CÁ NHÂN HÓA" title="Dành cho bạn" description="Tin từ đội đang theo dõi được ưu tiên, sau đó mới đến các chủ đề đang nổi bật."><Link className="primary-button" href="/settings"><Sparkles size={17} />Tinh chỉnh sở thích</Link></PageHero><div className="personalization-banner"><div className="ai-orb"><Sparkles size={22} /></div><div><strong>{followedNames.length ? `Đang ưu tiên ${followedNames.length} đội bạn theo dõi` : newsReal ? "Chưa chọn đội — đang xếp theo độ nóng và tin cậy" : "Feed dự phòng đang hoạt động"}</strong><p>Sở thích được lưu trên trình duyệt này và vẫn còn sau khi tải lại trang.</p></div><Link href="/bookmarks">Tin đã lưu<ArrowRight size={15} /></Link></div><section><SectionHeading eyebrow="SỞ THÍCH" title="Chọn đội để ưu tiên" /><div className="follow-grid">{teams.slice(0, 8).map((team) => <div className="follow-card" key={team.id}><TeamMark name={team.name} size="lg" /><div><strong>{team.name}</strong><span>{team.country}</span></div><button className={followed.has(team.id) ? "following" : ""} onClick={() => onFollow(team.id)}>{followed.has(team.id) ? <><Check size={15} />Đang theo dõi</> : <>+ Theo dõi</>}</button></div>)}</div></section><section><SectionHeading eyebrow={followedNames.length ? "ĐÃ CÁ NHÂN HÓA" : "ĐANG THỊNH HÀNH"} title="Bảng tin đề xuất" />{loading ? <DataLoadingState /> : <div className="news-page-grid">{recommendations.map((item) => <NewsCard key={item.id} item={item} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div>}</section></div>;
+  return <div className="page-content"><PageHero eyebrow="CÁ NHÂN HÓA" title="Dành cho bạn" description="Tin từ đội đang theo dõi được ưu tiên, sau đó mới đến các chủ đề đang nổi bật."><Link className="primary-button" href="/settings"><Sparkles size={17} />Tinh chỉnh sở thích</Link></PageHero><div className="personalization-banner"><div className="ai-orb"><Sparkles size={22} /></div><div><strong>{followedNames.length ? `Đang ưu tiên ${followedNames.length} đội bạn theo dõi` : newsReal ? "Chưa chọn đội — đang xếp theo độ nóng và tin cậy" : "Nguồn tin đang tạm gián đoạn"}</strong><p>Sở thích được lưu trên trình duyệt này và vẫn còn sau khi tải lại trang.</p></div><Link href="/bookmarks">Tin đã lưu<ArrowRight size={15} /></Link></div><section><SectionHeading eyebrow="SỞ THÍCH" title="Chọn đội để ưu tiên" /><div className="follow-grid">{teams.slice(0, 8).map((team) => <div className="follow-card" key={team.id}><TeamMark name={team.name} size="lg" /><div><strong>{team.name}</strong><span>{team.country}</span></div><button className={followed.has(team.id) ? "following" : ""} onClick={() => onFollow(team.id)}>{followed.has(team.id) ? <><Check size={15} />Đang theo dõi</> : <>+ Theo dõi</>}</button></div>)}</div></section><section><SectionHeading eyebrow={followedNames.length ? "ĐÃ CÁ NHÂN HÓA" : "ĐANG THỊNH HÀNH"} title="Bảng tin đề xuất" />{loading ? <DataLoadingState /> : recommendations.length ? <div className="news-page-grid">{recommendations.map((item) => <NewsCard key={item.id} item={item} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div> : <EmptyState title="Chưa có tin đề xuất" description="Không dùng dữ liệu giả khi nguồn RSS không khả dụng." />}</section></div>;
 }
 
 function LivePage({ mode }: { mode: "live" | "fixtures" | "results" }) {
@@ -340,24 +344,83 @@ function TransfersPage({ bookmarks, onBookmark }: { bookmarks: Set<string>; onBo
   const { newsItems, newsReal, loading } = useRuntimeData();
   const [query, setQuery] = useState("");
   const transferNews = filterNewsItems(newsItems.filter(isTransferNews), { query });
-  return <div className="page-content"><PageHero eyebrow="MARKET WATCH" title="Tin chuyển nhượng" description="Chỉ hiển thị bài từ mạng lưới RSS; SportPeek không tự tạo cầu thủ, mức phí hay trạng thái thương vụ."><div className="window-status"><i />{newsReal ? "Nguồn báo chí đang hoạt động" : "Dữ liệu minh họa"}</div></PageHero><div className="personalization-banner"><div className="ai-orb"><ShieldCheck size={22} /></div><div><strong>Phân biệt rõ tin đồn và xác nhận chính thức</strong><p>Hãy mở các nguồn đối chiếu trong từng bài trước khi xem một thương vụ là hoàn tất.</p></div><Link href="/sources">Nguồn & phương pháp<ArrowRight size={15} /></Link></div><FilterBar search query={query} onQueryChange={setQuery} />{loading ? <DataLoadingState /> : transferNews.length ? <><div className="results-summary">Tìm thấy {transferNews.length} tin chuyển nhượng từ các nguồn đang theo dõi</div><div className="news-page-grid">{transferNews.map((item) => <NewsCard item={item} key={item.id} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div></> : <EmptyState title="Chưa có tin chuyển nhượng phù hợp" description="SportPeek sẽ hiển thị khi các nguồn RSS đăng tin có liên quan; hệ thống không điền dữ liệu giả." />}</div>;
+  return <div className="page-content"><PageHero eyebrow="MARKET WATCH" title="Tin chuyển nhượng" description="Chỉ hiển thị bài từ mạng lưới RSS; SportPeek không tự tạo cầu thủ, mức phí hay trạng thái thương vụ."><div className="window-status"><i />{newsReal ? "Nguồn báo chí đang hoạt động" : "Nguồn tin tạm gián đoạn"}</div></PageHero><div className="personalization-banner"><div className="ai-orb"><ShieldCheck size={22} /></div><div><strong>Phân biệt rõ tin đồn và xác nhận chính thức</strong><p>Hãy mở các nguồn đối chiếu trong từng bài trước khi xem một thương vụ là hoàn tất.</p></div><Link href="/sources">Nguồn & phương pháp<ArrowRight size={15} /></Link></div><FilterBar search query={query} onQueryChange={setQuery} />{loading ? <DataLoadingState /> : transferNews.length ? <><div className="results-summary">Tìm thấy {transferNews.length} tin chuyển nhượng từ các nguồn đang theo dõi</div><div className="news-page-grid">{transferNews.map((item) => <NewsCard item={item} key={item.id} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div></> : <EmptyState title="Chưa có tin chuyển nhượng phù hợp" description="SportPeek sẽ hiển thị khi các nguồn RSS đăng tin có liên quan; hệ thống không điền dữ liệu giả." />}</div>;
 }
 
 
-function RichNewsDetail({ slug, bookmarked, onBookmark }: { slug: string; bookmarked: boolean; onBookmark: (id: string) => void }) {
-  const { newsItems, loading } = useRuntimeData();
-  const [shareStatus, setShareStatus] = useState("");
-  const item = newsItems.find((entry) => entry.slug === slug);
-  if (loading) return <DataLoadingState label="Đang tải bài viết" />;
-  if (!item) return <ContentNotFound title="Không tìm thấy bài viết" description="Bài viết không tồn tại, đã hết hạn trong RSS hoặc đường dẫn không chính xác." />;
+const storyStatusLabels: Record<StoryCluster["status"], string> = {
+  official: "Nguồn chính thức",
+  corroborated: "Đa nguồn xác nhận",
+  rumor: "Tin đồn",
+  unverified: "Chưa kiểm chứng",
+  developing: "Đang phát triển",
+  disputed: "Có điểm mâu thuẫn",
+};
 
-  const sourceDetails = item.sourceDetails?.length
-    ? item.sourceDetails
-    : item.sources.map((name) => ({ name, url: item.originalUrl ?? "#", reliability: item.reliability, language: item.originalLanguage ?? "vi" as const, excerpt: item.summary }));
-  const readingBody = item.readingBody?.length ? item.readingBody : [item.summary, ...item.keyPoints];
-  const wordCount = [item.summary, ...readingBody, ...item.keyPoints].join(" ").split(/\s+/).filter(Boolean).length;
+function formatStoryTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Không rõ thời gian";
+  return new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Ho_Chi_Minh" }).format(date);
+}
+
+function StorySourceCard({ article, lead }: { article: RawArticle; lead: boolean }) {
+  return <article className="story-source-card">
+    <div className="story-source-heading"><span className="source-avatar">{getInitials(article.sourceName)}</span><div><strong>{article.sourceName}</strong><small>{formatStoryTime(article.publishedAt)} · {article.language === "en" ? "Tiếng Anh" : "Tiếng Việt"}</small></div></div>
+    <div className="story-source-flags">{lead && <span>Nguồn đầu tiên</span>}{article.isOfficialSource && <span className="official">Nguồn chính thức</span>}</div>
+    <h3>{article.title}</h3>
+    {article.excerpt ? <p>{article.excerpt}</p> : <p className="muted-copy">Nguồn không cung cấp trích đoạn trong RSS.</p>}
+    {isSafeExternalUrl(article.originalUrl) && <a href={article.originalUrl} target="_blank" rel="noopener noreferrer">Đọc bài gốc<ExternalLink size={14} /></a>}
+  </article>;
+}
+
+function RichNewsDetail({ slug, bookmarks, onBookmark }: { slug: string; bookmarks: Set<string>; onBookmark: (id: string) => void }) {
+  const router = useRouter();
+  const [reloadToken, setReloadToken] = useState(0);
+  const [readerResult, setReaderResult] = useState<{ slug: string; reloadToken: number; state: StoryReaderState }>({ slug: "", reloadToken: -1, state: loadingStoryReaderState });
+  const readerState = readerResult.slug === slug && readerResult.reloadToken === reloadToken ? readerResult.state : loadingStoryReaderState;
+  const [activeTab, setActiveTab] = useState("summary");
+  const [shareStatus, setShareStatus] = useState("");
+  useEffect(() => {
+    let active = true;
+    void fetchStoryDetail(slug).then((next) => { if (active) setReaderResult({ slug, reloadToken, state: next }); });
+    return () => { active = false; };
+  }, [slug, reloadToken]);
+  useEffect(() => {
+    const canonicalSlug = readerState.meta?.canonicalSlug;
+    if (readerState.data && canonicalSlug && canonicalSlug !== slug) router.replace(`/news/${canonicalSlug}`, { scroll: false });
+  }, [readerState.data, readerState.meta, router, slug]);
+
+  if (readerState.status === "idle" || readerState.status === "loading") {
+    return <div className="article-page story-reader-skeleton" aria-busy="true" aria-label="Đang tải bài viết"><div className="story-skeleton-line wide" /><div className="story-skeleton-line title" /><div className="story-skeleton-line title short" /><div className="story-skeleton-media" /><div className="story-skeleton-grid"><div /><div /></div></div>;
+  }
+  if (!readerState.data) {
+    const isNotFound = readerState.status === "not_found";
+    return <div className="article-page story-state-panel"><EmptyState title={isNotFound ? "Không tìm thấy bài viết" : readerState.status === "configuration_required" ? "Chưa cấu hình nguồn tin thật" : "Không thể tải bài viết"} description={readerState.message ?? "Không thể tải bài viết lúc này."} /><div className="story-state-actions">{!isNotFound && <button className="primary-button" onClick={() => setReloadToken((value) => value + 1)}>Thử lại</button>}<Link className="secondary-button" href="/news">Quay lại feed</Link><Link href="/">Về trang chủ</Link></div></div>;
+  }
+
+  const { story, relatedStories } = readerState.data;
+  const item = storyToNewsItem(story);
+  const bookmarked = bookmarks.has(story.id);
+  const readingBody = story.summaryLong.split(/\n{2,}/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const wordCount = story.summaryLong.split(/\s+/).filter(Boolean).length;
   const readingMinutes = Math.max(2, Math.ceil(wordCount / 210));
-  const related = relatedNewsItems(newsItems, [item.team, item.competition, ...item.title.split(/[:\-–—]/).slice(0, 2)], item.id, 3);
+  const officialArticles = story.articles.filter((article) => article.isOfficialSource);
+  const tabs = [
+    { id: "summary", label: "Tóm tắt" },
+    { id: "sources", label: "Tất cả bài nguồn" },
+    ...(story.timeline.length ? [{ id: "timeline", label: "Dòng thời gian" }] : []),
+    ...(story.agreedFacts.length ? [{ id: "facts", label: "Các điểm đã thống nhất" }] : []),
+    ...(story.disputedPoints.length ? [{ id: "disputed", label: "Điểm còn mâu thuẫn" }] : []),
+    ...(officialArticles.length ? [{ id: "official", label: "Nguồn chính thức" }] : []),
+  ];
+  const moveTabFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    const next = tabs[nextIndex];
+    setActiveTab(next.id);
+    document.getElementById(`story-tab-${next.id}`)?.focus();
+  };
   const share = async () => {
     try {
       if (navigator.share) await navigator.share({ title: item.title, url: window.location.href });
@@ -366,29 +429,33 @@ function RichNewsDetail({ slug, bookmarked, onBookmark }: { slug: string; bookma
     } catch { setShareStatus("Không thể chia sẻ lúc này"); }
   };
 
-  return <div className="article-page rich-article-page">
+  return <div className="article-page rich-article-page story-reader-page">
+    {readerState.status === "stale" && <div className="story-stale-banner" role="status"><Clock3 size={16} />{readerState.message}</div>}
     <div className="article-breadcrumb"><Link href="/news">Tin tức</Link><ChevronRight size={14} /><span>{item.competition}</span></div>
     <header className="article-header">
-      <div className="article-badges"><span className="demo-label">{item.translatedByAI ? "AI DỊCH TỪ TIẾNG ANH" : item.originalLanguage === "en" ? "BẢN GỐC TIẾNG ANH" : "TIN TỔNG HỢP"}</span><HotnessBadge score={item.hotness} /><ReliabilityBadge score={item.reliability} /></div>
+      <div className="article-badges"><span className={`story-status story-status-${story.status}`}>{storyStatusLabels[story.status]}</span>{story.aiGenerated && <span className="demo-label">AI DỊCH · CHỜ BIÊN TẬP</span>}{story.hotnessScore !== null && <HotnessBadge score={story.hotnessScore} />}{story.reliabilityScore !== null && <ReliabilityBadge score={story.reliabilityScore} />}</div>
       <h1>{item.title}</h1>
       <p>{item.summary}</p>
-      <div className="article-meta"><span className="source-avatar">SP</span><div><strong>SportPeek Newsroom</strong><span>Cập nhật {item.publishedAt} · {item.sources.length} nguồn · {readingMinutes} phút đọc</span></div><div className="article-actions"><button onClick={() => onBookmark(item.id)} className={bookmarked ? "active" : ""}><Bookmark size={17} fill={bookmarked ? "currentColor" : "none"} />{bookmarked ? "Đã lưu" : "Lưu"}</button><button onClick={share}><Share2 size={17} />Chia sẻ</button></div></div>
+      <div className="article-meta"><span className="source-avatar">SP</span><div><strong>SportPeek Newsroom</strong><span>Xuất bản {formatStoryTime(story.publishedAt)} · cập nhật {formatStoryTime(story.updatedAt)} · {story.sourceCount} nguồn · {readingMinutes} phút đọc</span></div><div className="article-actions"><button onClick={() => onBookmark(story.id)} className={bookmarked ? "active" : ""}><Bookmark size={17} fill={bookmarked ? "currentColor" : "none"} />{bookmarked ? "Đã lưu" : "Lưu"}</button><button onClick={share}><Share2 size={17} />Chia sẻ</button></div></div>
       {shareStatus && <p className="inline-status" role="status">{shareStatus}</p>}
     </header>
     <NewsVisual item={item} priority />
     <p className="article-image-caption">{item.imageUrl ? `Ảnh do ${item.imageSource ?? item.sources[0]} cung cấp qua RSS hoặc metadata bài gốc.` : "Nguồn hiện chưa cung cấp ảnh đại diện; SportPeek không dùng ảnh không liên quan để lấp chỗ trống."}</p>
+    <div className="story-tabs" role="tablist" aria-label="Nội dung cụm tin">{tabs.map((tab, index) => <button type="button" role="tab" id={`story-tab-${tab.id}`} aria-controls={`story-panel-${tab.id}`} aria-selected={activeTab === tab.id} tabIndex={activeTab === tab.id ? 0 : -1} className={activeTab === tab.id ? "active" : ""} onClick={() => setActiveTab(tab.id)} onKeyDown={(event) => moveTabFocus(event, index)} key={tab.id}>{tab.label}</button>)}</div>
     <div className="article-layout">
       <article className="article-body">
-        <div className="summary-box"><div className="summary-title"><Sparkles size={19} /><strong>{item.translatedByAI ? "AI dịch và tóm tắt" : "Tóm tắt nhanh từ nguồn"}</strong><span>Không thêm dữ kiện</span></div><p>{item.summary}</p></div>
-        <section className="article-story"><span className="article-section-kicker">BẢN TIN MỞ RỘNG</span><h2>Toàn cảnh từ các nguồn</h2>{readingBody.map((paragraph, index) => <p key={`${index}-${paragraph.slice(0, 35)}`}>{paragraph}</p>)}</section>
-        <section><h2>Các nguồn đang nói gì?</h2><div className="source-perspectives">{sourceDetails.map((source) => <article key={`${source.name}-${source.url}`}><div><span className="source-avatar">{getInitials(source.name)}</span><strong>{source.name}</strong><small>{source.language === "en" ? "Nguồn tiếng Anh" : "Nguồn tiếng Việt"} · Tin cậy {source.reliability}%</small></div><p>{source.excerpt ?? item.summary}</p><a href={source.url} target="_blank" rel="noreferrer">Đọc toàn văn tại nguồn<ExternalLink size={14} /></a></article>)}</div></section>
-        <section><h2>Những điểm chính</h2><ul className="key-points">{item.keyPoints.map((point) => <li key={point}><Check size={16} />{point}</li>)}</ul></section>
-        <section><h2>Vì sao tin này đang được chú ý?</h2><ul className="key-points">{(item.trendingReasons ?? ["Độ mới và uy tín nguồn được đưa vào điểm số"]).map((reason) => <li key={reason}><Flame size={16} />{reason}</li>)}</ul><p className="muted-copy">Điểm nóng là ước tính từ độ mới, số báo cùng đưa, độ uy tín nguồn và tầm quan trọng chủ đề; không phải lượt xem thật của từng tòa soạn.</p></section>
-        <div className="aggregation-notice"><ShieldCheck size={22} /><div><strong>Nội dung tổng hợp có giới hạn</strong><p>SportPeek dùng metadata và trích đoạn ngắn, không đăng lại toàn văn. Nút đọc nguồn giúp bạn kiểm tra ngữ cảnh và cập nhật mới nhất của tòa soạn.</p></div></div>
+        <div role="tabpanel" id={`story-panel-${activeTab}`} aria-labelledby={`story-tab-${activeTab}`}>
+          {activeTab === "summary" && <><div className="summary-box"><div className="summary-title"><Sparkles size={19} /><strong>{story.aiGenerated ? "Bản dịch và tóm tắt đã xử lý trước" : "Tóm tắt từ nguồn"}</strong><span>{story.reviewStatus === "reviewed" ? "Đã đối chiếu metadata" : "Chưa biên tập thủ công"}</span></div><p>{story.summary}</p></div><section className="article-story"><span className="article-section-kicker">BẢN TIN MỞ RỘNG</span><h2>Toàn cảnh từ các nguồn</h2>{readingBody.map((paragraph, index) => <p key={`${index}-${paragraph.slice(0, 35)}`}>{paragraph}</p>)}</section><section><h2>Vì sao tin này được chú ý?</h2><ul className="key-points">{(item.trendingReasons ?? []).map((reason) => <li key={reason}><Flame size={16} />{reason}</li>)}</ul><p className="muted-copy">Điểm nóng là ước tính từ độ mới, số nguồn, độ uy tín và tầm quan trọng chủ đề; không phải lượt xem của tòa soạn.</p></section></>}
+          {activeTab === "sources" && <section className="story-source-grid"><h2>{story.articles.length} bài nguồn</h2>{story.articles.map((article, index) => <StorySourceCard article={article} lead={index === 0} key={article.id} />)}</section>}
+          {activeTab === "official" && <section className="story-source-grid"><h2>Nguồn chính thức</h2>{officialArticles.map((article) => <StorySourceCard article={article} lead={story.articles[0]?.id === article.id} key={article.id} />)}</section>}
+          {activeTab === "timeline" && <section><h2>Dòng thời gian nguồn đăng</h2><div className="story-timeline">{story.timeline.map((entry) => <div key={entry.id}><time>{formatStoryTime(entry.occurredAt)}</time><span><i /><strong>{entry.description}</strong></span></div>)}</div></section>}
+          {activeTab === "facts" && <section><h2>Các điểm đã thống nhất</h2><ul className="key-points">{story.agreedFacts.map((fact) => <li key={fact.text}><Check size={16} />{fact.text}<small>{fact.sourceArticleIds.length} bài nguồn</small></li>)}</ul></section>}
+          {activeTab === "disputed" && <section><h2>Điểm còn mâu thuẫn</h2>{story.disputedPoints.map((point) => <div className="disputed-point" key={point.topic}><strong>{point.topic}</strong>{point.positions.map((position) => <p key={position.claim}>{position.claim}</p>)}</div>)}</section>}
+        </div>
+        <div className="aggregation-notice"><ShieldCheck size={22} /><div><strong>Nội dung tổng hợp có giới hạn</strong><p>SportPeek dùng metadata và trích đoạn ngắn, không đăng lại toàn văn. Mỗi bài nguồn đều có liên kết để bạn kiểm tra ngữ cảnh.</p></div></div>
       </article>
-      <aside className="article-aside"><div className="rail-card"><SectionHeading eyebrow="ĐỐI CHIẾU" title={`${sourceDetails.length} bài nguồn`} />{sourceDetails.map((source, index) => <a href={source.url} target="_blank" rel="noreferrer" className="source-card" key={`${source.name}-${source.url}`}><span className="source-avatar">{index + 1}</span><div><strong>{source.name}</strong><span>{source.language === "en" ? "Nguồn tiếng Anh" : "Nguồn tiếng Việt"} · Uy tín {source.reliability}%</span></div><ExternalLink size={15} /></a>)}</div><div className="rail-card article-read-card"><span className="eyebrow">THỜI LƯỢNG</span><strong>{readingMinutes} phút đọc</strong><p>{wordCount} từ được tổng hợp từ {item.sources.length} tòa soạn và {sourceDetails.length} bài RSS.</p><a href={item.originalUrl ?? sourceDetails[0]?.url} target="_blank" rel="noreferrer">Mở bài gốc<ExternalLink size={14} /></a></div></aside>
+      <aside className="article-aside"><div className="rail-card"><SectionHeading eyebrow="CẬP NHẬT" title={formatStoryTime(story.updatedAt)} /><p className="muted-copy">{story.sourceCount} nguồn · {story.articles.length} bài gốc · {story.hasOfficialSource ? "có nguồn chính thức" : "chưa có nguồn chính thức"}.</p></div>{story.linkedMatch && <div className="rail-card"><SectionHeading eyebrow="TRẬN LIÊN QUAN" title={story.linkedMatch.label} /><Link className="primary-button" href={story.linkedMatch.href}>Mở trung tâm trận đấu</Link></div>}<div className="rail-card"><SectionHeading eyebrow="ĐỌC TIẾP" title="Tin liên quan" />{relatedStories.length ? relatedStories.map((entry) => <NewsListItem item={storyToNewsItem(entry)} key={entry.id} />) : <EmptyState title="Chưa có tin liên quan" description="Không chèn nội dung khác chủ đề để lấp chỗ trống." />}</div><div className="rail-card article-read-card"><span className="eyebrow">THỜI LƯỢNG</span><strong>{readingMinutes} phút đọc</strong><p>{wordCount} từ trong bản tổng hợp; dữ kiện có thể được kiểm tra tại bài gốc.</p>{isSafeExternalUrl(story.articles[0]?.originalUrl) && <a href={story.articles[0].originalUrl} target="_blank" rel="noopener noreferrer">Mở bài nguồn đầu tiên<ExternalLink size={14} /></a>}</div></aside>
     </div>
-    <section className="related-news"><SectionHeading eyebrow="ĐỌC TIẾP" title="Tin liên quan" />{related.length ? <div className="news-page-grid">{related.map((entry) => <NewsCard key={entry.id} item={entry} bookmarked={false} onBookmark={onBookmark} />)}</div> : <EmptyState title="Chưa có tin liên quan đủ gần" description="SportPeek không chèn tin khác chủ đề chỉ để lấp chỗ trống." />}</section>
   </div>;
 }
 
@@ -576,7 +643,7 @@ export default function SportPeekApp({ route }: { route: string }) {
       const sportsActive = allSportsResponses.length === 4 && allSportsResponses.every((result) => result?.provider !== "mock" && result?.demo === false);
       const aiStatus = newsResponse?.aiStatus ?? { provider: "off" as const, state: "off" as const, translatedCount: 0 };
       const aiActive = newsResponse?.aiTranslation === true;
-      setRuntimeData({ newsItems: newsResponse?.data?.length ? newsResponse.data : news, matchItems: sportsActive ? mergedMatches : mergedMatches.length ? mergedMatches : matches, standingRows: sportsActive ? tableResponse?.data ?? [] : tableResponse?.data?.length ? tableResponse.data : standings, newsReal: rssActive, sportsReal: sportsActive, newsSources: newsResponse?.sources ?? [], aiTranslation: aiActive, aiStatus, loading: false, lastUpdated: new Date().toISOString(), status: createAppStatus(rssActive, sportsActive, aiStatus, newsResponse?.sources?.length ?? 0) });
+      setRuntimeData({ newsItems: newsResponse?.data ?? [], matchItems: sportsActive ? mergedMatches : mergedMatches.length ? mergedMatches : matches, standingRows: sportsActive ? tableResponse?.data ?? [] : tableResponse?.data?.length ? tableResponse.data : standings, newsReal: rssActive, sportsReal: sportsActive, newsSources: newsResponse?.sources ?? [], aiTranslation: aiActive, aiStatus, loading: false, lastUpdated: new Date().toISOString(), status: createAppStatus(rssActive, sportsActive, aiStatus, newsResponse?.sources?.length ?? 0) });
       } finally { loading = false; }
     };
     void load();
@@ -592,7 +659,7 @@ export default function SportPeekApp({ route }: { route: string }) {
   if (route === "/") page = <HomePage bookmarks={bookmarks} onBookmark={toggleBookmark} sourceFilter={homeSourceFilter} />;
   else if (route === "/for-you") page = <ForYouPage followed={followed} onFollow={toggleFollow} bookmarks={bookmarks} onBookmark={toggleBookmark} />;
   else if (route === "/news") page = <NewsPage bookmarks={bookmarks} onBookmark={toggleBookmark} />;
-  else if (segments[0] === "news" && segments[1]) page = <RichNewsDetail slug={segments[1]} bookmarked={bookmarks.has(runtimeData.newsItems.find((item) => item.slug === segments[1])?.id ?? "")} onBookmark={toggleBookmark} />;
+  else if (segments[0] === "news" && segments[1]) page = <RichNewsDetail slug={segments[1]} bookmarks={bookmarks} onBookmark={toggleBookmark} />;
   else if (route === "/live") page = <LivePage mode="live" />;
   else if (route === "/fixtures") page = <LivePage mode="fixtures" />;
   else if (route === "/results") page = <LivePage mode="results" />;

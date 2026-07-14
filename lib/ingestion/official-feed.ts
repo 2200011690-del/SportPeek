@@ -61,8 +61,17 @@ const DEFAULT_FEEDS: FeedConfig[] = [
 ];
 
 export type NewsAIStatus = { provider: "cloudflare" | "openai" | "off"; state: "ok" | "off" | "error"; translatedCount: number };
-type AggregatedNews = { data: NewsItem[]; sources: string[]; aiTranslation: boolean; aiStatus: NewsAIStatus };
-const cache = new Map<string, AggregatedNews & { expiresAt: number }>();
+export type AggregatedNews = {
+  data: NewsItem[];
+  sources: string[];
+  aiTranslation: boolean;
+  aiStatus: NewsAIStatus;
+  cached: boolean;
+  stale: boolean;
+  lastUpdatedAt: string;
+};
+type CachedAggregatedNews = Omit<AggregatedNews, "cached" | "stale"> & { expiresAt: number };
+const cache = new Map<string, CachedAggregatedNews>();
 const parser = new XMLParser({ ignoreAttributes: false, processEntities: true, trimValues: true });
 const STOP_WORDS = new Set("cua và với trong trên cho sau trước khi là đã sẽ một những các được từ về tại theo vào ra qua do this that with from after before over into says said for the and but are was were has have had not new latest more than its their his her của những các được trong trên với một khi sau trước theo cho tại từ về đã đang sẽ không".split(/\s+/));
 
@@ -334,6 +343,13 @@ function toNewsItem(cluster: RawArticle[], index: number): NewsItem {
     reliability: article.source.reliability,
     language: article.source.language,
     excerpt: article.excerpt.slice(0, 420),
+    articleId: article.id,
+    title: article.title,
+    publishedAt: article.published.toISOString(),
+    fetchedAt: new Date().toISOString(),
+    isOfficialSource: Boolean(article.source.official),
+    imageUrl: article.imageUrl,
+    canonicalUrl: article.url,
   }));
   const keyPoints = lead.keyPoints?.length ? lead.keyPoints : [lead.excerpt, ...cluster.filter((article) => article.id !== lead.id).slice(0, 2).map((article) => article.title)].map((value) => value.slice(0, 190));
   const international = lead.source.language === "en";
@@ -408,17 +424,27 @@ export async function getAggregatedNews(): Promise<AggregatedNews> {
   const feeds = feedsFromEnvironment();
   const key = feeds.map((feed) => feed.url).join("|") + `|${process.env.AI_PROVIDER ?? "mock"}`;
   const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached;
+  if (cached && cached.expiresAt > Date.now()) {
+    return { data: cached.data, sources: cached.sources, aiTranslation: cached.aiTranslation, aiStatus: cached.aiStatus, lastUpdatedAt: cached.lastUpdatedAt, cached: true, stale: false };
+  }
   const settled = await Promise.allSettled(feeds.map(fetchFeed));
   const articles = settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-  if (!articles.length) throw new Error("Không tải được các nguồn RSS");
+  if (!articles.length) {
+    if (cached) {
+      return { data: cached.data, sources: cached.sources, aiTranslation: cached.aiTranslation, aiStatus: cached.aiStatus, lastUpdatedAt: cached.lastUpdatedAt, cached: true, stale: true };
+    }
+    throw new Error("Không tải được các nguồn RSS");
+  }
   const deduplicated = [...new Map(articles.map((article) => [article.url, article])).values()];
   await enrichMissingImages(deduplicated);
   let aiStatus: NewsAIStatus;
   try { aiStatus = await translateInternational(deduplicated); }
   catch (error) {
     console.warn("[SportPeek AI] Translation failed:", error instanceof Error ? error.message : "unknown error");
-    aiStatus = { provider: process.env.AI_PROVIDER?.toLowerCase() === "openai" ? "openai" : "cloudflare", state: "error", translatedCount: 0 };
+    const requested = process.env.AI_PROVIDER?.toLowerCase();
+    aiStatus = requested === "openai" || requested === "cloudflare"
+      ? { provider: requested, state: "error", translatedCount: 0 }
+      : { provider: "off", state: "off", translatedCount: 0 };
   }
   const aiTranslation = aiStatus.translatedCount > 0;
   // The main newsroom promises "latest", so recency is the primary order.
@@ -429,7 +455,7 @@ export async function getAggregatedNews(): Promise<AggregatedNews> {
   }).slice(0, 60);
   const sources = [...new Set(deduplicated.map((article) => article.source.name))];
   const cacheTtl = aiStatus.state === "error" ? 30_000 : 5 * 60_000;
-  const result = { data, sources, aiTranslation, aiStatus, expiresAt: Date.now() + cacheTtl };
-  cache.set(key, result);
-  return result;
+  const lastUpdatedAt = new Date().toISOString();
+  cache.set(key, { data, sources, aiTranslation, aiStatus, lastUpdatedAt, expiresAt: Date.now() + cacheTtl });
+  return { data, sources, aiTranslation, aiStatus, lastUpdatedAt, cached: false, stale: false };
 }

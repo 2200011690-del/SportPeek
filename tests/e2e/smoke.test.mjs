@@ -41,3 +41,29 @@ test("news API exposes publisher images and a richer reading body", { skip: !bas
   assert.ok(payload.data.every((item) => Array.isArray(item.readingBody) && item.readingBody.length >= 2), "every story should include source-backed reading paragraphs");
   assert.ok(payload.data.every((item) => item.sourceDetails?.every((source) => source.excerpt)), "source comparison should include short excerpts");
 });
+
+test("feed story opens through the shared detail API", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => {
+  const feedResponse = await fetch(`${base}/api/stories`);
+  assert.equal(feedResponse.status, 200);
+  const feed = await feedResponse.json();
+  assert.ok(["success", "stale"].includes(feed.status));
+  assert.ok(Array.isArray(feed.data) && feed.data.length > 0);
+  const expected = feed.data[0];
+  const detailResponse = await fetch(`${base}/api/stories/${expected.slug}`);
+  assert.equal(detailResponse.status, 200);
+  const detail = await detailResponse.json();
+  assert.equal(detail.data.story.id, expected.id);
+  assert.equal(detail.data.story.title, expected.title);
+  assert.ok(detail.data.story.articles.length >= 1);
+  assert.ok(detail.data.story.articles.every((article) => /^https?:\/\//.test(article.originalUrl)));
+  const pageResponse = await fetch(`${base}/news/${expected.slug}`);
+  assert.equal(pageResponse.status, 200);
+});
+
+test("missing story returns a real 404 envelope", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => {
+  const response = await fetch(`${base}/api/stories/story-does-not-exist`);
+  assert.equal(response.status, 404);
+  const payload = await response.json();
+  assert.equal(payload.status, "not_found");
+  assert.equal(payload.data, null);
+});
