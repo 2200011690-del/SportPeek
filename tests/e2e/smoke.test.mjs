@@ -32,3 +32,12 @@ test("news API reports the real AI state", { skip: !base && "Set E2E_BASE_URL to
   assert.equal(payload.aiTranslation, payload.aiStatus.translatedCount > 0);
   if (payload.aiTranslation) assert.ok(payload.data.some((item) => item.translatedByAI));
 });
+
+test("news API exposes publisher images and a richer reading body", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => {
+  const response = await fetch(`${base}/api/news`);
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.ok(payload.data.some((item) => /^https:\/\//.test(item.imageUrl ?? "")), "at least one current RSS story should include a real image");
+  assert.ok(payload.data.every((item) => Array.isArray(item.readingBody) && item.readingBody.length >= 2), "every story should include source-backed reading paragraphs");
+  assert.ok(payload.data.every((item) => item.sourceDetails?.every((source) => source.excerpt)), "source comparison should include short excerpts");
+});

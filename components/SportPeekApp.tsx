@@ -101,10 +101,18 @@ function ContentNotFound({ title, description }: { title: string; description: s
   return <div className="large-empty"><EmptyState title={title} description={description} /><Link href="/" className="primary-button">Về trang chủ</Link></div>;
 }
 
-function NewsVisual({ item, compact = false }: { item: NewsItem; compact?: boolean }) {
+function NewsVisual({ item, compact = false, priority = false }: { item: NewsItem; compact?: boolean; priority?: boolean }) {
   const { newsReal } = useRuntimeData();
-  return <div className={`news-visual tone-${item.imageTone} ${compact ? "compact" : ""}`}>
-    <div className="field-lines" /><span className="visual-label">{!newsReal ? "DỮ LIỆU MINH HỌA" : item.translatedByAI ? "AI DỊCH · CÓ NGUỒN" : item.originalLanguage === "en" ? "QUỐC TẾ · BẢN GỐC" : "TIN TỔNG HỢP"}</span><span className="visual-team">{getInitials(item.team)}</span>
+  const [failedImageUrl, setFailedImageUrl] = useState<string>();
+  const hasImage = Boolean(item.imageUrl && item.imageUrl !== failedImageUrl);
+  return <div className={`news-visual tone-${item.imageTone} ${compact ? "compact" : ""} ${hasImage ? "has-real-image" : "image-fallback"}`}>
+    {hasImage && <>
+      {/* Publisher images are intentionally unproxied to keep this internal, free deployment within quota. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={item.imageUrl} alt={item.imageAlt ?? item.title} loading={priority ? "eager" : "lazy"} fetchPriority={priority ? "high" : "auto"} referrerPolicy="no-referrer" onError={() => setFailedImageUrl(item.imageUrl)} />
+    </>}
+    {!hasImage && <><div className="field-lines" /><span className="visual-team">{getInitials(item.team)}</span></>}
+    <span className="visual-label">{!newsReal ? "DỮ LIỆU MINH HỌA" : hasImage ? `ẢNH · ${item.imageSource ?? item.sources[0]}` : "NGUỒN CHƯA CÓ ẢNH"}</span>
   </div>;
 }
 
@@ -206,10 +214,16 @@ function matchesSourceFilter(item: NewsItem, filter: SourceFilter): boolean {
 }
 
 function HomeHeroNews({ item, demo, bookmarked, onBookmark }: { item: NewsItem; demo: boolean; bookmarked: boolean; onBookmark: (id: string) => void }) {
-  return <article className="home-hero-news">
-    <div className="home-hero-glow" aria-hidden><span>SP</span></div>
+  const [failedImageUrl, setFailedImageUrl] = useState<string>();
+  const hasImage = Boolean(item.imageUrl && item.imageUrl !== failedImageUrl);
+  return <article className={`home-hero-news ${hasImage ? "has-real-image" : "image-fallback"}`}>
+    {hasImage && <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="home-hero-image" src={item.imageUrl} alt={item.imageAlt ?? item.title} fetchPriority="high" referrerPolicy="no-referrer" onError={() => setFailedImageUrl(item.imageUrl)} />
+    </>}
+    {!hasImage && <div className="home-hero-glow" aria-hidden><span>SP</span></div>}
     <div className="home-hero-content">
-      <div className="home-hero-kicker"><span>{demo ? "Dữ liệu minh họa" : "Tiêu điểm SportPeek"}</span><HotnessBadge score={item.hotness} /></div>
+      <div className="home-hero-kicker"><span>{demo ? "Dữ liệu minh họa" : hasImage ? `Ảnh từ ${item.imageSource ?? item.sources[0]}` : "Tiêu điểm SportPeek"}</span><HotnessBadge score={item.hotness} /></div>
       <h1>{item.title}</h1>
       <p>{item.summary}</p>
       <div className="home-hero-meta"><span><Newspaper size={15} />{item.sources.length} nguồn</span><span><Clock3 size={15} />{item.publishedAt}</span><span><ShieldCheck size={15} />Tin cậy {item.reliability}%</span></div>
@@ -345,6 +359,53 @@ function NewsDetail({ slug, bookmarked, onBookmark }: { slug: string; bookmarked
     } catch { setShareStatus("Không thể chia sẻ lúc này"); }
   };
   return <div className="article-page"><div className="article-breadcrumb"><Link href="/news">Tin tức</Link><ChevronRight size={14} /><span>{item.competition}</span></div><header className="article-header"><div className="article-badges"><span className="demo-label">{item.translatedByAI ? "AI DỊCH TỪ TIẾNG ANH" : item.originalLanguage === "en" ? "BẢN GỐC TIẾNG ANH" : "TIN TỔNG HỢP"}</span><HotnessBadge score={item.hotness} /><ReliabilityBadge score={item.reliability} /></div><h1>{item.title}</h1><p>{item.summary}</p><div className="article-meta"><span className="source-avatar">SP</span><div><strong>SportPeek Newsroom</strong><span>Cập nhật {item.publishedAt} · {item.sources.length} nguồn</span></div><div className="article-actions"><button onClick={() => onBookmark(item.id)} className={bookmarked ? "active" : ""}><Bookmark size={17} fill={bookmarked ? "currentColor" : "none"} />{bookmarked ? "Đã lưu" : "Lưu"}</button><button onClick={share}><Share2 size={17} />Chia sẻ</button></div></div>{shareStatus && <p className="inline-status" role="status">{shareStatus}</p>}</header><NewsVisual item={item} /><div className="article-layout"><article className="article-body"><div className="summary-box"><div className="summary-title"><Sparkles size={19} /><strong>{item.translatedByAI ? "AI dịch và tóm tắt" : "Tóm tắt từ nguồn"}</strong><span>Không thêm dữ kiện</span></div><p>{item.summary}</p></div><section><h2>Những điểm chính</h2><ul className="key-points">{item.keyPoints.map((point) => <li key={point}><Check size={16} />{point}</li>)}</ul></section><section><h2>Vì sao tin này đang được chú ý?</h2><ul className="key-points">{(item.trendingReasons ?? ["Độ mới và uy tín nguồn được đưa vào điểm số"]).map((reason) => <li key={reason}><Flame size={16} />{reason}</li>)}</ul><p className="muted-copy">Điểm nóng là ước tính từ độ mới, số báo cùng đưa, độ uy tín nguồn và tầm quan trọng chủ đề; không phải lượt xem thật của từng tòa soạn.</p></section><div className="aggregation-notice"><ShieldCheck size={22} /><div><strong>Đây là nội dung tổng hợp</strong><p>SportPeek chỉ dùng metadata, trích đoạn ngắn và bản tóm tắt. Hãy mở từng nguồn bên cạnh để đọc bài đầy đủ và đối chiếu.</p></div></div></article><aside className="article-aside"><div className="rail-card"><SectionHeading eyebrow="ĐỐI CHIẾU" title={`${sourceDetails.length} nguồn`} />{sourceDetails.map((source, index) => <a href={source.url} target="_blank" rel="noreferrer" className="source-card" key={`${source.name}-${source.url}`}><span className="source-avatar">{index + 1}</span><div><strong>{source.name}</strong><span>{source.language === "en" ? "Nguồn tiếng Anh" : "Nguồn tiếng Việt"} · Uy tín {source.reliability}%</span></div><ExternalLink size={15} /></a>)}</div><div className="rail-card"><SectionHeading eyebrow="CHỦ ĐỀ" title="Phân loại" /><div className="entity-chips"><Link href="/news"><Newspaper size={15} />Thể thao</Link><Link href="/news"><Trophy size={15} />{item.competition}</Link></div></div></aside></div><section className="related-news"><SectionHeading eyebrow="ĐỌC TIẾP" title="Tin liên quan" />{related.length ? <div className="news-page-grid">{related.map((entry) => <NewsCard key={entry.id} item={entry} bookmarked={false} onBookmark={onBookmark} />)}</div> : <EmptyState title="Chưa có tin liên quan đủ gần" description="SportPeek không chèn tin khác chủ đề chỉ để lấp chỗ trống." />}</section></div>;
+}
+
+function RichNewsDetail({ slug, bookmarked, onBookmark }: { slug: string; bookmarked: boolean; onBookmark: (id: string) => void }) {
+  const { newsItems, loading } = useRuntimeData();
+  const [shareStatus, setShareStatus] = useState("");
+  const item = newsItems.find((entry) => entry.slug === slug);
+  if (loading || !item) return <NewsDetail slug={slug} bookmarked={bookmarked} onBookmark={onBookmark} />;
+
+  const sourceDetails = item.sourceDetails?.length
+    ? item.sourceDetails
+    : item.sources.map((name) => ({ name, url: item.originalUrl ?? "#", reliability: item.reliability, language: item.originalLanguage ?? "vi" as const, excerpt: item.summary }));
+  const readingBody = item.readingBody?.length ? item.readingBody : [item.summary, ...item.keyPoints];
+  const wordCount = [item.summary, ...readingBody, ...item.keyPoints].join(" ").split(/\s+/).filter(Boolean).length;
+  const readingMinutes = Math.max(2, Math.ceil(wordCount / 210));
+  const related = relatedNewsItems(newsItems, [item.team, item.competition, ...item.title.split(/[:\-–—]/).slice(0, 2)], item.id, 3);
+  const share = async () => {
+    try {
+      if (navigator.share) await navigator.share({ title: item.title, url: window.location.href });
+      else await navigator.clipboard.writeText(window.location.href);
+      setShareStatus("Đã sao chép liên kết");
+    } catch { setShareStatus("Không thể chia sẻ lúc này"); }
+  };
+
+  return <div className="article-page rich-article-page">
+    <div className="article-breadcrumb"><Link href="/news">Tin tức</Link><ChevronRight size={14} /><span>{item.competition}</span></div>
+    <header className="article-header">
+      <div className="article-badges"><span className="demo-label">{item.translatedByAI ? "AI DỊCH TỪ TIẾNG ANH" : item.originalLanguage === "en" ? "BẢN GỐC TIẾNG ANH" : "TIN TỔNG HỢP"}</span><HotnessBadge score={item.hotness} /><ReliabilityBadge score={item.reliability} /></div>
+      <h1>{item.title}</h1>
+      <p>{item.summary}</p>
+      <div className="article-meta"><span className="source-avatar">SP</span><div><strong>SportPeek Newsroom</strong><span>Cập nhật {item.publishedAt} · {item.sources.length} nguồn · {readingMinutes} phút đọc</span></div><div className="article-actions"><button onClick={() => onBookmark(item.id)} className={bookmarked ? "active" : ""}><Bookmark size={17} fill={bookmarked ? "currentColor" : "none"} />{bookmarked ? "Đã lưu" : "Lưu"}</button><button onClick={share}><Share2 size={17} />Chia sẻ</button></div></div>
+      {shareStatus && <p className="inline-status" role="status">{shareStatus}</p>}
+    </header>
+    <NewsVisual item={item} priority />
+    <p className="article-image-caption">{item.imageUrl ? `Ảnh do ${item.imageSource ?? item.sources[0]} cung cấp qua RSS hoặc metadata bài gốc.` : "Nguồn hiện chưa cung cấp ảnh đại diện; SportPeek không dùng ảnh không liên quan để lấp chỗ trống."}</p>
+    <div className="article-layout">
+      <article className="article-body">
+        <div className="summary-box"><div className="summary-title"><Sparkles size={19} /><strong>{item.translatedByAI ? "AI dịch và tóm tắt" : "Tóm tắt nhanh từ nguồn"}</strong><span>Không thêm dữ kiện</span></div><p>{item.summary}</p></div>
+        <section className="article-story"><span className="article-section-kicker">BẢN TIN MỞ RỘNG</span><h2>Toàn cảnh từ các nguồn</h2>{readingBody.map((paragraph, index) => <p key={`${index}-${paragraph.slice(0, 35)}`}>{paragraph}</p>)}</section>
+        <section><h2>Các nguồn đang nói gì?</h2><div className="source-perspectives">{sourceDetails.map((source) => <article key={`${source.name}-${source.url}`}><div><span className="source-avatar">{getInitials(source.name)}</span><strong>{source.name}</strong><small>{source.language === "en" ? "Nguồn tiếng Anh" : "Nguồn tiếng Việt"} · Tin cậy {source.reliability}%</small></div><p>{source.excerpt ?? item.summary}</p><a href={source.url} target="_blank" rel="noreferrer">Đọc toàn văn tại nguồn<ExternalLink size={14} /></a></article>)}</div></section>
+        <section><h2>Những điểm chính</h2><ul className="key-points">{item.keyPoints.map((point) => <li key={point}><Check size={16} />{point}</li>)}</ul></section>
+        <section><h2>Vì sao tin này đang được chú ý?</h2><ul className="key-points">{(item.trendingReasons ?? ["Độ mới và uy tín nguồn được đưa vào điểm số"]).map((reason) => <li key={reason}><Flame size={16} />{reason}</li>)}</ul><p className="muted-copy">Điểm nóng là ước tính từ độ mới, số báo cùng đưa, độ uy tín nguồn và tầm quan trọng chủ đề; không phải lượt xem thật của từng tòa soạn.</p></section>
+        <div className="aggregation-notice"><ShieldCheck size={22} /><div><strong>Nội dung tổng hợp có giới hạn</strong><p>SportPeek dùng metadata và trích đoạn ngắn, không đăng lại toàn văn. Nút đọc nguồn giúp bạn kiểm tra ngữ cảnh và cập nhật mới nhất của tòa soạn.</p></div></div>
+      </article>
+      <aside className="article-aside"><div className="rail-card"><SectionHeading eyebrow="ĐỐI CHIẾU" title={`${sourceDetails.length} bài nguồn`} />{sourceDetails.map((source, index) => <a href={source.url} target="_blank" rel="noreferrer" className="source-card" key={`${source.name}-${source.url}`}><span className="source-avatar">{index + 1}</span><div><strong>{source.name}</strong><span>{source.language === "en" ? "Nguồn tiếng Anh" : "Nguồn tiếng Việt"} · Uy tín {source.reliability}%</span></div><ExternalLink size={15} /></a>)}</div><div className="rail-card article-read-card"><span className="eyebrow">THỜI LƯỢNG</span><strong>{readingMinutes} phút đọc</strong><p>{wordCount} từ được tổng hợp từ {item.sources.length} tòa soạn và {sourceDetails.length} bài RSS.</p><a href={item.originalUrl ?? sourceDetails[0]?.url} target="_blank" rel="noreferrer">Mở bài gốc<ExternalLink size={14} /></a></div></aside>
+    </div>
+    <section className="related-news"><SectionHeading eyebrow="ĐỌC TIẾP" title="Tin liên quan" />{related.length ? <div className="news-page-grid">{related.map((entry) => <NewsCard key={entry.id} item={entry} bookmarked={false} onBookmark={onBookmark} />)}</div> : <EmptyState title="Chưa có tin liên quan đủ gần" description="SportPeek không chèn tin khác chủ đề chỉ để lấp chỗ trống." />}</section>
+  </div>;
 }
 
 function MatchDetail({ id }: { id: string }) {
@@ -547,7 +608,7 @@ export default function SportPeekApp({ route }: { route: string }) {
   if (route === "/") page = <HomePage bookmarks={bookmarks} onBookmark={toggleBookmark} sourceFilter={homeSourceFilter} />;
   else if (route === "/for-you") page = <ForYouPage followed={followed} onFollow={toggleFollow} bookmarks={bookmarks} onBookmark={toggleBookmark} />;
   else if (route === "/news") page = <NewsPage bookmarks={bookmarks} onBookmark={toggleBookmark} />;
-  else if (segments[0] === "news" && segments[1]) page = <NewsDetail slug={segments[1]} bookmarked={bookmarks.has(runtimeData.newsItems.find((item) => item.slug === segments[1])?.id ?? "")} onBookmark={toggleBookmark} />;
+  else if (segments[0] === "news" && segments[1]) page = <RichNewsDetail slug={segments[1]} bookmarked={bookmarks.has(runtimeData.newsItems.find((item) => item.slug === segments[1])?.id ?? "")} onBookmark={toggleBookmark} />;
   else if (route === "/live") page = <LivePage mode="live" />;
   else if (route === "/fixtures") page = <LivePage mode="fixtures" />;
   else if (route === "/results") page = <LivePage mode="results" />;

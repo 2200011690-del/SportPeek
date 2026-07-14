@@ -33,6 +33,10 @@ export interface NewsItem {
   reliability: number;
   sources: string[];
   sourceDetails?: NewsSourceDetail[];
+  imageUrl?: string;
+  imageAlt?: string;
+  imageSource?: string;
+  readingBody?: string[];
   originalUrl?: string;
   originalLanguage?: "vi" | "en";
   translatedByAI?: boolean;
@@ -46,6 +50,7 @@ export interface NewsSourceDetail {
   url: string;
   reliability: number;
   language: "vi" | "en";
+  excerpt?: string;
 }
 
 export interface Match {
