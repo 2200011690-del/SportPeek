@@ -56,6 +56,7 @@ export interface Match {
   homeScore: number | null;
   awayScore: number | null;
   startTime: string;
+  startTimestamp?: string;
   status: MatchStatus;
   minute?: number;
   venue: string;

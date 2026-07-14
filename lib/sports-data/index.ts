@@ -41,7 +41,7 @@ export class ApiFootballProvider implements SportsDataProvider {
 
   private mapMatches(items: ApiFixture[]): Match[] {
     const allowed = new Set(configuredLeagueIds());
-    return items.filter((item) => !allowed.size || allowed.has(item.league.id)).map((item) => ({ id: String(item.fixture.id), competition: item.league.name, home: item.teams.home.name, away: item.teams.away.name, homeScore: item.goals.home, awayScore: item.goals.away, startTime: new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh", hour12: false }).format(new Date(item.fixture.date)), status: matchStatus(item.fixture.status.short), minute: item.fixture.status.elapsed ?? undefined, venue: item.fixture.venue?.name ?? "Chưa công bố" }));
+    return items.filter((item) => !allowed.size || allowed.has(item.league.id)).map((item) => ({ id: String(item.fixture.id), competition: item.league.name, home: item.teams.home.name, away: item.teams.away.name, homeScore: item.goals.home, awayScore: item.goals.away, startTime: new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh", hour12: false }).format(new Date(item.fixture.date)), startTimestamp: item.fixture.date, status: matchStatus(item.fixture.status.short), minute: item.fixture.status.elapsed ?? undefined, venue: item.fixture.venue?.name ?? "Chưa công bố" }));
   }
 
   async getLiveMatches(): Promise<Match[]> { const ids = configuredLeagueIds(); const items = await this.request<ApiFixture[]>(`/fixtures?live=${ids.length ? ids.join("-") : "all"}`, 15_000); return this.mapMatches(items); }
@@ -114,7 +114,7 @@ export class FootballDataProvider implements SportsDataProvider {
       return {
         id: String(item.id), competition: item.competition.name, home: footballDataTeamName(item.homeTeam), away: footballDataTeamName(item.awayTeam),
         homeScore: fullTime.home ?? fullTime.homeTeam ?? null, awayScore: fullTime.away ?? fullTime.awayTeam ?? null,
-        startTime: new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh", hour12: false }).format(new Date(item.utcDate)),
+        startTime: new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh", hour12: false }).format(new Date(item.utcDate)), startTimestamp: item.utcDate,
         status: footballDataStatus(item.status), minute: item.minute ?? undefined, venue: item.venue ?? "Chưa công bố",
       };
     });
