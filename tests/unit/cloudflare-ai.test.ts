@@ -42,8 +42,10 @@ test("Cloudflare AI rejects enrichment for unknown article ids", async () => {
     },
   });
   try {
-    const result = await enrichInternationalNewsWithCloudflare([{ id: "real", title: "Real", excerpt: "Real excerpt" }]);
-    assert.deepEqual(result, []);
+    await assert.rejects(
+      () => enrichInternationalNewsWithCloudflare([{ id: "real", title: "Real", excerpt: "Real excerpt" }]),
+      /đổi article id/,
+    );
   } finally {
     setWorkersAIBinding(undefined);
   }

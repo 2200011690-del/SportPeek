@@ -30,7 +30,7 @@ const enrichmentItemSchema = z.object({
   importance: z.number().int().min(0).max(100),
 });
 
-const enrichmentSchema = z.object({ items: z.array(enrichmentItemSchema).min(1).max(8) });
+const enrichmentSchema = z.object({ items: z.array(enrichmentItemSchema).length(1) });
 
 function modelName(): string {
   return process.env.CLOUDFLARE_AI_MODEL || DEFAULT_CLOUDFLARE_AI_MODEL;
@@ -94,7 +94,7 @@ const enrichmentJsonSchema: Record<string, unknown> = {
     items: {
       type: "array",
       minItems: 1,
-      maxItems: 8,
+      maxItems: 1,
       items: {
         type: "object",
         additionalProperties: false,
@@ -114,20 +114,24 @@ const enrichmentJsonSchema: Record<string, unknown> = {
 
 export async function enrichInternationalNewsWithCloudflare(articles: Array<{ id: string; title: string; excerpt: string }>): Promise<NewsEnrichment[]> {
   if (!articles.length) return [];
-  const result = await runStructured(
-    enrichmentSchema,
-    enrichmentJsonSchema,
-    "Bạn là biên tập viên thể thao trung lập. Phải trả đúng một item cho mỗi article và giữ nguyên tuyệt đối trường id. Chỉ dùng dữ kiện trong metadata được cung cấp. Dịch tự nhiên sang tiếng Việt, giữ nguyên tên riêng, không suy đoán, không giật tít quá mức và không sao chép dài.",
-    { articles },
-    4500,
-  );
-  const allowed = new Set(articles.map((article) => article.id));
-  const valid = result.items.filter((item) => allowed.has(item.id));
+  const settled = await Promise.allSettled(articles.map(async (article) => {
+    const result = await runStructured(
+      enrichmentSchema,
+      enrichmentJsonSchema,
+      "Bạn là biên tập viên thể thao trung lập. Phải trả đúng một item và giữ nguyên tuyệt đối trường id. Chỉ dùng dữ kiện trong metadata được cung cấp. Dịch tự nhiên, ngắn gọn sang tiếng Việt, giữ nguyên tên riêng, không suy đoán, không giật tít quá mức và không sao chép dài.",
+      { articles: [article] },
+      900,
+    );
+    const item = result.items[0];
+    if (item.id !== article.id) throw new Error(`Cloudflare AI đổi article id ${article.id}`);
+    return item;
+  }));
+  const valid = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  const failures = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failures.length) console.warn(`[SportPeek AI] ${failures.length}/${articles.length} article translations failed`);
   if (!valid.length) {
-    console.warn("[SportPeek AI] Model returned no matching article ids", {
-      requested: [...allowed],
-      returned: result.items.map((item) => item.id),
-    });
+    const reason = failures[0]?.reason;
+    throw reason instanceof Error ? reason : new Error("Cloudflare AI không dịch được bài nào");
   }
   return valid;
 }

@@ -213,7 +213,7 @@ async function translateInternational(articles: RawArticle[]): Promise<NewsAISta
   const provider = requested as "cloudflare" | "openai";
   const available = provider === "cloudflare" ? hasWorkersAIBinding() : Boolean(process.env.OPENAI_API_KEY);
   if (!available) return { provider, state: "error", translatedCount: 0 };
-  const candidates = articles.filter((article) => article.source.language === "en").sort((a, b) => b.published.getTime() - a.published.getTime()).slice(0, 8);
+  const candidates = articles.filter((article) => article.source.language === "en").sort((a, b) => b.published.getTime() - a.published.getTime()).slice(0, 4);
   if (!candidates.length) return { provider, state: "ok", translatedCount: 0 };
   const input = candidates.map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt }));
   const enriched = provider === "cloudflare"
