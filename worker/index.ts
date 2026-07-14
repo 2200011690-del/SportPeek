@@ -74,7 +74,7 @@ const worker = {
 
           console.log("[Cron] Running scheduled story processing...");
           const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
-          const storySummary = await processStories({ useAi });
+          const storySummary = await processStories({ useAi, limit: 30 });
           console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
         } catch (error) {
           console.error("[Cron] Error running scheduled task:", error);

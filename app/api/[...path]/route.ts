@@ -216,7 +216,8 @@ export async function POST(request: NextRequest, { params }: Context) {
     try {
       const rssResult = await syncRss();
       const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
-      const storyResult = await processStories({ useAi });
+      const recluster = body && typeof body === "object" && "recluster" in body ? Boolean((body as any).recluster) : false;
+      const storyResult = await processStories({ useAi, recluster, limit: 30 });
       return NextResponse.json({ rss: rssResult, stories: storyResult });
     }
     catch (error) { const safe = toSafeError(error); return NextResponse.json({ status: "configuration_required", error: { code: safe.code, message: safe.message } }, { status: safe.status }); }
