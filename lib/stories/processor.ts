@@ -52,7 +52,14 @@ async function buildStory(draft: Draft, provider: AIProvider, teams: EntityRecor
   const input: ClusterArticleInput[] = articles.map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt, publishedAt: article.publishedAt, sourceName: article.sourceName })); const heuristic = new HeuristicAIProvider();
   let generated = false; let generatedSummary = await heuristic.summarizeCluster({ articles: input });
   if (useRemoteAi && !["heuristic", "disabled", "mock"].includes(provider.name)) {
-    try { const candidate = await provider.summarizeCluster({ articles: input }); const allowed = new Set(input.map((article) => article.id)); if (candidate.sourceIds.every((id) => allowed.has(id))) { generatedSummary = candidate; generated = true; } } catch { /* The source-backed heuristic result remains readable. */ }
+    const candidate = await provider.summarizeCluster({ articles: input });
+    const allowed = new Set(input.map((article) => article.id));
+    if (candidate.sourceIds.every((id) => allowed.has(id))) {
+      generatedSummary = candidate;
+      generated = true;
+    } else {
+      throw new Error("AI returned unknown source IDs");
+    }
   }
   const agreements = generated ? await provider.identifyAgreements({ articles: input }).catch(() => heuristic.identifyAgreements({ articles: input })) : await heuristic.identifyAgreements({ articles: input });
   const disputes = generated ? await provider.identifyDisputes({ articles: input }).catch(() => heuristic.identifyDisputes({ articles: input })) : await heuristic.identifyDisputes({ articles: input });
@@ -102,7 +109,7 @@ async function persistDrafts(drafts: Array<{ draft: Draft; story: StoryCluster; 
 export async function processStories(options: { dryRun?: boolean; includeFailed?: boolean; recluster?: boolean; useAi?: boolean; limit?: number } = {}): Promise<StoryProcessingSummary> {
   const client = admin(); const jobId = randomUUID(); const provider = getAIProvider(); const summary: StoryProcessingSummary = { jobId, dryRun: Boolean(options.dryRun), inputArticles: 0, createdClusters: 0, updatedClusters: 0, mergedArticles: 0, failedArticles: 0, aiProvider: provider.name, errors: [] };
   if (options.recluster && !options.dryRun) { await client.from("story_cluster_articles").delete().not("cluster_id", "is", null); await client.from("story_clusters").delete().not("id", "is", null); await client.from("raw_articles").update({ processing_status: "pending" }).neq("processing_status", "pending"); }
-  let query = client.from("raw_articles").select("id,source_id,external_id,original_url,canonical_url,title,normalized_title,excerpt,author,image_url,published_at,fetched_at,content_hash,language,processing_status,raw_metadata,news_sources(name,logo_url,is_official,reliability_score)").order("published_at", { ascending: true }).limit(options.limit ?? 1000); query = options.recluster ? query : query.in("processing_status", options.includeFailed ? ["pending", "failed"] : ["pending"]);
+  let query = client.from("raw_articles").select("id,source_id,external_id,original_url,canonical_url,title,normalized_title,excerpt,author,image_url,published_at,fetched_at,content_hash,language,processing_status,raw_metadata,news_sources(name,logo_url,is_official,reliability_score)").order("published_at", { ascending: true }).limit(options.limit ?? 1000); query = options.recluster ? query : query.in("processing_status", ["pending", "failed"]);
   const { data, error } = await query; if (error) throw new ProviderError("Không thể đọc raw articles pending.", "supabase"); const incoming = ((data ?? []) as unknown as RawRow[]).map(toArticle); summary.inputArticles = incoming.length;
   const drafts = options.recluster ? [] : await loadExistingDrafts();
   for (const article of incoming) {
@@ -113,7 +120,7 @@ export async function processStories(options: { dryRun?: boolean; includeFailed?
     else { drafts.push({ id: randomUUID(), clusterKey: stableClusterKey(article), articles: [article], existing: false, touched: true }); summary.createdClusters += 1; }
   }
   const touched = drafts.filter((draft) => draft.touched); const entities = await loadEntities(); const built = [] as Array<{ draft: Draft; story: StoryCluster; teamIds: string[]; competitionId: string | null }>;
-  for (const draft of touched) { try { built.push({ draft, ...(await buildStory(draft, provider, entities.teams, entities.competitions, Boolean(options.useAi))) }); if (draft.existing) summary.updatedClusters += 1; } catch (error) { const message = error instanceof Error ? error.message.slice(0, 600) : toSafeError(error).message; summary.errors.push(`${draft.id}: ${message}`); summary.failedArticles += draft.articles.length; } }
+  for (const draft of touched) { try { built.push({ draft, ...(await buildStory(draft, provider, entities.teams, entities.competitions, Boolean(options.useAi))) }); if (draft.existing) summary.updatedClusters += 1; } catch (error) { const message = error instanceof Error ? error.message.slice(0, 600) : toSafeError(error).message; summary.errors.push(`${draft.id}: ${message}`); summary.failedArticles += draft.articles.length; const failedIds = draft.articles.map((a) => a.id); try { await client.from("raw_articles").update({ processing_status: "failed" }).in("id", failedIds); } catch { /* ignore */ } } }
   if (!summary.dryRun && built.length) { await client.from("ingestion_jobs").insert({ id: jobId, job_type: "stories:process", provider: provider.name, status: "processing", fetched_count: incoming.length, metadata: { useAi: Boolean(options.useAi), recluster: Boolean(options.recluster) } }); try { await persistDrafts(built, summary); await client.from("ingestion_jobs").update({ status: summary.errors.length ? "failed" : "completed", fetched_count: incoming.length, inserted_count: summary.createdClusters, updated_count: summary.updatedClusters, skipped_count: summary.failedArticles, error_code: summary.errors.length ? "PARTIAL_FAILURE" : null, error_message: summary.errors.join("; ").slice(0, 1000) || null, completed_at: new Date().toISOString() }).eq("id", jobId); } catch (error) { const safe = toSafeError(error); await client.from("ingestion_jobs").update({ status: "failed", error_code: safe.code, error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId); throw error; } }
   return summary;
 }

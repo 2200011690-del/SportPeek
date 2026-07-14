@@ -65,22 +65,22 @@ const worker = {
     }
     globalThis.__SPORTPEEK_WORKERS_AI__ = runtimeEnv.AI;
 
-    if (ctx) {
-      ctx.waitUntil((async () => {
-        try {
-          console.log("[Cron] Running scheduled RSS sync...");
-          const rssSummary = await syncRss();
-          console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
+    const run = async () => {
+      try {
+        console.log("[Cron] Running scheduled RSS sync...");
+        const rssSummary = await syncRss();
+        console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
 
-          console.log("[Cron] Running scheduled story processing...");
-          const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
-          const storySummary = await processStories({ useAi, limit: 30 });
-          console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
-        } catch (error) {
-          console.error("[Cron] Error running scheduled task:", error);
-        }
-      })());
-    }
+        console.log("[Cron] Running scheduled story processing...");
+        const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
+        const storySummary = await processStories({ useAi, limit: 30 });
+        console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
+      } catch (error) {
+        console.error("[Cron] Error running scheduled task:", error);
+      }
+    };
+    if (ctx) ctx.waitUntil(run());
+    else await run();
   }
 };
 
