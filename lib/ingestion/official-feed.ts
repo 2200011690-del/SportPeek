@@ -249,7 +249,10 @@ export async function getAggregatedNews(): Promise<AggregatedNews> {
   const deduplicated = [...new Map(articles.map((article) => [article.url, article])).values()];
   let aiStatus: NewsAIStatus;
   try { aiStatus = await translateInternational(deduplicated); }
-  catch { aiStatus = { provider: process.env.AI_PROVIDER?.toLowerCase() === "openai" ? "openai" : "cloudflare", state: "error", translatedCount: 0 }; }
+  catch (error) {
+    console.warn("[SportPeek AI] Translation failed:", error instanceof Error ? error.message : "unknown error");
+    aiStatus = { provider: process.env.AI_PROVIDER?.toLowerCase() === "openai" ? "openai" : "cloudflare", state: "error", translatedCount: 0 };
+  }
   const aiTranslation = aiStatus.translatedCount > 0;
   // The main newsroom promises "latest", so recency is the primary order.
   // Hotness remains visible and is used separately for the home highlights.
@@ -258,7 +261,8 @@ export async function getAggregatedNews(): Promise<AggregatedNews> {
     return (Number.isNaN(newest) ? 0 : newest) || b.hotness - a.hotness || b.reliability - a.reliability;
   }).slice(0, 60);
   const sources = [...new Set(deduplicated.map((article) => article.source.name))];
-  const result = { data, sources, aiTranslation, aiStatus, expiresAt: Date.now() + 5 * 60_000 };
+  const cacheTtl = aiStatus.state === "error" ? 30_000 : 5 * 60_000;
+  const result = { data, sources, aiTranslation, aiStatus, expiresAt: Date.now() + cacheTtl };
   cache.set(key, result);
   return result;
 }
