@@ -5,6 +5,7 @@ import {
   Clock3, Command, Flame, Goal, Home, Languages, Menu, Moon, Newspaper,
   Radio, Search, Settings, ShieldCheck, Sparkles, Star, Sun, Trophy, UserRound, Users, X, Zap,
   ArrowRight, Check, SlidersHorizontal, ExternalLink, Share2, MapPin, MessageCircle, LockKeyhole,
+  BadgeCheck, Globe2, ListFilter, Rss, Video,
 } from "lucide-react";
 import Link from "next/link";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -13,9 +14,23 @@ import { hotnessLabel } from "@/lib/scoring";
 import type { Match, NewsItem } from "@/lib/types";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 
-type RuntimeData = { newsItems: NewsItem[]; matchItems: Match[]; standingRows: typeof standings; newsReal: boolean; sportsReal: boolean; newsSources: string[]; aiTranslation: boolean };
+type ServiceState = "ok" | "degraded" | "off";
+type AppStatus = {
+  rss: { state: ServiceState; label: string };
+  ai: { state: ServiceState; label: string };
+  sports: { state: ServiceState; label: string };
+  healthy: boolean;
+};
+type SourceFilter = "all" | "vi" | "international" | "official" | "youtube" | "rss";
+type RuntimeData = { newsItems: NewsItem[]; matchItems: Match[]; standingRows: typeof standings; newsReal: boolean; sportsReal: boolean; newsSources: string[]; aiTranslation: boolean; status: AppStatus };
 type RuntimeResponse<T> = { data: T; demo?: boolean; provider?: string; sources?: string[]; aiTranslation?: boolean };
-const RuntimeDataContext = createContext<RuntimeData>({ newsItems: news, matchItems: matches, standingRows: standings, newsReal: false, sportsReal: false, newsSources: [], aiTranslation: false });
+const createAppStatus = (rssActive: boolean, sportsActive: boolean, aiActive: boolean, sourceCount: number): AppStatus => ({
+  rss: rssActive ? { state: "ok", label: `RSS · ${sourceCount} nguồn` } : { state: "degraded", label: "RSS gián đoạn" },
+  ai: aiActive ? { state: "ok", label: "AI dịch đang bật" } : { state: "off", label: "AI chưa bật" },
+  sports: sportsActive ? { state: "ok", label: "football-data hoạt động" } : { state: "degraded", label: "Dữ liệu trận đấu dự phòng" },
+  healthy: rssActive && sportsActive,
+});
+const RuntimeDataContext = createContext<RuntimeData>({ newsItems: news, matchItems: matches, standingRows: standings, newsReal: false, sportsReal: false, newsSources: [], aiTranslation: false, status: createAppStatus(false, false, false, 0) });
 const useRuntimeData = () => useContext(RuntimeDataContext);
 
 const navItems = [
@@ -49,8 +64,9 @@ function SectionHeading({ eyebrow, title, action, href = "/news" }: { eyebrow?: 
 }
 
 function NewsVisual({ item, compact = false }: { item: NewsItem; compact?: boolean }) {
+  const { newsReal } = useRuntimeData();
   return <div className={`news-visual tone-${item.imageTone} ${compact ? "compact" : ""}`}>
-    <div className="field-lines" /><span className="visual-label">{item.translatedByAI ? "AI DỊCH · CÓ NGUỒN" : item.originalLanguage === "en" ? "QUỐC TẾ · BẢN GỐC" : "TIN TỔNG HỢP"}</span><span className="visual-team">{getInitials(item.team)}</span>
+    <div className="field-lines" /><span className="visual-label">{!newsReal ? "DỮ LIỆU MINH HỌA" : item.translatedByAI ? "AI DỊCH · CÓ NGUỒN" : item.originalLanguage === "en" ? "QUỐC TẾ · BẢN GỐC" : "TIN TỔNG HỢP"}</span><span className="visual-team">{getInitials(item.team)}</span>
   </div>;
 }
 
@@ -85,15 +101,34 @@ export function StandingsTable({ full = false }: { full?: boolean }) {
   return <div className="table-wrap"><table className="standings-table"><thead><tr><th>#</th><th>Đội</th><th>Tr</th>{full && <><th>W</th><th>D</th><th>L</th><th>HS</th></>}<th>Đ</th>{full && <th>Phong độ</th>}</tr></thead><tbody>{standingRows.map((row) => <tr key={row.team}><td><span className={`rank rank-${row.position}`}>{row.position}</span></td><td><span className="standing-team"><TeamMark name={row.team} size="sm" />{row.team}</span></td><td>{row.played}</td>{full && <><td>{row.won}</td><td>{row.drawn}</td><td>{row.lost}</td><td>{row.goalDifference > 0 ? "+" : ""}{row.goalDifference}</td></>}<td><strong>{row.points}</strong></td>{full && <td><span className="form-row">{row.form.map((result, i) => <i key={i} className={result.toLowerCase()}>{result}</i>)}</span></td>}</tr>)}</tbody></table></div>;
 }
 
-function AppSidebar({ route, open, onClose }: { route: string; open: boolean; onClose: () => void }) {
-  const { matchItems } = useRuntimeData();
+function AppSidebar({ route, open, onClose, sourceFilter, onSourceFilter }: { route: string; open: boolean; onClose: () => void; sourceFilter: SourceFilter; onSourceFilter: (filter: SourceFilter) => void }) {
+  const { matchItems, newsItems } = useRuntimeData();
   const liveCount = matchItems.filter((match) => match.status === "live").length;
+  const homeMode = route === "/";
+  const primaryItems = [navItems[0], navItems[2], navItems[3]];
+  const secondaryItems = [navItems[4], navItems[5], navItems[6]];
+  const sourceCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of newsItems) for (const source of item.sources) counts.set(source, (counts.get(source) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  }, [newsItems]);
+  const filterItems = [
+    { id: "vi" as const, label: "Báo Việt Nam", icon: Newspaper, count: newsItems.filter((item) => item.originalLanguage !== "en").length },
+    { id: "international" as const, label: "Báo quốc tế", icon: Globe2, count: newsItems.filter((item) => item.originalLanguage === "en").length },
+    { id: "official" as const, label: "Kênh chính thức", icon: BadgeCheck, count: newsItems.filter((item) => item.sources.some((source) => ["VFF", "VPF"].includes(source))).length },
+    { id: "youtube" as const, label: "YouTube", icon: Video, count: newsItems.filter((item) => item.sources.some((source) => /youtube/i.test(source))).length },
+    { id: "rss" as const, label: "RSS", icon: Rss, count: newsItems.length },
+  ];
+  const renderNav = (items: typeof navItems) => items.map((item) => { const Icon = item.icon; const active = route === item.href || (item.href !== "/" && route.startsWith(item.href)); return <Link key={item.href} href={item.href} className={active ? "active" : ""}><Icon size={18} /><span>{homeMode && item.href === "/" ? "Trang chủ" : item.label}</span>{item.href === "/live" && liveCount > 0 && <em>{liveCount}</em>}</Link>; });
   return <><div className={`drawer-backdrop ${open ? "show" : ""}`} onClick={onClose} /><aside className={`app-sidebar ${open ? "open" : ""}`}>
     <div className="brand"><span className="brand-symbol"><span /></span><span>SPORT<b>PEEK</b></span></div>
     <button className="sidebar-close" onClick={onClose} aria-label="Đóng menu"><X size={20} /></button>
-    <nav aria-label="Điều hướng chính">{navItems.map((item) => { const Icon = item.icon; const active = route === item.href || (item.href !== "/" && route.startsWith(item.href)); return <Link key={item.href} href={item.href} className={active ? "active" : ""}><Icon size={19} /><span>{item.label}</span>{item.href === "/live" && liveCount > 0 && <em>{liveCount}</em>}</Link>; })}</nav>
-    <div className="sidebar-section"><span>Theo dõi</span>{teams.slice(0, 4).map((team) => <Link href={`/teams/${team.slug}`} key={team.id}><TeamMark name={team.name} size="sm" /><span>{team.name}</span></Link>)}</div>
-    <div className="sidebar-upgrade"><Zap size={20} /><strong>Cá nhân hóa feed</strong><p>Theo dõi đội bóng và giải đấu bạn quan tâm.</p><Link href="/login">Đăng nhập ngay</Link></div>
+    <nav aria-label="Điều hướng chính">{renderNav(homeMode ? primaryItems : navItems)}</nav>
+    {homeMode ? <>
+      <div className="sidebar-section source-filter-section"><span><ListFilter size={13} />Lọc nguồn</span>{filterItems.map((item) => { const Icon = item.icon; return <button type="button" className={sourceFilter === item.id ? "active" : ""} key={item.id} onClick={() => onSourceFilter(sourceFilter === item.id ? "all" : item.id)}><Icon size={16} /><span>{item.label}</span><em>{item.count}</em></button>; })}</div>
+      <div className="sidebar-section followed-sources"><span>Nguồn đang theo dõi</span>{sourceCounts.map(([source, count]) => <Link href="/sources" key={source}><span className="source-logo">{getInitials(source)}</span><span>{source}</span><em>{count} mới</em></Link>)}</div>
+      <div className="home-secondary-nav"><span>Tỉ số & lịch</span><nav aria-label="Tỉ số và lịch thi đấu">{renderNav(secondaryItems)}</nav></div>
+    </> : <><div className="sidebar-section"><span>Theo dõi</span>{teams.slice(0, 4).map((team) => <Link href={`/teams/${team.slug}`} key={team.id}><TeamMark name={team.name} size="sm" /><span>{team.name}</span></Link>)}</div><div className="sidebar-upgrade"><Zap size={20} /><strong>Cá nhân hóa feed</strong><p>Theo dõi đội bóng và giải đấu bạn quan tâm.</p><Link href="/login">Đăng nhập ngay</Link></div></>}
     <div className="sidebar-bottom"><Link href="/settings"><Settings size={18} />Cài đặt</Link><Link href="/sources"><ShieldCheck size={18} />Nguồn tin</Link></div>
   </aside></>;
 }
@@ -116,21 +151,51 @@ function SearchCommand({ open, onClose }: { open: boolean; onClose: () => void }
   return <div className="command-backdrop" onMouseDown={onClose}><div className="command-dialog" role="dialog" aria-modal="true" aria-label="Tìm kiếm" onMouseDown={(event) => event.stopPropagation()}><div className="command-input"><Search size={20} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nhập ít nhất 2 ký tự..." aria-label="Nội dung tìm kiếm" /><button onClick={onClose}><X size={19} /></button></div><div className="command-results">{query.length < 2 ? <div className="command-hint"><Command size={28} /><p>Tìm kiếm hợp nhất trên tin tức, đội bóng, cầu thủ và giải đấu.</p></div> : results.length ? results.map((result) => <Link key={result.href} href={result.href} onClick={onClose}><span>{result.label}</span><small>{result.type}</small></Link>) : <EmptyState title="Không tìm thấy kết quả" description="Thử từ khóa khác hoặc kiểm tra lại chính tả." />}</div><div className="command-footer"><span>↑↓ di chuyển</span><span>Enter mở</span><span>Esc đóng</span></div></div></div>;
 }
 
-function BreakingTicker() {
-  const { newsItems, newsReal } = useRuntimeData();
-  const latest = [...newsItems].sort((a, b) => Date.parse(b.publishedTimestamp ?? "") - Date.parse(a.publishedTimestamp ?? ""))[0] ?? newsItems[0];
-  return <div className="breaking-ticker"><span className="ticker-label"><Zap size={14} />MỚI NHẤT</span><div className="ticker-copy"><strong>{newsReal ? "Tin mới:" : "Cập nhật:"}</strong> {latest?.title ?? "Bản tin thể thao đang được cập nhật"}</div><span className="ticker-time">{latest?.publishedAt ?? "vừa xong"}</span><div className="ticker-arrows"><button aria-label="Tin trước"><ChevronLeft size={16} /></button><button aria-label="Tin sau"><ChevronRight size={16} /></button></div></div>;
+function matchesSourceFilter(item: NewsItem, filter: SourceFilter): boolean {
+  if (filter === "all" || filter === "rss") return true;
+  if (filter === "vi") return item.originalLanguage !== "en";
+  if (filter === "international") return item.originalLanguage === "en";
+  if (filter === "official") return item.sources.some((source) => ["VFF", "VPF"].includes(source));
+  return item.sources.some((source) => /youtube/i.test(source));
 }
 
-function HomePage({ bookmarks, onBookmark }: { bookmarks: Set<string>; onBookmark: (id: string) => void }) {
-  const { newsItems, matchItems } = useRuntimeData();
-  const highlightedNews = [...newsItems].sort((a, b) => b.hotness - a.hotness || b.reliability - a.reliability);
-  const today = new Intl.DateTimeFormat("vi-VN", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date()).toUpperCase();
-  return <><BreakingTicker /><div className="home-grid"><main className="main-feed"><div className="welcome-row"><div><span className="eyebrow">{today}</span><h1>Chào buổi tối, người hâm mộ.</h1><p>Những diễn biến đáng chú ý được tổng hợp và kiểm chứng cho bạn.</p></div><div className="signal"><span><i />Hệ thống ổn định</span><strong>{newsItems.length}</strong><small>tin trong bản tổng hợp hiện tại</small></div></div>
-    <section><SectionHeading eyebrow="ĐIỂM TIN" title="Đáng chú ý nhất" action="Xem tất cả" /><div className="featured-grid">{highlightedNews.slice(0, 2).map((item) => <NewsCard key={item.id} item={item} featured bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div></section>
-    <section><SectionHeading eyebrow="CẬP NHẬT LIÊN TỤC" title="Tin mới nhất" action="Mở bảng tin" /><div className="news-stack">{newsItems.slice(2, 7).map((item) => <NewsListItem item={item} key={item.id} />)}</div></section>
-    <section className="popular-section"><SectionHeading eyebrow="KHÁM PHÁ" title="Đội bóng phổ biến" /><div className="team-strip">{teams.slice(0, 6).map((team) => <Link href={`/teams/${team.slug}`} key={team.id}><TeamMark name={team.name} /><span>{team.name}</span><small>{team.country}</small></Link>)}</div></section>
-  </main><aside className="right-rail"><section className="rail-card live-rail"><SectionHeading eyebrow="ĐANG DIỄN RA" title="Trực tiếp" action="Tất cả" href="/live" />{matchItems.filter((match) => match.status === "live").map((match) => <MatchCard key={match.id} match={match} compact />)}</section><section className="rail-card"><SectionHeading eyebrow="HÔM NAY" title="Lịch thi đấu" action="Lịch đầy đủ" href="/fixtures" />{matchItems.filter((match) => match.status === "scheduled").slice(0, 3).map((match) => <MatchCard key={match.id} match={match} compact />)}</section><section className="rail-card"><SectionHeading eyebrow="PREMIER LEAGUE" title="Bảng xếp hạng" action="Chi tiết" href="/standings" /><StandingsTable /></section><section className="rail-card topics"><SectionHeading eyebrow="XU HƯỚNG" title="Chủ đề nổi bật" /><div>{["# Kỳ chuyển nhượng", "# Đại chiến cuối tuần", "# Tài năng trẻ", "# Chiến thuật pressing", "# V.League"].map((topic) => <Link href={`/search?q=${encodeURIComponent(topic)}`} key={topic}><span>{topic}</span><em>Khám phá</em></Link>)}</div></section></aside></div></>;
+function HomeHeroNews({ item, demo, bookmarked, onBookmark }: { item: NewsItem; demo: boolean; bookmarked: boolean; onBookmark: (id: string) => void }) {
+  return <article className="home-hero-news">
+    <div className="home-hero-glow" aria-hidden><span>SP</span></div>
+    <div className="home-hero-content">
+      <div className="home-hero-kicker"><span>{demo ? "Dữ liệu minh họa" : "Tiêu điểm SportPeek"}</span><HotnessBadge score={item.hotness} /></div>
+      <h1>{item.title}</h1>
+      <p>{item.summary}</p>
+      <div className="home-hero-meta"><span><Newspaper size={15} />{item.sources.length} nguồn</span><span><Clock3 size={15} />{item.publishedAt}</span><span><ShieldCheck size={15} />Tin cậy {item.reliability}%</span></div>
+      <div className="home-hero-actions"><Link href={`/news/${item.slug}`}>Xem tin<ArrowRight size={17} /></Link><button type="button" className={bookmarked ? "active" : ""} onClick={() => onBookmark(item.id)} aria-label={bookmarked ? "Bỏ lưu tin" : "Lưu tin"}><Bookmark size={17} fill={bookmarked ? "currentColor" : "none"} /></button></div>
+    </div>
+  </article>;
+}
+
+function HomeNewsRow({ item, demo }: { item: NewsItem; demo: boolean }) {
+  return <article className="home-news-row"><NewsVisual item={item} compact /><div className="home-news-copy"><div className="meta-row"><span className="category-label">{demo ? "Dữ liệu minh họa" : item.category}</span><span>{item.publishedAt}</span></div><Link href={`/news/${item.slug}`}><h3>{item.title}</h3></Link><p>{item.summary}</p><div className="home-news-meta"><span>{item.sources.length} nguồn</span><HotnessBadge score={item.hotness} /></div></div><Link className="home-news-open" href={`/news/${item.slug}`} aria-label={`Xem tin ${item.title}`}><ChevronRight size={18} /></Link></article>;
+}
+
+function DenseNewsList({ items, numbered = false }: { items: NewsItem[]; numbered?: boolean }) {
+  return <div className="dense-news-list">{items.map((item, index) => <Link href={`/news/${item.slug}`} key={item.id}><span className="dense-news-index">{numbered ? String(index + 1).padStart(2, "0") : <i />}</span><span><strong>{item.title}</strong><small>{item.publishedAt} · {item.sources.length} nguồn</small></span></Link>)}</div>;
+}
+
+function HomePage({ bookmarks, onBookmark, sourceFilter }: { bookmarks: Set<string>; onBookmark: (id: string) => void; sourceFilter: SourceFilter }) {
+  const { newsItems, matchItems, newsReal, sportsReal } = useRuntimeData();
+  const filteredNews = newsItems.filter((item) => matchesSourceFilter(item, sourceFilter));
+  const hotNews = [...filteredNews].sort((a, b) => b.hotness - a.hotness || b.reliability - a.reliability);
+  const hero = hotNews[0];
+  const feedItems = filteredNews.filter((item) => item.id !== hero?.id).slice(0, 12);
+  const overallHot = [...newsItems].sort((a, b) => b.hotness - a.hotness || b.reliability - a.reliability).filter((item) => item.id !== hero?.id).slice(0, 6);
+  const dateKey = (value?: string) => value ? new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date(value)) : "";
+  const todayKey = dateKey(new Date().toISOString());
+  const todayItems = newsItems.filter((item) => dateKey(item.publishedTimestamp) === todayKey).slice(0, 5);
+  const liveMatches = matchItems.filter((match) => match.status === "live");
+  const today = new Intl.DateTimeFormat("vi-VN", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date());
+  return <div className="home-grid"><main className="main-feed home-main-feed"><div className="home-feed-heading"><div><span>{today}</span><h2>Dòng tin thể thao</h2></div><Link href="/news">Xem toàn bộ<ArrowRight size={15} /></Link></div>
+    {hero ? <HomeHeroNews item={hero} demo={!newsReal} bookmarked={bookmarks.has(hero.id)} onBookmark={onBookmark} /> : <div className="home-filter-empty"><Rss size={26} /><strong>Chưa có tin từ nhóm nguồn này</strong><p>Chọn một nhóm nguồn khác để tiếp tục theo dõi.</p></div>}
+    {feedItems.length > 0 && <section className="home-continuous-feed" aria-label="Tin mới nhất"><div className="home-feed-label"><span>Tin mới nhất</span><em>{filteredNews.length} tin</em></div>{feedItems.map((item) => <HomeNewsRow item={item} demo={!newsReal} key={item.id} />)}<Link href="/news" className="home-feed-more">Mở bảng tin đầy đủ<ArrowRight size={16} /></Link></section>}
+  </main><aside className="right-rail home-right-rail"><section className="rail-card hot-news-rail"><SectionHeading eyebrow="ĐANG ĐƯỢC QUAN TÂM" title="Tin nóng" action="Tất cả" /><DenseNewsList items={overallHot} numbered /></section><section className="rail-card today-news-rail"><SectionHeading eyebrow="CẬP NHẬT TRONG NGÀY" title="Tin hôm nay" /><DenseNewsList items={(todayItems.length ? todayItems : newsItems).slice(0, 5)} /></section><section className="rail-card compact-live-rail"><SectionHeading eyebrow={sportsReal ? "FOOTBALL-DATA.ORG" : "DỮ LIỆU MINH HỌA"} title="Đang trực tiếp" action="Mở live" href="/live" />{liveMatches.length ? liveMatches.slice(0, 2).map((match) => <MatchCard key={match.id} match={match} compact />) : <div className="no-live"><Radio size={18} /><span><strong>Chưa có trận đang diễn ra</strong><small>Dữ liệu sẽ tự cập nhật khi trận bắt đầu.</small></span></div>}</section></aside></div>;
 }
 
 function PageHero({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {
@@ -237,17 +302,26 @@ function LegalPage({ type }: { type: string }) {
 function EmptyState({ title, description }: { title: string; description: string }) { return <div className="empty-state"><Search size={28} /><strong>{title}</strong><p>{description}</p></div>; }
 function Pagination() { return <nav className="pagination" aria-label="Phân trang"><button disabled><ChevronLeft size={16} /></button><button className="active">1</button><button>2</button><button>3</button><span>…</span><button>12</button><button><ChevronRight size={16} /></button></nav>; }
 
-function AppFooter() {
-  return <footer className="app-footer"><div><div className="brand"><span className="brand-symbol"><span /></span><span>SPORT<b>PEEK</b></span></div><p>Tin thể thao quan trọng, được tổng hợp thông minh.</p></div><div><strong>Sản phẩm</strong><Link href="/news">Tin tức</Link><Link href="/live">Trực tiếp</Link><Link href="/standings">Bảng xếp hạng</Link></div><div><strong>Minh bạch</strong><Link href="/sources">Nguồn tin</Link><Link href="/copyright">Bản quyền</Link><Link href="/privacy">Quyền riêng tư</Link></div><div><strong>Hệ thống</strong><span className="system-ok"><i />Hoạt động bình thường</span><small>© 2026 SportPeek Beta</small></div></footer>;
+function SystemStatusBanner() {
+  const { status } = useRuntimeData();
+  return <div className={`demo-bar status-banner ${status.healthy ? "healthy" : "degraded"}`}><span className="status-banner-label"><ShieldCheck size={14} />Trạng thái dữ liệu</span>{([status.rss, status.ai, status.sports]).map((service) => <span className={`service-status ${service.state}`} key={service.label}><i />{service.label}</span>)}</div>;
+}
+
+function AppFooter({ compact = false }: { compact?: boolean }) {
+  const { status } = useRuntimeData();
+  const statusText = [status.rss.label, status.ai.label, status.sports.label].join(" · ");
+  if (compact) return <footer className="app-footer compact-footer"><div><span>© 2026 SportPeek</span><Link href="/sources">Nguồn & phương pháp</Link><Link href="/privacy">Quyền riêng tư</Link></div><span className={`footer-data-status ${status.healthy ? "ok" : "degraded"}`}><i />{statusText}</span></footer>;
+  return <footer className="app-footer"><div><div className="brand"><span className="brand-symbol"><span /></span><span>SPORT<b>PEEK</b></span></div><p>Tin thể thao quan trọng, được tổng hợp thông minh.</p></div><div><strong>Sản phẩm</strong><Link href="/news">Tin tức</Link><Link href="/live">Trực tiếp</Link><Link href="/standings">Bảng xếp hạng</Link></div><div><strong>Minh bạch</strong><Link href="/sources">Nguồn tin</Link><Link href="/copyright">Bản quyền</Link><Link href="/privacy">Quyền riêng tư</Link></div><div><strong>Trạng thái dữ liệu</strong><span className={`footer-data-status ${status.healthy ? "ok" : "degraded"}`}><i />{statusText}</span><small>© 2026 SportPeek Beta</small></div></footer>;
 }
 
 export default function SportPeekApp({ route }: { route: string }) {
   const [theme, setTheme] = useState("dark");
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [homeSourceFilter, setHomeSourceFilter] = useState<SourceFilter>("all");
   const [bookmarks, setBookmarks] = useState<Set<string>>(() => new Set(["n1", "n5"]));
   const [followed, setFollowed] = useState<Set<string>>(() => new Set(["team-1", "team-7"]));
-  const [runtimeData, setRuntimeData] = useState<RuntimeData>({ newsItems: news, matchItems: matches, standingRows: standings, newsReal: false, sportsReal: false, newsSources: [], aiTranslation: false });
+  const [runtimeData, setRuntimeData] = useState<RuntimeData>({ newsItems: news, matchItems: matches, standingRows: standings, newsReal: false, sportsReal: false, newsSources: [], aiTranslation: false, status: createAppStatus(false, false, false, 0) });
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   useEffect(() => { const key = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSearchOpen(true); } }; window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key); }, []);
   useEffect(() => {
@@ -269,7 +343,11 @@ export default function SportPeekApp({ route }: { route: string }) {
       const sportsResponses = requests.slice(1, 4).filter((result): result is PromiseFulfilledResult<RuntimeResponse<Match[]>> => result.status === "fulfilled").map((result) => result.value);
       const tableResponse = requests[4].status === "fulfilled" ? requests[4].value : null;
       const mergedMatches = [...new Map(sportsResponses.flatMap((result) => result.data ?? []).map((match) => [match.id, match])).values()];
-      setRuntimeData({ newsItems: newsResponse?.data?.length ? newsResponse.data : news, matchItems: mergedMatches.length ? mergedMatches : matches, standingRows: tableResponse?.data?.length ? tableResponse.data : standings, newsReal: newsResponse?.demo === false, sportsReal: sportsResponses.some((result) => result.provider !== "mock" && result.demo === false), newsSources: newsResponse?.sources ?? [], aiTranslation: newsResponse?.aiTranslation === true });
+      const rssActive = newsResponse?.demo === false && Boolean(newsResponse.data?.length);
+      const allSportsResponses = requests.slice(1, 5).map((result) => result.status === "fulfilled" ? result.value as RuntimeResponse<unknown> : null);
+      const sportsActive = allSportsResponses.length === 4 && allSportsResponses.every((result) => result?.provider !== "mock" && result?.demo === false);
+      const aiActive = newsResponse?.aiTranslation === true;
+      setRuntimeData({ newsItems: newsResponse?.data?.length ? newsResponse.data : news, matchItems: mergedMatches.length ? mergedMatches : matches, standingRows: tableResponse?.data?.length ? tableResponse.data : standings, newsReal: rssActive, sportsReal: sportsActive, newsSources: newsResponse?.sources ?? [], aiTranslation: aiActive, status: createAppStatus(rssActive, sportsActive, aiActive, newsResponse?.sources?.length ?? 0) });
       } finally { loading = false; }
     };
     void load();
@@ -282,7 +360,7 @@ export default function SportPeekApp({ route }: { route: string }) {
   const isAuth = ["/login", "/register", "/forgot-password", "/auth/callback"].includes(route);
   if (isAuth) return <AuthPage type={route === "/register" ? "register" : route === "/forgot-password" ? "forgot" : "login"} />;
   let page: React.ReactNode;
-  if (route === "/") page = <HomePage bookmarks={bookmarks} onBookmark={toggleBookmark} />;
+  if (route === "/") page = <HomePage bookmarks={bookmarks} onBookmark={toggleBookmark} sourceFilter={homeSourceFilter} />;
   else if (route === "/for-you") page = <ForYouPage followed={followed} onFollow={toggleFollow} bookmarks={bookmarks} onBookmark={toggleBookmark} />;
   else if (route === "/news") page = <NewsPage bookmarks={bookmarks} onBookmark={toggleBookmark} />;
   else if (segments[0] === "news" && segments[1]) page = <NewsDetail slug={segments[1]} bookmarked={bookmarks.has(runtimeData.newsItems.find((item) => item.slug === segments[1])?.id ?? "n1")} onBookmark={toggleBookmark} />;
@@ -301,5 +379,5 @@ export default function SportPeekApp({ route }: { route: string }) {
   else if (route.startsWith("/admin")) page = <AdminPage />;
   else if (["terms", "privacy", "copyright", "sources"].includes(segments[0])) page = <LegalPage type={segments[0]} />;
   else page = <div className="large-empty"><EmptyState title="Không tìm thấy trang" description="Trang bạn tìm kiếm không tồn tại hoặc đã được di chuyển." /><Link href="/" className="primary-button">Về trang chủ</Link></div>;
-  return <RuntimeDataContext.Provider value={runtimeData}><div className="app-shell"><AppSidebar route={route} open={menuOpen} onClose={() => setMenuOpen(false)} /><div className="app-column"><Header onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} theme={theme} onTheme={() => setTheme(theme === "dark" ? "light" : "dark")} /><div className="demo-bar"><ShieldCheck size={14} />{runtimeData.newsReal ? `Đang tổng hợp ${runtimeData.newsSources.length} nguồn Việt Nam và quốc tế.` : "Mạng lưới tin tạm gián đoạn — đang dùng dữ liệu dự phòng."} {runtimeData.aiTranslation ? "AI dịch tiếng Anh đang hoạt động." : "Chưa kích hoạt dịch AI."} {runtimeData.sportsReal ? "Tỉ số trực tiếp đang hoạt động." : "Tỉ số đang dùng dữ liệu dự phòng."}</div><div className="content-wrap">{page}</div><AppFooter /></div><MobileNavigation route={route} /><SearchCommand open={searchOpen} onClose={() => setSearchOpen(false)} /></div></RuntimeDataContext.Provider>;
+  return <RuntimeDataContext.Provider value={runtimeData}><div className={`app-shell ${route === "/" ? "home-shell" : ""}`}><AppSidebar route={route} open={menuOpen} onClose={() => setMenuOpen(false)} sourceFilter={homeSourceFilter} onSourceFilter={setHomeSourceFilter} /><div className="app-column"><Header onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} theme={theme} onTheme={() => setTheme(theme === "dark" ? "light" : "dark")} /><SystemStatusBanner /><div className="content-wrap">{page}</div><AppFooter compact={route === "/"} /></div><MobileNavigation route={route} /><SearchCommand open={searchOpen} onClose={() => setSearchOpen(false)} /></div></RuntimeDataContext.Provider>;
 }

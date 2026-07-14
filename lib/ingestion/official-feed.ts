@@ -1,6 +1,7 @@
 import { formatDistanceToNowStrict } from "date-fns";
 import { vi } from "date-fns/locale";
 import { XMLParser } from "fast-xml-parser";
+import { decode } from "html-entities";
 import { enrichInternationalNews } from "@/lib/ai/openai";
 import { calculateHotness, calculateReliability } from "@/lib/scoring";
 import type { NewsItem, NewsSourceDetail } from "@/lib/types";
@@ -55,7 +56,7 @@ const STOP_WORDS = new Set("cua và với trong trên cho sau trước khi là �
 
 function cleanText(value: unknown): string {
   const raw = typeof value === "string" || typeof value === "number" ? String(value) : value && typeof value === "object" && "#text" in value ? String((value as { "#text"?: unknown })["#text"] ?? "") : "";
-  return raw.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;|&#160;/gi, " ").replace(/&hellip;|&#8230;/gi, "…").replace(/&quot;|&#34;|&#8220;|&#8221;/gi, '"').replace(/&#8211;/gi, "–").replace(/&#8217;|&rsquo;|&#39;/gi, "’").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim();
+  return decode(raw).replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function feedsFromEnvironment(): FeedConfig[] {
