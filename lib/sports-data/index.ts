@@ -1,4 +1,6 @@
 import { matches as demoMatches, players as demoPlayers, standings as demoStandings, teams as demoTeams } from "@/lib/demo-data";
+import { developmentFixturesEnabled } from "@/lib/config";
+import { ConfigurationError } from "@/lib/core/errors";
 import type { Match, Standing, Team } from "@/lib/types";
 
 type PlayerRecord = (typeof demoPlayers)[number];
@@ -7,6 +9,17 @@ export interface SportsDataProvider { readonly name: string; getLiveMatches(): P
 export class MockSportsDataProvider implements SportsDataProvider {
   readonly name = "mock";
   async getLiveMatches(){return demoMatches.filter((match)=>match.status==="live")} async getFixtures(){return demoMatches.filter((match)=>match.status==="scheduled")} async getResults(){return demoMatches.filter((match)=>match.status==="finished")} async getStandings(){return demoStandings} async getTeams(){return demoTeams} async getPlayers(){return demoPlayers}
+}
+
+export class DisabledSportsDataProvider implements SportsDataProvider {
+  readonly name = "disabled";
+  private unavailable(): never { throw new ConfigurationError("Nhà cung cấp dữ liệu thể thao chưa được cấu hình.", "sports"); }
+  async getLiveMatches(): Promise<Match[]> { return this.unavailable(); }
+  async getFixtures(): Promise<Match[]> { return this.unavailable(); }
+  async getResults(): Promise<Match[]> { return this.unavailable(); }
+  async getStandings(): Promise<Standing[]> { return this.unavailable(); }
+  async getTeams(): Promise<Team[]> { return this.unavailable(); }
+  async getPlayers(): Promise<PlayerRecord[]> { return this.unavailable(); }
 }
 
 type ApiTeam = { id: number; name: string; code?: string; country?: string; logo?: string };
@@ -23,7 +36,7 @@ function matchStatus(short: string): Match["status"] { if (["1H","HT","2H","ET",
 export class ApiFootballProvider implements SportsDataProvider {
   readonly name = "api-football";
   private readonly baseUrl = process.env.API_FOOTBALL_BASE_URL ?? "https://v3.football.api-sports.io";
-  private readonly key = (process.env.SPORTS_DATA_API_KEY ?? "").trim();
+  private readonly key = (process.env.API_FOOTBALL_KEY ?? (process.env.SPORTS_DATA_PROVIDER === "api-football" ? process.env.SPORTS_DATA_API_KEY : "") ?? "").trim();
   private readonly season = Number(process.env.API_FOOTBALL_SEASON ?? "2025");
 
   private async request<T>(path: string, ttlMs: number): Promise<T> {
@@ -49,7 +62,7 @@ export class ApiFootballProvider implements SportsDataProvider {
   async getResults(): Promise<Match[]> { const date = new Date(); date.setDate(date.getDate() - 1); const items = await this.request<ApiFixture[]>(`/fixtures?date=${formatDate(date)}&timezone=Asia%2FHo_Chi_Minh`, 10 * 60_000); return this.mapMatches(items).filter((item) => item.status === "finished"); }
   async getStandings(): Promise<Standing[]> { const league = configuredLeagueIds()[0] ?? 39; const groups = await this.request<Array<{ league: { standings: ApiStanding[][] } }>>(`/standings?league=${league}&season=${this.season}`, 30 * 60_000); return (groups[0]?.league.standings[0] ?? []).map((row) => ({ position: row.rank, team: row.team.name, played: row.all.played, won: row.all.win, drawn: row.all.draw, lost: row.all.lose, goalDifference: row.goalsDiff, points: row.points, form: (row.form?.split("") ?? []).slice(-5).filter((value): value is "W"|"D"|"L" => ["W","D","L"].includes(value)) })); }
   async getTeams(): Promise<Team[]> { const league = configuredLeagueIds()[0] ?? 39; const records = await this.request<Array<{ team: ApiTeam; venue?: { name?: string } }>>(`/teams?league=${league}&season=${this.season}`, 24 * 60 * 60_000); return records.map(({ team, venue }) => ({ id: String(team.id), name: team.name, shortName: team.code ?? team.name.slice(0,3).toUpperCase(), slug: team.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""), country: team.country ?? "", accent: "#8cff4e", stadium: venue?.name ?? "" })); }
-  async getPlayers(): Promise<PlayerRecord[]> { return demoPlayers; }
+  async getPlayers(): Promise<PlayerRecord[]> { return []; }
 }
 
 type FootballDataTeam = { id: number; name?: string | null; shortName?: string | null; tla?: string | null; area?: { name?: string }; venue?: string };
@@ -88,7 +101,7 @@ function addDays(date: Date, amount: number): Date {
 export class FootballDataProvider implements SportsDataProvider {
   readonly name = "football-data";
   private readonly baseUrl = process.env.FOOTBALL_DATA_BASE_URL ?? "https://api.football-data.org/v4";
-  private readonly key = (process.env.SPORTS_DATA_API_KEY ?? "").trim();
+  private readonly key = (process.env.FOOTBALL_DATA_API_KEY ?? (process.env.SPORTS_DATA_PROVIDER === "football-data" ? process.env.SPORTS_DATA_API_KEY : "") ?? "").trim();
 
   private async request<T>(path: string, ttlMs: number): Promise<T> {
     if (!this.key) throw new Error("Thiếu SPORTS_DATA_API_KEY");
@@ -141,13 +154,12 @@ export class FootballDataProvider implements SportsDataProvider {
     const payload = await this.request<{ teams: FootballDataTeam[] }>(`/competitions/${encodeURIComponent(code)}/teams`, 24 * 60 * 60_000);
     return (payload.teams ?? []).map((team) => { const name = footballDataTeamName(team); return { id: String(team.id), name, shortName: team.tla ?? team.shortName ?? name.slice(0, 3).toUpperCase(), slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), country: team.area?.name ?? "", accent: "#8cff4e", stadium: team.venue ?? "" }; });
   }
-  async getPlayers(): Promise<PlayerRecord[]> { return demoPlayers; }
+  async getPlayers(): Promise<PlayerRecord[]> { return []; }
 }
 
-export function isRealSportsDataEnabled(): boolean { return ["api-football", "football-data"].includes(process.env.SPORTS_DATA_PROVIDER ?? "") && Boolean(process.env.SPORTS_DATA_API_KEY?.trim()); }
+export function isRealSportsDataEnabled(): boolean { return Boolean(process.env.FOOTBALL_DATA_API_KEY?.trim() || process.env.API_FOOTBALL_KEY?.trim() || (["api-football", "football-data"].includes(process.env.SPORTS_DATA_PROVIDER ?? "") && process.env.SPORTS_DATA_API_KEY?.trim())); }
 export function getSportsDataProvider(): SportsDataProvider {
-  if (!process.env.SPORTS_DATA_API_KEY?.trim()) return new MockSportsDataProvider();
-  if (process.env.SPORTS_DATA_PROVIDER === "football-data") return new FootballDataProvider();
-  if (process.env.SPORTS_DATA_PROVIDER === "api-football") return new ApiFootballProvider();
-  return new MockSportsDataProvider();
+  if (process.env.FOOTBALL_DATA_API_KEY?.trim() || (process.env.SPORTS_DATA_PROVIDER === "football-data" && process.env.SPORTS_DATA_API_KEY?.trim())) return new FootballDataProvider();
+  if (process.env.API_FOOTBALL_KEY?.trim() || (process.env.SPORTS_DATA_PROVIDER === "api-football" && process.env.SPORTS_DATA_API_KEY?.trim())) return new ApiFootballProvider();
+  return developmentFixturesEnabled() ? new MockSportsDataProvider() : new DisabledSportsDataProvider();
 }

@@ -59,5 +59,6 @@ export function storyToNewsItem(story: StoryCluster, index = 0): NewsItem {
     ],
     imageTone: ["red", "green", "blue", "amber", "cyan"][index % 5],
     featured: index < 2,
+    storyStatus: story.status,
   };
 }

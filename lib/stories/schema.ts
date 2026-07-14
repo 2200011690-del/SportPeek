@@ -21,6 +21,7 @@ export const rawArticleSchema = z.object({
   publishedAt: z.string().datetime(),
   fetchedAt: z.string().datetime(),
   isOfficialSource: z.boolean(),
+  isSyndicated: z.boolean().default(false),
   language: z.enum(["vi", "en"]),
   processingStatus: z.enum(["pending", "processing", "completed", "failed"]),
 });
@@ -60,7 +61,7 @@ export const storyClusterSchema = z.object({
   summaryLong: z.string().min(1).max(12_000),
   category: z.string().min(1).max(160),
   language: z.enum(["vi", "en"]),
-  status: z.enum(["official", "corroborated", "rumor", "unverified", "developing", "disputed"]),
+  status: z.enum(["official", "reported", "rumor", "unverified", "developing", "disputed", "completed", "correction"]),
   sourceCount: z.number().int().nonnegative(),
   sourceNames: z.array(z.string().min(1)),
   officialSources: z.array(rawArticleSchema),
@@ -93,10 +94,10 @@ export const storyApiStatusSchema = z.enum([
 ]);
 
 export const storyResponseMetaSchema = z.object({
-  source: z.enum(["aggregated-rss", "development-fixture"]),
+  source: z.enum(["supabase", "aggregated-rss", "development-fixture"]),
   cached: z.boolean(),
   stale: z.boolean(),
-  lastUpdatedAt: z.string().datetime().nullable(),
+  lastUpdatedAt: z.string().datetime({ offset: true }).nullable(),
   canonicalSlug: z.string().nullable().optional(),
 });
 

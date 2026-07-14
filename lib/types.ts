@@ -1,4 +1,4 @@
-export type MatchStatus = "scheduled" | "live" | "finished";
+export type MatchStatus = "scheduled" | "live" | "finished" | "postponed" | "cancelled";
 
 export interface Team {
   id: string;
@@ -8,6 +8,7 @@ export interface Team {
   country: string;
   accent: string;
   stadium: string;
+  logoUrl?: string;
 }
 
 export interface Competition {
@@ -16,6 +17,20 @@ export interface Competition {
   slug: string;
   country: string;
   season: string;
+  logoUrl?: string;
+}
+
+export interface Player {
+  id: string;
+  name: string;
+  slug: string;
+  nationality: string;
+  position: string;
+  teamId?: string;
+  teamName?: string;
+  teamSlug?: string;
+  imageUrl?: string;
+  dateOfBirth?: string;
 }
 
 export interface NewsItem {
@@ -43,6 +58,8 @@ export interface NewsItem {
   trendingReasons?: string[];
   imageTone: string;
   featured?: boolean;
+  storyStatus?: "official" | "reported" | "rumor" | "unverified" | "developing" | "disputed" | "completed" | "correction";
+  personalization?: { score: number; reasons: string[] };
 }
 
 export interface NewsSourceDetail {
@@ -74,6 +91,88 @@ export interface Match {
   status: MatchStatus;
   minute?: number;
   venue: string;
+  provider?: string;
+  sourceTimestamp?: string;
+  dataFreshness?: "fresh" | "delayed" | "stale" | "unknown";
+}
+
+export interface MatchEvent {
+  id: string;
+  type: string;
+  minute: number;
+  extraMinute?: number;
+  team?: string;
+  player?: string;
+  relatedPlayer?: string;
+}
+
+export interface MatchStatistic {
+  team: string;
+  possession?: number;
+  shots?: number;
+  shotsOnTarget?: number;
+  corners?: number;
+  fouls?: number;
+  yellowCards?: number;
+  redCards?: number;
+  expectedGoals?: number;
+}
+
+export type MatchCapability = "score" | "venue" | "referee" | "events" | "lineups" | "statistics" | "standings" | "form" | "head_to_head" | "preview" | "recap" | "official_highlights";
+
+export interface MatchDetailData {
+  match: Match & {
+    competitionId: string;
+    competitionSlug: string;
+    season: string;
+    referee?: string;
+    homeTeamId: string;
+    homeTeamSlug: string;
+    awayTeamId: string;
+    awayTeamSlug: string;
+  };
+  events: MatchEvent[];
+  statistics: MatchStatistic[];
+  standings: Standing[];
+  capabilities: Record<MatchCapability, boolean>;
+  providerCoverage: Array<{ capability: string; provider: string }>;
+  updatedAt: string;
+  stale: boolean;
+}
+
+export interface CompetitionDetailData {
+  competition: Competition;
+  teams: Team[];
+  fixtures: Match[];
+  results: Match[];
+  standings: Standing[];
+  providerCoverage: Array<{ capability: string; provider: string }>;
+  updatedAt: string | null;
+}
+
+export interface TeamDetailData {
+  team: Team;
+  competitions: Competition[];
+  fixtures: Match[];
+  results: Match[];
+  standings: Standing[];
+  updatedAt: string | null;
+}
+
+export interface PlayerDetailData {
+  player: Player;
+  updatedAt: string | null;
+}
+
+export interface NewsSourceCatalogItem {
+  id: string;
+  name: string;
+  language: "vi" | "en";
+  reliability: number;
+  official: boolean;
+  active: boolean;
+  lastFetchedAt: string | null;
+  lastError: string | null;
 }
 
 export interface Standing {
@@ -86,4 +185,10 @@ export interface Standing {
   goalDifference: number;
   points: number;
   form: ("W" | "D" | "L")[];
+  provider?: string;
+  sourceTimestamp?: string;
+  dataFreshness?: "fresh" | "delayed" | "stale" | "unknown";
+  competitionId?: string;
+  competition?: string;
+  season?: string;
 }

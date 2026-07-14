@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import SportPeekApp from "@/components/SportPeekApp";
+import { isInternalMode, isPublicSignupAllowed } from "@/lib/config";
 
 type PageProps = { params: Promise<{ slug: string[] }> };
 
@@ -11,10 +13,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     standings: "Bảng xếp hạng", transfers: "Chuyển nhượng", search: "Tìm kiếm", bookmarks: "Tin đã lưu",
     settings: "Cài đặt", admin: "Quản trị", login: "Đăng nhập", register: "Đăng ký", "reset-password": "Đặt lại mật khẩu",
   };
-  return { title: `${labels[slug[0]] ?? route.replaceAll("-", " ")} | SportPeek`, robots: ["settings", "admin", "bookmarks"].includes(slug[0]) ? { index: false, follow: false } : undefined };
+  return { title: `${labels[slug[0]] ?? route.replaceAll("-", " ")} | SportPeek`, robots: isInternalMode() || ["settings", "admin", "bookmarks"].includes(slug[0]) ? { index: false, follow: false } : undefined };
 }
 
 export default async function CatchAllPage({ params }: PageProps) {
   const { slug } = await params;
-  return <SportPeekApp route={`/${slug.join("/")}`} />;
+  if (slug[0] === "register" && isInternalMode()) redirect("/login?error=invitation_only");
+  return <SportPeekApp route={`/${slug.join("/")}`} signupAllowed={isPublicSignupAllowed()} />;
 }

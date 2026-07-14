@@ -21,7 +21,32 @@
     "db:seed": "npx supabase db reset",
     "db:reset": "npx supabase db reset",
     "ingest:mock": "tsx scripts/ingest-mock.ts",
-    "cron:demo": "tsx scripts/cron-demo.ts"
+    "cron:demo": "tsx scripts/cron-demo.ts",
+    "discover:providers": "tsx scripts/sports.ts providers",
+    "discover:competitions": "tsx scripts/sports.ts competitions --dry-run",
+    "sync:competitions": "tsx scripts/sports.ts competitions",
+    "sync:teams": "tsx scripts/sports.ts teams",
+    "sync:fixtures": "tsx scripts/sports.ts fixtures",
+    "sync:results": "tsx scripts/sports.ts results",
+    "sync:standings": "tsx scripts/sports.ts standings",
+    "sync:live": "tsx scripts/sports.ts live",
+    "sync:metadata": "tsx scripts/sports.ts teams",
+    "report:coverage": "tsx scripts/sports.ts coverage"
+    ,"rss:test": "tsx scripts/rss.ts test"
+    ,"rss:sync": "tsx scripts/rss.ts sync"
+    ,"rss:sync-source": "tsx scripts/rss.ts sync-source"
+    ,"rss:report": "tsx scripts/rss.ts report"
+    ,"stories:process": "tsx scripts/stories.ts process"
+    ,"stories:recluster": "tsx scripts/stories.ts recluster"
+    ,"stories:summarize": "tsx scripts/stories.ts summarize"
+    ,"stories:retry-failed": "tsx scripts/stories.ts retry-failed"
+    ,"stories:report": "tsx scripts/stories.ts report"
+    ,"ops": "tsx scripts/ops.ts"
+    ,"ops:health": "tsx scripts/ops.ts health"
+    ,"ops:providers": "tsx scripts/ops.ts providers"
+    ,"ops:failed-jobs": "tsx scripts/ops.ts failed-jobs"
+    ,"ops:stale": "tsx scripts/ops.ts stale"
+    ,"ops:conflicts": "tsx scripts/ops.ts conflicts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

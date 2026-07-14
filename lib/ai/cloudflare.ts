@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { AIProvider, ClassifiedArticle, ClusterSummary } from "./types";
 import type { NewsEnrichment } from "./openai";
+import { agreementsSchema, answerSchema, disputesSchema, matchEvaluationSchema, timelineSchema } from "./remote-base";
+import type { ClusterArticleInput } from "./types";
 
 export const DEFAULT_CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 
@@ -186,6 +188,27 @@ export class CloudflareAIProvider implements AIProvider {
   async extractEntities(input: { title: string; excerpt: string }) {
     const result = await this.classifyArticle(input);
     return { teams: result.teams, players: result.players, competitions: result.competition ? [result.competition] : [] };
+  }
+
+  evaluateClusterMatch(input: { article: ClusterArticleInput; candidate: ClusterArticleInput[] }) {
+    return runStructured(matchEvaluationSchema, z.toJSONSchema(matchEvaluationSchema) as Record<string, unknown>, "Đánh giá đúng cùng một sự kiện thể thao; không gộp preview với result, injury với recovery hoặc hai thương vụ khác nhau.", input, 900);
+  }
+
+  generateTimeline(input: { articles: ClusterArticleInput[] }) {
+    return runStructured(timelineSchema, z.toJSONSchema(timelineSchema) as Record<string, unknown>, "Tạo timeline chỉ từ bài nguồn; mỗi mục phải có supportingArticleIds hợp lệ.", input, 1400);
+  }
+
+  identifyAgreements(input: { articles: ClusterArticleInput[] }) {
+    return runStructured(agreementsSchema, z.toJSONSchema(agreementsSchema) as Record<string, unknown>, "Chỉ nêu dữ kiện được ít nhất hai bài nguồn hỗ trợ.", input, 1200);
+  }
+
+  identifyDisputes(input: { articles: ClusterArticleInput[] }) {
+    return runStructured(disputesSchema, z.toJSONSchema(disputesSchema) as Record<string, unknown>, "Chỉ nêu mâu thuẫn thực sự có trong metadata nguồn.", input, 1200);
+  }
+
+  async answerFromClusterContext(input: { question: string; articles: ClusterArticleInput[] }) {
+    const result = await runStructured(answerSchema, z.toJSONSchema(answerSchema) as Record<string, unknown>, "Trả lời chỉ bằng context và nói rõ khi không đủ dữ kiện.", input, 1200);
+    return `${result.answer}${result.sourceArticleIds.length ? ` (Nguồn: ${result.sourceArticleIds.join(", ")})` : ""}`;
   }
 
   createMatchPreview(input: Record<string, unknown>): Promise<string> {

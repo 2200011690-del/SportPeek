@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Be_Vietnam_Pro, Space_Grotesk } from "next/font/google";
+import { isInternalMode } from "@/lib/config";
 import "./globals.css";
 
 const vietnam = Be_Vietnam_Pro({ variable: "--font-vietnam", subsets: ["latin", "vietnamese"], weight: ["400", "500", "600", "700", "800"] });
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
   openGraph: { type: "website", locale: "vi_VN", siteName: "SportPeek", title: "SportPeek — Góc nhìn thể thao thông minh", description: "Tin thể thao quan trọng, được tổng hợp thông minh.", images: [{ url: "/og.png", width: 1740, height: 909, alt: "SportPeek — Tin thể thao quan trọng, được tổng hợp thông minh" }] },
   twitter: { card: "summary_large_image", title: "SportPeek", description: "Tin thể thao quan trọng, được tổng hợp thông minh.", images: ["/og.png"] },
+  robots: isInternalMode() ? { index: false, follow: false, noarchive: true, nosnippet: true } : undefined,
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#090b0d", colorScheme: "dark light" };

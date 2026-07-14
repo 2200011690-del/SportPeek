@@ -1,5 +1,22 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { isAllowedEmail, isInternalMode } from "@/lib/config";
+
+const PUBLIC_AUTH_PATHS = new Set(["/login", "/forgot-password", "/reset-password", "/auth/callback"]);
+
+function withSessionCookies(target: NextResponse, source: NextResponse): NextResponse {
+  source.cookies.getAll().forEach((cookie) => target.cookies.set(cookie));
+  return target;
+}
+
+function loginRedirect(request: NextRequest, response: NextResponse, error?: string): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = "/login";
+  url.search = "";
+  url.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
+  if (error) url.searchParams.set("error", error);
+  return withSessionCookies(NextResponse.redirect(url), response);
+}
 
 export async function updateSession(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -7,9 +24,9 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!url || !key) {
-    return NextResponse.next({ request });
-  }
+  if (!url || !key) return isInternalMode() && !PUBLIC_AUTH_PATHS.has(request.nextUrl.pathname)
+    ? loginRedirect(request, NextResponse.next({ request }), "configuration_required")
+    : NextResponse.next({ request });
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, key, {
@@ -30,5 +47,26 @@ export async function updateSession(request: NextRequest) {
   });
 
   await supabase.auth.getClaims();
+  if (!isInternalMode()) return response;
+
+  const pathname = request.nextUrl.pathname;
+  if (pathname === "/register") return loginRedirect(request, response, "invitation_only");
+  if (PUBLIC_AUTH_PATHS.has(pathname) || pathname.startsWith("/api/cron/") || pathname === "/api/telegram/webhook") return response;
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.email) {
+    if (pathname.startsWith("/api/")) return withSessionCookies(NextResponse.json({ status: "unauthorized", error: { code: "AUTHENTICATION_REQUIRED", message: "Bạn cần đăng nhập." } }, { status: 401 }), response);
+    return loginRedirect(request, response);
+  }
+
+  let allowed = isAllowedEmail(user.email);
+  if (!allowed) {
+    const membership = await supabase.from("allowed_users").select("id").eq("email", user.email).maybeSingle();
+    allowed = Boolean(membership.data);
+  }
+  if (!allowed) {
+    if (pathname.startsWith("/api/")) return withSessionCookies(NextResponse.json({ status: "unauthorized", error: { code: "FORBIDDEN", message: "Tài khoản chưa được mời vào SportPeek." } }, { status: 403 }), response);
+    return loginRedirect(request, response, "not_invited");
+  }
   return response;
 }

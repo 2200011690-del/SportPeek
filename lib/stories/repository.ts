@@ -2,6 +2,7 @@ import { getAggregatedNews, type AggregatedNews } from "@/lib/ingestion/official
 import type { NewsItem } from "@/lib/types";
 import { normalizeSearchText } from "@/lib/ui-logic";
 import { createStorySlug } from "./slug";
+import { createPersistedStoryRepository } from "./persisted-repository";
 import {
   storyClusterSchema,
   type RawArticle,
@@ -39,7 +40,7 @@ function inferStatus(item: NewsItem, articles: RawArticle[]): StoryCluster["stat
   const independentSources = new Set(articles.map((article) => article.sourceId)).size;
   if (articles.some((article) => article.isOfficialSource)) return "official";
   if (/(tranh cai|phu nhan|mau thuan|disput|denied)/.test(text)) return "disputed";
-  if (independentSources >= 2) return "corroborated";
+  if (independentSources >= 2) return "reported";
   if (/(tin don|co the|duoc cho la|reportedly|rumou?r|could|may)/.test(text)) return "rumor";
   const ageHours = Math.max(0, (Date.now() - Date.parse(item.publishedTimestamp ?? "")) / 3_600_000);
   return ageHours <= 12 ? "developing" : "unverified";
@@ -82,6 +83,7 @@ function itemToStory(item: NewsItem): StoryCluster {
       publishedAt: articlePublishedAt,
       fetchedAt: !Number.isNaN(Date.parse(detail.fetchedAt ?? "")) ? new Date(detail.fetchedAt as string).toISOString() : fetchedAt,
       isOfficialSource: Boolean(detail.isOfficialSource),
+      isSyndicated: false,
       language: detail.language,
       processingStatus: "completed",
     }];
@@ -242,4 +244,4 @@ export function createStoryRepository(loader: StoryNewsLoader = getAggregatedNew
   return { getStoryFeed, getLatestStories, getStoryBySlug, getStoryById, getStorySources, getRelatedStories };
 }
 
-export const storyRepository = createStoryRepository();
+export const storyRepository = createPersistedStoryRepository();
