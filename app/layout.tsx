@@ -11,6 +11,7 @@ export const metadata: Metadata = {
   title: { default: "SportPeek — Tin thể thao quan trọng", template: "%s | SportPeek" },
   description: "Tin thể thao quan trọng, được tổng hợp thông minh. Tin tức, lịch thi đấu, kết quả và bảng xếp hạng trong một trải nghiệm hiện đại.",
   applicationName: "SportPeek",
+  manifest: "/manifest.json",
   alternates: { canonical: "/" },
   openGraph: { type: "website", locale: "vi_VN", siteName: "SportPeek", title: "SportPeek — Góc nhìn thể thao thông minh", description: "Tin thể thao quan trọng, được tổng hợp thông minh.", images: [{ url: "/og.png", width: 1740, height: 909, alt: "SportPeek — Tin thể thao quan trọng, được tổng hợp thông minh" }] },
   twitter: { card: "summary_large_image", title: "SportPeek", description: "Tin thể thao quan trọng, được tổng hợp thông minh.", images: ["/og.png"] },

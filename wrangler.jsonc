@@ -11,6 +11,9 @@
     "not_found_handling": "none",
     "binding": "ASSETS"
   },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
   "images": {
     "binding": "IMAGES"
   },
@@ -27,5 +30,6 @@
     "FOOTBALL_DATA_BASE_URL": "https://api.football-data.org/v4",
     "FOOTBALL_DATA_COMPETITIONS": "PL,CL,PD,SA,BL1,FL1,DED,PPL,BSA,ELC,WC",
     "NEWS_PROVIDER": "aggregated-rss"
+    ,"SUPABASE_RUNTIME_USE_PUBLIC_KEY": "true"
   }
 }

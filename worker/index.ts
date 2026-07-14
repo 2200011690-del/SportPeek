@@ -1,6 +1,8 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { syncRss } from "../lib/rss/sync";
+import { processStories } from "../lib/stories/processor";
 
 interface Env {
   ASSETS: Fetcher;
@@ -55,6 +57,31 @@ const worker = {
 
     return handler.fetch(request, runtimeEnv, ctx);
   },
+
+  async scheduled(controller: unknown, env?: Env, ctx?: ExecutionContext): Promise<void> {
+    const runtimeEnv = env ?? ({} as Env);
+    for (const [key, value] of Object.entries(runtimeEnv as unknown as Record<string, unknown>)) {
+      if (typeof value === "string") process.env[key] = value;
+    }
+    globalThis.__SPORTPEEK_WORKERS_AI__ = runtimeEnv.AI;
+
+    if (ctx) {
+      ctx.waitUntil((async () => {
+        try {
+          console.log("[Cron] Running scheduled RSS sync...");
+          const rssSummary = await syncRss();
+          console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
+
+          console.log("[Cron] Running scheduled story processing...");
+          const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
+          const storySummary = await processStories({ useAi });
+          console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
+        } catch (error) {
+          console.error("[Cron] Error running scheduled task:", error);
+        }
+      })());
+    }
+  }
 };
 
 export default worker;

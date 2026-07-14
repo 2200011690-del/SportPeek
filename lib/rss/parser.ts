@@ -41,6 +41,12 @@ function mediaImage(item: Record<string, unknown>, articleUrl: string): string |
   return extractImageFromMarkup(content, articleUrl) ?? null;
 }
 
+function isNonFootballSport(title: string, categories: string[], excerpt: string): boolean {
+  const text = ` ${title} ${categories.join(" ")} ${excerpt} `.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const nonFootballRegex = /\b(cricket|one-day international|t20|test match|wimbledon|nba|formula 1|formula one|f1|grand prix|badminton|tennis|golf|snooker|darts|rugby|boxing|mma|ufc|motogp|quan vot|cau long|bong ro|dua xe|boi loi|dien kinh|co vua)\b/i;
+  return nonFootballRegex.test(text);
+}
+
 export function parseRssXml(xml: string, source: { feedUrl: string; language: "vi" | "en" }, now = new Date()): ParsedRssArticle[] {
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error("RSS chứa khai báo XML không được hỗ trợ.");
   const document = parser.parse(xml) as Record<string, unknown>;
@@ -53,7 +59,9 @@ export function parseRssXml(xml: string, source: { feedUrl: string; language: "v
     const descriptionMarkup = markup((item["content:encoded"] ?? item.content ?? item.description ?? item.summary) as Value); const excerpt = text(descriptionMarkup as Value).slice(0, 1000);
     const guid = text((item.guid ?? item.id) as Value) || canonicalUrl;
     const author = text((item.author ?? item["dc:creator"] ?? item.creator) as Value).slice(0, 200) || null;
-    const parsed = parsedRssArticleSchema.safeParse({ externalId: guid, originalUrl, canonicalUrl, title, normalizedTitle: normalizeSearchText(title), excerpt, author, imageUrl: mediaImage(item, originalUrl), publishedAt: published.toISOString(), language: source.language, rawMetadata: { categories: list(item.category as Value).map(text).filter(Boolean).slice(0, 10) } });
+    const categories = list(item.category as Value).map(text).filter(Boolean).slice(0, 10);
+    if (isNonFootballSport(title, categories, excerpt)) return [];
+    const parsed = parsedRssArticleSchema.safeParse({ externalId: guid, originalUrl, canonicalUrl, title, normalizedTitle: normalizeSearchText(title), excerpt, author, imageUrl: mediaImage(item, originalUrl), publishedAt: published.toISOString(), language: source.language, rawMetadata: { categories } });
     return parsed.success ? [parsed.data] : [];
   });
 }

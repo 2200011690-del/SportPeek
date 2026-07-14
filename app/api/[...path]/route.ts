@@ -5,6 +5,7 @@ import { sportsService } from "@/lib/application/sports-service";
 import { storyService } from "@/lib/application/story-service";
 import { toSafeError } from "@/lib/core/errors";
 import { syncRss } from "@/lib/rss/sync";
+import { processStories } from "@/lib/stories/processor";
 import { readNewsSourceCatalog } from "@/lib/rss/repository";
 import { getHealthSnapshot } from "@/lib/health";
 import { sportsCacheRepository } from "@/lib/sports-data/repository";
@@ -100,12 +101,18 @@ export async function GET(request: NextRequest, { params }: Context) {
     const stories = result.data ?? [];
     try {
       const ranked = await personalizationService.personalizedFeed(stories);
-      return NextResponse.json({ status: result.status, data: ranked.map((entry, index) => ({ ...storyToNewsItem(entry.value, index), personalization: { score: entry.score, reasons: entry.reasons } })), strategy: "rules-v1", personalized: true, demo: false, meta: result.meta, error: result.error ?? null }, { status: repositoryHttpStatus(result.status) });
+      return NextResponse.json({ status: result.status, data: ranked.map((entry, index) => ({ ...storyToNewsItem(entry.value, index), personalization: { score: entry.score, reasons: entry.reasons } })), strategy: "rules-v1", personalized: true, demo: false, meta: result.meta, error: result.error ?? null }, {
+        status: repositoryHttpStatus(result.status),
+        headers: { "cache-control": "private, max-age=30, stale-while-revalidate=60" }
+      });
     } catch (error) {
       const safe = toSafeError(error);
       if (safe.code !== "AUTHENTICATION_REQUIRED") return NextResponse.json({ status: "error", data: [], strategy: "unavailable", personalized: false, demo: false, error: safe }, { status: safe.status });
       const source = stories.map((story, index) => ({ ...storyToNewsItem(story, index), personalization: { score: Math.round(((story.hotnessScore ?? 0) + (story.reliabilityScore ?? 0)) * 10) / 10, reasons: ["Đăng nhập nội bộ để dùng sở thích; hiện xếp theo độ nóng và độ tin cậy"] } }));
-      return NextResponse.json({ status: result.status, data: source.sort((a,b)=>b.hotness+b.reliability-a.hotness-a.reliability), strategy: "trending-anonymous", personalized: false, demo: false, meta: result.meta, error: result.error ?? null }, { status: repositoryHttpStatus(result.status) });
+      return NextResponse.json({ status: result.status, data: source.sort((a,b)=>b.hotness+b.reliability-a.hotness-a.reliability), strategy: "trending-anonymous", personalized: false, demo: false, meta: result.meta, error: result.error ?? null }, {
+        status: repositoryHttpStatus(result.status),
+        headers: { "cache-control": "private, max-age=30, stale-while-revalidate=60" }
+      });
     }
   }
   if (route === "search") {
@@ -206,7 +213,12 @@ export async function POST(request: NextRequest, { params }: Context) {
     if (!protectedBySecret(request)) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
     const rate = rateLimit(`cron:${clientKey(request)}`, 5, 300_000);
     if (!rate.allowed) return NextResponse.json({ error: "Đã vượt giới hạn" }, { status: 429 });
-    try { return NextResponse.json(await syncRss()); }
+    try {
+      const rssResult = await syncRss();
+      const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
+      const storyResult = await processStories({ useAi });
+      return NextResponse.json({ rss: rssResult, stories: storyResult });
+    }
     catch (error) { const safe = toSafeError(error); return NextResponse.json({ status: "configuration_required", error: { code: safe.code, message: safe.message } }, { status: safe.status }); }
   }
   if (route === "ai/process") {
