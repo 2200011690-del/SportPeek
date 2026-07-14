@@ -30,7 +30,7 @@ const enrichmentItemSchema = z.object({
   importance: z.number().int().min(0).max(100),
 });
 
-const enrichmentSchema = z.object({ items: z.array(enrichmentItemSchema) });
+const enrichmentSchema = z.object({ items: z.array(enrichmentItemSchema).min(1).max(8) });
 
 function modelName(): string {
   return process.env.CLOUDFLARE_AI_MODEL || DEFAULT_CLOUDFLARE_AI_MODEL;
@@ -93,6 +93,8 @@ const enrichmentJsonSchema: Record<string, unknown> = {
   properties: {
     items: {
       type: "array",
+      minItems: 1,
+      maxItems: 8,
       items: {
         type: "object",
         additionalProperties: false,
@@ -115,12 +117,19 @@ export async function enrichInternationalNewsWithCloudflare(articles: Array<{ id
   const result = await runStructured(
     enrichmentSchema,
     enrichmentJsonSchema,
-    "Bạn là biên tập viên thể thao trung lập. Chỉ dùng dữ kiện trong metadata được cung cấp. Dịch tự nhiên sang tiếng Việt, giữ nguyên tên riêng, không suy đoán, không giật tít quá mức và không sao chép dài.",
+    "Bạn là biên tập viên thể thao trung lập. Phải trả đúng một item cho mỗi article và giữ nguyên tuyệt đối trường id. Chỉ dùng dữ kiện trong metadata được cung cấp. Dịch tự nhiên sang tiếng Việt, giữ nguyên tên riêng, không suy đoán, không giật tít quá mức và không sao chép dài.",
     { articles },
     4500,
   );
   const allowed = new Set(articles.map((article) => article.id));
-  return result.items.filter((item) => allowed.has(item.id));
+  const valid = result.items.filter((item) => allowed.has(item.id));
+  if (!valid.length) {
+    console.warn("[SportPeek AI] Model returned no matching article ids", {
+      requested: [...allowed],
+      returned: result.items.map((item) => item.id),
+    });
+  }
+  return valid;
 }
 
 const classificationSchema = z.object({
