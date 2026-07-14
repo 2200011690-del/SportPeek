@@ -123,6 +123,7 @@ Automated checks on 2026-07-14:
 - `npm test`: passed, 30/30 tests.
 - `npm run build`: passed.
 - `E2E_BASE_URL=http://localhost:3000 npm run test:e2e`: passed, 7/7 checks.
+- `vinext start` production-adapter smoke check: `/` returned HTTP 200 and a missing story API returned HTTP 404. The Worker entry now tolerates runtimes that omit Cloudflare's `env` argument while retaining bindings when Cloudflare provides them.
 
 New unit/integration coverage checks stable slugs, unsafe URLs, shared feed/detail identity, legacy lookup, missing summary fallback, stale/configuration states, real not-found, finite timeout, one-retry maximum, and source lists. E2E checks the feed-to-detail API contract and missing-story HTTP 404 without calling live APIs from unit tests.
 

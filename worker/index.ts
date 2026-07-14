@@ -27,30 +27,33 @@ interface ExecutionContext {
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 const worker = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env?: Env, ctx?: ExecutionContext): Promise<Response> {
     // Vinext server modules read configuration through `process.env`, while
     // Cloudflare supplies runtime variables and secrets through the Worker
     // `env` binding. Bridge string bindings before dispatching the request so
-    // server-only secrets remain runtime-only and are never bundled.
-    for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
+    // server-only secrets remain runtime-only and are never bundled. Vinext's
+    // Node production adapter and Sites may omit the Cloudflare env argument,
+    // so keep the entry compatible with both invocation shapes.
+    const runtimeEnv = env ?? ({} as Env);
+    for (const [key, value] of Object.entries(runtimeEnv as unknown as Record<string, unknown>)) {
       if (typeof value === "string") process.env[key] = value;
     }
-    globalThis.__SPORTPEEK_WORKERS_AI__ = env.AI;
+    globalThis.__SPORTPEEK_WORKERS_AI__ = runtimeEnv.AI;
 
     const url = new URL(request.url);
 
-    if (url.pathname === "/_vinext/image") {
+    if (url.pathname === "/_vinext/image" && runtimeEnv.ASSETS && runtimeEnv.IMAGES) {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {
-        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
+        fetchAsset: (path) => runtimeEnv.ASSETS.fetch(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
-          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
+          const result = await runtimeEnv.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
           return result.response();
         },
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    return handler.fetch(request, runtimeEnv, ctx);
   },
 };
 
