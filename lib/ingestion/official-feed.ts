@@ -2,6 +2,7 @@ import { formatDistanceToNowStrict } from "date-fns";
 import { vi } from "date-fns/locale";
 import { XMLParser } from "fast-xml-parser";
 import { decode } from "html-entities";
+import { enrichInternationalNewsWithCloudflare, hasWorkersAIBinding } from "@/lib/ai/cloudflare";
 import { enrichInternationalNews } from "@/lib/ai/openai";
 import { calculateHotness, calculateReliability } from "@/lib/scoring";
 import type { NewsItem, NewsSourceDetail } from "@/lib/types";
@@ -50,7 +51,9 @@ const DEFAULT_FEEDS: FeedConfig[] = [
   { name: "Sky Sports Football", url: "https://www.skysports.com/rss/12040", reliability: 90, language: "en" },
 ];
 
-const cache = new Map<string, { expiresAt: number; data: NewsItem[]; sources: string[]; aiTranslation: boolean }>();
+export type NewsAIStatus = { provider: "cloudflare" | "openai" | "off"; state: "ok" | "off" | "error"; translatedCount: number };
+type AggregatedNews = { data: NewsItem[]; sources: string[]; aiTranslation: boolean; aiStatus: NewsAIStatus };
+const cache = new Map<string, AggregatedNews & { expiresAt: number }>();
 const parser = new XMLParser({ ignoreAttributes: false, processEntities: true, trimValues: true });
 const STOP_WORDS = new Set("cua và với trong trên cho sau trước khi là đã sẽ một những các được từ về tại theo vào ra qua do this that with from after before over into says said for the and but are was were has have had not new latest more than its their his her của những các được trong trên với một khi sau trước theo cho tại từ về đã đang sẽ không".split(/\s+/));
 
@@ -204,11 +207,18 @@ function toNewsItem(cluster: RawArticle[], index: number): NewsItem {
   };
 }
 
-async function translateInternational(articles: RawArticle[]): Promise<boolean> {
-  if (!process.env.OPENAI_API_KEY || process.env.AI_PROVIDER?.toLowerCase() !== "openai") return false;
-  const candidates = articles.filter((article) => article.source.language === "en").sort((a, b) => b.published.getTime() - a.published.getTime()).slice(0, 20);
-  if (!candidates.length) return false;
-  const enriched = await enrichInternationalNews(candidates.map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt })));
+async function translateInternational(articles: RawArticle[]): Promise<NewsAIStatus> {
+  const requested = process.env.AI_PROVIDER?.toLowerCase();
+  if (requested !== "cloudflare" && requested !== "openai") return { provider: "off", state: "off", translatedCount: 0 };
+  const provider = requested as "cloudflare" | "openai";
+  const available = provider === "cloudflare" ? hasWorkersAIBinding() : Boolean(process.env.OPENAI_API_KEY);
+  if (!available) return { provider, state: "error", translatedCount: 0 };
+  const candidates = articles.filter((article) => article.source.language === "en").sort((a, b) => b.published.getTime() - a.published.getTime()).slice(0, 8);
+  if (!candidates.length) return { provider, state: "ok", translatedCount: 0 };
+  const input = candidates.map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt }));
+  const enriched = provider === "cloudflare"
+    ? await enrichInternationalNewsWithCloudflare(input)
+    : await enrichInternationalNews(input);
   const byId = new Map(enriched.map((item) => [item.id, item]));
   for (const article of candidates) {
     const result = byId.get(article.id);
@@ -220,14 +230,15 @@ async function translateInternational(articles: RawArticle[]): Promise<boolean> 
     article.importance = result.importance;
     article.translatedByAI = true;
   }
-  return enriched.length > 0;
+  if (!enriched.length) return { provider, state: "error", translatedCount: 0 };
+  return { provider, state: "ok", translatedCount: enriched.length };
 }
 
 export async function getOfficialNews(): Promise<NewsItem[]> {
   return (await getAggregatedNews()).data;
 }
 
-export async function getAggregatedNews(): Promise<{ data: NewsItem[]; sources: string[]; aiTranslation: boolean }> {
+export async function getAggregatedNews(): Promise<AggregatedNews> {
   const feeds = feedsFromEnvironment();
   const key = feeds.map((feed) => feed.url).join("|") + `|${process.env.AI_PROVIDER ?? "mock"}`;
   const cached = cache.get(key);
@@ -236,8 +247,10 @@ export async function getAggregatedNews(): Promise<{ data: NewsItem[]; sources: 
   const articles = settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
   if (!articles.length) throw new Error("Không tải được các nguồn RSS");
   const deduplicated = [...new Map(articles.map((article) => [article.url, article])).values()];
-  let aiTranslation = false;
-  try { aiTranslation = await translateInternational(deduplicated); } catch { aiTranslation = false; }
+  let aiStatus: NewsAIStatus;
+  try { aiStatus = await translateInternational(deduplicated); }
+  catch { aiStatus = { provider: process.env.AI_PROVIDER?.toLowerCase() === "openai" ? "openai" : "cloudflare", state: "error", translatedCount: 0 }; }
+  const aiTranslation = aiStatus.translatedCount > 0;
   // The main newsroom promises "latest", so recency is the primary order.
   // Hotness remains visible and is used separately for the home highlights.
   const data = clusterArticles(deduplicated).map(toNewsItem).sort((a, b) => {
@@ -245,7 +258,7 @@ export async function getAggregatedNews(): Promise<{ data: NewsItem[]; sources: 
     return (Number.isNaN(newest) ? 0 : newest) || b.hotness - a.hotness || b.reliability - a.reliability;
   }).slice(0, 60);
   const sources = [...new Set(deduplicated.map((article) => article.source.name))];
-  const result = { data, sources, aiTranslation, expiresAt: Date.now() + 90_000 };
+  const result = { data, sources, aiTranslation, aiStatus, expiresAt: Date.now() + 5 * 60_000 };
   cache.set(key, result);
   return result;
 }

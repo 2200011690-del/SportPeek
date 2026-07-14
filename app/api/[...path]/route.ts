@@ -14,7 +14,7 @@ const protectedBySecret = (request: NextRequest) => process.env.CRON_SECRET && r
 
 export async function GET(request: NextRequest, { params }: Context) {
   const { path } = await params; const route = path.join("/"); const sports = getSportsDataProvider();
-  if (route === "news") { try { const result = await getAggregatedNews(); return NextResponse.json({ ...result, nextCursor: null, demo: false }, { headers: { "cache-control": "public, s-maxage=90, stale-while-revalidate=180" } }); } catch { return NextResponse.json({ data: news, nextCursor: null, demo: true, sources: [], aiTranslation: false, warning: "news_feeds_unavailable" }); } }
+  if (route === "news") { try { const result = await getAggregatedNews(); return NextResponse.json({ ...result, nextCursor: null, demo: false }, { headers: { "cache-control": "public, s-maxage=90, stale-while-revalidate=180" } }); } catch { const provider = process.env.AI_PROVIDER?.toLowerCase(); return NextResponse.json({ data: news, nextCursor: null, demo: true, sources: [], aiTranslation: false, aiStatus: provider === "cloudflare" || provider === "openai" ? { provider, state: "error", translatedCount: 0 } : { provider: "off", state: "off", translatedCount: 0 }, warning: "news_feeds_unavailable" }); } }
   if (route === "feed/for-you") { let source = news; try { source = (await getAggregatedNews()).data; } catch { /* use safe demo fallback */ } return NextResponse.json({ data: [...source].sort((a,b)=>b.hotness+b.reliability-a.hotness-a.reliability), strategy: "trending", personalized: false, demo: source === news }); }
   if (route === "search") {
     const rate = rateLimit(`search:${clientKey(request)}`, 30);

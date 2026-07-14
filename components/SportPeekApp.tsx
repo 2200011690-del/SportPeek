@@ -30,22 +30,27 @@ type AppStatus = {
   sports: { state: ServiceState; label: string };
   healthy: boolean;
 };
+type NewsAIStatus = { provider: "cloudflare" | "openai" | "off"; state: "ok" | "off" | "error"; translatedCount: number };
 type SourceFilter = "all" | "vi" | "international" | "official" | "youtube" | "rss";
-type RuntimeData = { newsItems: NewsItem[]; matchItems: Match[]; standingRows: typeof standings; newsReal: boolean; sportsReal: boolean; newsSources: string[]; aiTranslation: boolean; loading: boolean; lastUpdated: string | null; status: AppStatus };
-type RuntimeResponse<T> = { data: T; demo?: boolean; provider?: string; sources?: string[]; aiTranslation?: boolean };
-const createAppStatus = (rssActive: boolean, sportsActive: boolean, aiActive: boolean, sourceCount: number): AppStatus => ({
+type RuntimeData = { newsItems: NewsItem[]; matchItems: Match[]; standingRows: typeof standings; newsReal: boolean; sportsReal: boolean; newsSources: string[]; aiTranslation: boolean; aiStatus: NewsAIStatus; loading: boolean; lastUpdated: string | null; status: AppStatus };
+type RuntimeResponse<T> = { data: T; demo?: boolean; provider?: string; sources?: string[]; aiTranslation?: boolean; aiStatus?: NewsAIStatus };
+const createAppStatus = (rssActive: boolean, sportsActive: boolean, aiStatus: NewsAIStatus, sourceCount: number): AppStatus => ({
   rss: rssActive ? { state: "ok", label: `RSS · ${sourceCount} nguồn` } : { state: "degraded", label: "RSS gián đoạn" },
-  ai: aiActive ? { state: "ok", label: "AI dịch đang bật" } : { state: "off", label: "AI chưa bật" },
+  ai: aiStatus.state === "ok"
+    ? { state: "ok", label: aiStatus.translatedCount ? `Cloudflare AI · ${aiStatus.translatedCount} tin` : "Cloudflare AI sẵn sàng" }
+    : aiStatus.state === "error"
+      ? { state: "degraded", label: "Cloudflare AI gián đoạn" }
+      : { state: "off", label: "AI chưa bật" },
   sports: sportsActive ? { state: "ok", label: "football-data hoạt động" } : { state: "degraded", label: "Dữ liệu trận đấu dự phòng" },
-  healthy: rssActive && sportsActive,
+  healthy: rssActive && sportsActive && aiStatus.state !== "error",
 });
 const loadingStatus: AppStatus = {
   rss: { state: "loading", label: "Đang tải RSS" },
-  ai: { state: "off", label: "AI chưa bật" },
+  ai: { state: "loading", label: "Đang kết nối AI" },
   sports: { state: "loading", label: "Đang tải dữ liệu trận" },
   healthy: false,
 };
-const emptyRuntimeData: RuntimeData = { newsItems: [], matchItems: [], standingRows: [], newsReal: false, sportsReal: false, newsSources: [], aiTranslation: false, loading: true, lastUpdated: null, status: loadingStatus };
+const emptyRuntimeData: RuntimeData = { newsItems: [], matchItems: [], standingRows: [], newsReal: false, sportsReal: false, newsSources: [], aiTranslation: false, aiStatus: { provider: "off", state: "off", translatedCount: 0 }, loading: true, lastUpdated: null, status: loadingStatus };
 const RuntimeDataContext = createContext<RuntimeData>(emptyRuntimeData);
 const useRuntimeData = () => useContext(RuntimeDataContext);
 const STORAGE_KEYS = { bookmarks: "sportpeek.bookmarks", follows: "sportpeek.follows", settings: "sportpeek.settings", theme: "sportpeek.theme" } as const;
@@ -267,7 +272,7 @@ function FilterBar({ search = false, query = "", onQueryChange, competition = ""
 }
 
 function NewsPage({ bookmarks, onBookmark }: { bookmarks: Set<string>; onBookmark: (id: string) => void }) {
-  const { newsItems, newsReal, newsSources, aiTranslation, loading } = useRuntimeData();
+  const { newsItems, newsReal, newsSources, aiTranslation, aiStatus, loading } = useRuntimeData();
   const [query, setQuery] = useState("");
   const [competition, setCompetition] = useState("");
   const [team, setTeam] = useState("");
@@ -278,7 +283,14 @@ function NewsPage({ bookmarks, onBookmark }: { bookmarks: Set<string>; onBookmar
   const updateFilter = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1); };
   const competitionOptions = [...new Set(newsItems.map((item) => item.competition))].sort();
   const teamOptions = [...new Set(newsItems.map((item) => item.team))].filter((value) => !/thể thao|bóng đá|nhiều đội/i.test(value)).sort();
-  return <div className="page-content"><PageHero eyebrow="NEWSROOM" title="Tin nóng Việt Nam & thế giới" description="Tổng hợp nhiều báo thể thao, gộp các bài cùng sự kiện và xếp hạng mức quan tâm bằng tín hiệu minh bạch."><div className="hero-stat"><strong>{newsSources.length || newsItems.length}</strong><span>{loading ? "đang kết nối" : newsReal ? "nguồn đang hoạt động" : "tin dự phòng"}</span></div></PageHero><div className="personalization-banner"><div className="ai-orb"><Languages size={22} /></div><div><strong>{aiTranslation ? "AI đang dịch tin quốc tế sang tiếng Việt" : "Tin quốc tế đang hiển thị bản gốc"}</strong><p>{aiTranslation ? "Bản dịch chỉ dựa trên tiêu đề và trích đoạn của nguồn, không tự thêm dữ kiện." : "Có thể bật AI để tự động dịch và tóm tắt tin BBC, Guardian, ESPN và Sky Sports."}</p></div><Link href="/sources">Xem phương pháp<ArrowRight size={15} /></Link></div><FilterBar search query={query} onQueryChange={updateFilter(setQuery)} competition={competition} onCompetitionChange={updateFilter(setCompetition)} competitionOptions={competitionOptions} team={team} onTeamChange={updateFilter(setTeam)} teamOptions={teamOptions} minHotness={minHotness} onMinHotnessChange={updateFilter(setMinHotness)} />{loading ? <DataLoadingState /> : pagination.items.length ? <><div className="results-summary">Hiển thị {pagination.items.length} trong {filtered.length} tin phù hợp</div><div className="news-page-grid">{pagination.items.map((item) => <NewsCard key={item.id} item={item} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div><Pagination page={pagination.page} totalPages={pagination.totalPages} onPageChange={setPage} /></> : <EmptyState title="Không có tin phù hợp" description="Hãy thử bỏ bớt bộ lọc hoặc dùng từ khóa khác." />}</div>;
+  const aiMessage = aiStatus.state === "ok"
+    ? aiTranslation
+      ? ["Cloudflare AI đang dịch tin quốc tế sang tiếng Việt", "Bản dịch chỉ dựa trên tiêu đề và trích đoạn của nguồn, không tự thêm dữ kiện."]
+      : ["Cloudflare AI đã sẵn sàng", "Chưa có tin tiếng Anh mới cần dịch trong lần cập nhật này."]
+    : aiStatus.state === "error"
+      ? ["Cloudflare AI đang tạm gián đoạn", "SportPeek vẫn hiển thị bản gốc và không tạo bản dịch giả khi AI lỗi hoặc hết hạn mức."]
+      : ["Tin quốc tế đang hiển thị bản gốc", "AI chưa được bật trong môi trường này."];
+  return <div className="page-content"><PageHero eyebrow="NEWSROOM" title="Tin nóng Việt Nam & thế giới" description="Tổng hợp nhiều báo thể thao, gộp các bài cùng sự kiện và xếp hạng mức quan tâm bằng tín hiệu minh bạch."><div className="hero-stat"><strong>{newsSources.length || newsItems.length}</strong><span>{loading ? "đang kết nối" : newsReal ? "nguồn đang hoạt động" : "tin dự phòng"}</span></div></PageHero><div className="personalization-banner"><div className="ai-orb"><Languages size={22} /></div><div><strong>{aiMessage[0]}</strong><p>{aiMessage[1]}</p></div><Link href="/sources">Xem phương pháp<ArrowRight size={15} /></Link></div><FilterBar search query={query} onQueryChange={updateFilter(setQuery)} competition={competition} onCompetitionChange={updateFilter(setCompetition)} competitionOptions={competitionOptions} team={team} onTeamChange={updateFilter(setTeam)} teamOptions={teamOptions} minHotness={minHotness} onMinHotnessChange={updateFilter(setMinHotness)} />{loading ? <DataLoadingState /> : pagination.items.length ? <><div className="results-summary">Hiển thị {pagination.items.length} trong {filtered.length} tin phù hợp</div><div className="news-page-grid">{pagination.items.map((item) => <NewsCard key={item.id} item={item} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div><Pagination page={pagination.page} totalPages={pagination.totalPages} onPageChange={setPage} /></> : <EmptyState title="Không có tin phù hợp" description="Hãy thử bỏ bớt bộ lọc hoặc dùng từ khóa khác." />}</div>;
 }
 
 function ForYouPage({ followed, onFollow, bookmarks, onBookmark }: { followed: Set<string>; onFollow: (id: string) => void; bookmarks: Set<string>; onBookmark: (id: string) => void }) {
@@ -432,7 +444,7 @@ function AuthPage({ type }: { type: "login" | "register" | "forgot" | "reset" })
 }
 
 function AdminPage() {
-  const { newsItems, matchItems, standingRows, newsSources, aiTranslation, newsReal, sportsReal, loading, lastUpdated } = useRuntimeData();
+  const { newsItems, matchItems, standingRows, newsSources, aiTranslation, aiStatus, newsReal, sportsReal, loading, lastUpdated } = useRuntimeData();
   const metrics = [
     ["Tin hiện có", String(newsItems.length), newsReal ? "RSS thật" : loading ? "Đang tải" : "Dữ liệu minh họa", Newspaper],
     ["Nguồn RSS", String(newsSources.length), newsReal ? "Đang hoạt động" : "Chưa khả dụng", Rss],
@@ -440,10 +452,10 @@ function AdminPage() {
     ["Trận sắp tới", String(matchItems.filter((match) => match.status === "scheduled").length), "Cửa sổ 7 ngày", CalendarDays],
     ["Kết quả", String(matchItems.filter((match) => match.status === "finished").length), "Kết quả gần nhất", Goal],
     ["BXH", String(standingRows.length), sportsReal ? "Dữ liệu thật" : "Dữ liệu dự phòng", Trophy],
-    ["AI dịch", aiTranslation ? "Bật" : "Tắt", aiTranslation ? "Đang xử lý tin quốc tế" : "Không có khóa AI", Languages],
+    ["AI dịch", aiStatus.state === "ok" ? "Bật" : aiStatus.state === "error" ? "Lỗi" : "Tắt", aiTranslation ? `${aiStatus.translatedCount} tin qua Cloudflare AI` : aiStatus.state === "ok" ? "Sẵn sàng, chưa có tin mới" : aiStatus.state === "error" ? "Đang dùng bản gốc" : "Chưa cấu hình", Languages],
     ["Cập nhật cuối", lastUpdated ? new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(lastUpdated)) : "—", "Theo phiên trình duyệt", Clock3],
   ] as const;
-  return <div className="admin-page"><div className="admin-top"><div><span className="eyebrow">SYSTEM OVERVIEW</span><h1>Tổng quan dữ liệu thật</h1><p>Chỉ số được tính trực tiếp từ dữ liệu đang hiển thị, không dùng số liệu demo.</p></div><button className="primary-button" onClick={() => window.location.reload()}><Zap size={17} />Làm mới dữ liệu</button></div>{loading && <DataLoadingState />}<div className="metric-grid">{metrics.map(([label, value, note, Icon]) => <div className="metric-card" key={label}><span><Icon size={18} />{label}</span><strong>{value}</strong><small>{note}</small></div>)}</div><section className="content-card admin-status-card"><SectionHeading eyebrow="TRẠNG THÁI" title="Minh bạch vận hành" /><p className="muted-copy">RSS: {newsReal ? "đang hoạt động" : loading ? "đang kết nối" : "đang dùng dữ liệu minh họa"}. Thể thao: {sportsReal ? "football-data.org đang hoạt động" : loading ? "đang kết nối" : "đang dùng dữ liệu dự phòng"}. AI: {aiTranslation ? "đang dịch" : "chưa bật"}.</p></section></div>;
+  return <div className="admin-page"><div className="admin-top"><div><span className="eyebrow">SYSTEM OVERVIEW</span><h1>Tổng quan dữ liệu thật</h1><p>Chỉ số được tính trực tiếp từ dữ liệu đang hiển thị, không dùng số liệu demo.</p></div><button className="primary-button" onClick={() => window.location.reload()}><Zap size={17} />Làm mới dữ liệu</button></div>{loading && <DataLoadingState />}<div className="metric-grid">{metrics.map(([label, value, note, Icon]) => <div className="metric-card" key={label}><span><Icon size={18} />{label}</span><strong>{value}</strong><small>{note}</small></div>)}</div><section className="content-card admin-status-card"><SectionHeading eyebrow="TRẠNG THÁI" title="Minh bạch vận hành" /><p className="muted-copy">RSS: {newsReal ? "đang hoạt động" : loading ? "đang kết nối" : "đang dùng dữ liệu minh họa"}. Thể thao: {sportsReal ? "football-data.org đang hoạt động" : loading ? "đang kết nối" : "đang dùng dữ liệu dự phòng"}. AI: {aiStatus.state === "ok" ? aiTranslation ? "đang dịch qua Cloudflare" : "đã sẵn sàng" : aiStatus.state === "error" ? "đang gián đoạn" : "chưa bật"}.</p></section></div>;
 }
 
 function LegalPage({ type }: { type: string }) {
@@ -517,8 +529,9 @@ export default function SportPeekApp({ route }: { route: string }) {
       const rssActive = newsResponse?.demo === false && Boolean(newsResponse.data?.length);
       const allSportsResponses = requests.slice(1, 5).map((result) => result.status === "fulfilled" ? result.value as RuntimeResponse<unknown> : null);
       const sportsActive = allSportsResponses.length === 4 && allSportsResponses.every((result) => result?.provider !== "mock" && result?.demo === false);
+      const aiStatus = newsResponse?.aiStatus ?? { provider: "off" as const, state: "off" as const, translatedCount: 0 };
       const aiActive = newsResponse?.aiTranslation === true;
-      setRuntimeData({ newsItems: newsResponse?.data?.length ? newsResponse.data : news, matchItems: sportsActive ? mergedMatches : mergedMatches.length ? mergedMatches : matches, standingRows: sportsActive ? tableResponse?.data ?? [] : tableResponse?.data?.length ? tableResponse.data : standings, newsReal: rssActive, sportsReal: sportsActive, newsSources: newsResponse?.sources ?? [], aiTranslation: aiActive, loading: false, lastUpdated: new Date().toISOString(), status: createAppStatus(rssActive, sportsActive, aiActive, newsResponse?.sources?.length ?? 0) });
+      setRuntimeData({ newsItems: newsResponse?.data?.length ? newsResponse.data : news, matchItems: sportsActive ? mergedMatches : mergedMatches.length ? mergedMatches : matches, standingRows: sportsActive ? tableResponse?.data ?? [] : tableResponse?.data?.length ? tableResponse.data : standings, newsReal: rssActive, sportsReal: sportsActive, newsSources: newsResponse?.sources ?? [], aiTranslation: aiActive, aiStatus, loading: false, lastUpdated: new Date().toISOString(), status: createAppStatus(rssActive, sportsActive, aiStatus, newsResponse?.sources?.length ?? 0) });
       } finally { loading = false; }
     };
     void load();
