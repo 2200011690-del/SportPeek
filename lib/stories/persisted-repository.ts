@@ -9,6 +9,11 @@ export type PersistedStorySnapshot = { stories: StoryCluster[]; lastSyncAt: stri
 export type PersistedStoryLoader = () => Promise<PersistedStorySnapshot>;
 type PersistedAIProvider = Exclude<NewsAIStatus["provider"], "off">;
 
+export function restoreOriginalStoryLanguage(story: StoryCluster): StoryCluster {
+  const originalLanguage = story.articles[0]?.language ?? story.language;
+  return originalLanguage === story.language ? story : { ...story, language: originalLanguage };
+}
+
 function isPersistedAIProvider(provider: string | null | undefined): provider is PersistedAIProvider {
   return provider === "cloudflare" || provider === "openai" || provider === "gemini" || provider === "groq";
 }
@@ -56,7 +61,8 @@ export function createPersistedStoryRepository(loader: PersistedStoryLoader = lo
   const load = async (): Promise<StoryRepositoryResult<StoryCluster[]>> => {
     try {
       const snapshot = await loader(); const stale = Boolean(snapshot.lastSyncAt && Date.now() - Date.parse(snapshot.lastSyncAt) > 60 * 60_000);
-      return { status: snapshot.stories.length ? stale ? "stale" : "success" : "empty", data: snapshot.stories, meta: { source: "supabase", cached: true, stale, lastUpdatedAt: snapshot.lastSyncAt }, diagnostics: { sources: snapshot.sources, aiTranslation: snapshot.stories.some((story) => story.aiGenerated), aiStatus: snapshot.aiStatus } };
+      const stories = snapshot.stories.map(restoreOriginalStoryLanguage);
+      return { status: stories.length ? stale ? "stale" : "success" : "empty", data: stories, meta: { source: "supabase", cached: true, stale, lastUpdatedAt: snapshot.lastSyncAt }, diagnostics: { sources: snapshot.sources, aiTranslation: stories.some((story) => story.aiGenerated), aiStatus: snapshot.aiStatus } };
     } catch (error) {
       if (error instanceof ConfigurationError) return { status: "configuration_required", data: null, meta: { source: "supabase", cached: false, stale: false, lastUpdatedAt: null }, error: { code: error.code, message: error.message } };
       return { status: "error", data: null, meta: { source: "supabase", cached: false, stale: false, lastUpdatedAt: null }, error: { code: "STORY_CACHE_UNAVAILABLE", message: "Không thể đọc kho tin đã xử lý." } };

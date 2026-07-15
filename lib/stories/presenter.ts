@@ -60,7 +60,9 @@ export function storyToNewsItem(story: StoryCluster, index = 0): NewsItem {
     imageSource: story.articles.find((article) => article.imageUrl)?.sourceName,
     readingBody,
     originalUrl: lead.originalUrl,
-    originalLanguage: story.language,
+    // AI writes Vietnamese copy, but source filters must keep using the
+    // publisher language. Older AI rows may have story.language="vi".
+    originalLanguage: lead.language,
     translatedByAI: story.aiGenerated,
     trendingReasons: [
       story.sourceCount >= 2 ? `${story.sourceCount} nguồn độc lập cùng đưa tin` : "Hiện mới ghi nhận một nguồn",

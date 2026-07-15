@@ -32,6 +32,16 @@ test("feed adapter guarantees readable paragraphs and source excerpts for legacy
   assert.ok(card.sourceDetails?.every((source) => Boolean(source.excerpt)));
 });
 
+test("international source filter survives Vietnamese AI summaries", async () => {
+  const repository = createStoryRepository(async () => makeAggregatedNews(), { provider: "aggregated-rss" });
+  const feed = await repository.getStoryFeed();
+  const internationalStory = feed.data?.[0];
+  assert.ok(internationalStory);
+  const card = storyToNewsItem({ ...internationalStory, language: "vi", aiGenerated: true });
+  assert.equal(card.originalLanguage, "en");
+  assert.equal(card.translatedByAI, true);
+});
+
 test("invalid story routes return not_found rather than an empty success", async () => {
   const repository = createStoryRepository(async () => makeAggregatedNews(), { provider: "aggregated-rss" });
   const result = await repository.getStoryBySlug("story-does-not-exist");
