@@ -3,13 +3,19 @@ import { slugify } from "@/lib/validation";
 import {
   dataFreshness,
   normalizedCompetitionSchema,
+  normalizedMatchEventSchema,
   normalizedMatchSchema,
+  normalizedMatchStatisticsSchema,
+  normalizedPlayerSchema,
   normalizedStandingSchema,
   normalizedTeamSchema,
   type NormalizedCompetition,
   type NormalizedMatch,
+  type NormalizedMatchDetails,
+  type NormalizedPlayer,
   type NormalizedStanding,
   type NormalizedTeam,
+  type NormalizedTransfer,
   type SportsCapability,
   type SportsProviderName,
 } from "./models";
@@ -32,6 +38,17 @@ export interface SportsSyncAdapter {
     competitionExternalId: string,
     season?: string,
   ): Promise<NormalizedStanding[]>;
+  getLiveMatches?(): Promise<NormalizedMatch[]>;
+  getDailyMatches?(date: string): Promise<{
+    matches: NormalizedMatch[];
+    teams: NormalizedTeam[];
+  }>;
+  getMatchDetails?(
+    matchExternalId: string,
+    homeTeamExternalId: string,
+    awayTeamExternalId: string,
+  ): Promise<NormalizedMatchDetails>;
+  getTransfers?(teamExternalId: string): Promise<NormalizedTransfer[]>;
 }
 
 const nowIso = () => new Date().toISOString();
@@ -299,7 +316,17 @@ export class FootballDataSyncAdapter implements SportsSyncAdapter {
 type AfLeague = {
   league: { id: number; name: string; type?: string; logo?: string | null };
   country: { name?: string; code?: string | null };
-  seasons?: Array<{ year: number; current?: boolean }>;
+  seasons?: Array<{
+    year: number;
+    current?: boolean;
+    coverage?: {
+      fixtures?: { events?: boolean; lineups?: boolean; statistics_fixtures?: boolean; statistics_players?: boolean };
+      standings?: boolean;
+      players?: boolean;
+      injuries?: boolean;
+      predictions?: boolean;
+    };
+  }>;
 };
 type AfTeam = {
   team: {
@@ -320,7 +347,10 @@ type AfFixture = {
     referee?: string | null;
   };
   league: { id: number; season: number; round?: string | null };
-  teams: { home: { id: number }; away: { id: number } };
+  teams: {
+    home: { id: number; name?: string; logo?: string | null };
+    away: { id: number; name?: string; logo?: string | null };
+  };
   goals: { home: number | null; away: number | null };
 };
 type AfStanding = {
@@ -338,6 +368,61 @@ type AfStanding = {
   };
 };
 
+type AfEvent = {
+  time?: { elapsed?: number | null; extra?: number | null };
+  team?: { id?: number | null };
+  player?: { id?: number | null; name?: string | null };
+  assist?: { id?: number | null; name?: string | null };
+  type?: string | null;
+  detail?: string | null;
+  comments?: string | null;
+};
+type AfStatistic = { type?: string | null; value?: number | string | null };
+type AfFixtureStatistics = {
+  team?: { id?: number | null; name?: string | null };
+  statistics?: AfStatistic[];
+};
+type AfLineupPlayer = {
+  player?: {
+    id?: number | null;
+    name?: string | null;
+    number?: number | null;
+    pos?: string | null;
+    grid?: string | null;
+  };
+};
+type AfLineup = {
+  team?: { id?: number | null; name?: string | null };
+  formation?: string | null;
+  startXI?: AfLineupPlayer[];
+  substitutes?: AfLineupPlayer[];
+  coach?: { id?: number | null; name?: string | null; photo?: string | null };
+};
+type AfFixturePlayer = {
+  player?: { id?: number | null; name?: string | null; photo?: string | null };
+  statistics?: Array<{ games?: { position?: string | null } }>;
+};
+type AfFixturePlayers = {
+  team?: { id?: number | null; name?: string | null };
+  players?: AfFixturePlayer[];
+};
+type AfInjury = {
+  player?: { id?: number | null; name?: string | null; photo?: string | null; type?: string | null; reason?: string | null };
+  team?: { id?: number | null; name?: string | null };
+};
+type AfTransferRecord = {
+  player?: { id?: number | null; name?: string | null };
+  update?: string | null;
+  transfers?: Array<{
+    date?: string | null;
+    type?: string | null;
+    teams?: {
+      in?: { id?: number | null; name?: string | null };
+      out?: { id?: number | null; name?: string | null };
+    };
+  }>;
+};
+
 function afStatus(value: string): NormalizedMatch["status"] {
   if (["1H", "HT", "2H", "ET", "BT", "P", "INT", "LIVE"].includes(value))
     return value === "HT" ? "paused" : "live";
@@ -345,6 +430,139 @@ function afStatus(value: string): NormalizedMatch["status"] {
   if (value === "PST") return "postponed";
   if (["CANC", "ABD", "AWD", "WO"].includes(value)) return "cancelled";
   return "scheduled";
+}
+
+function apiFootballLeagueIds(): Set<string> {
+  return new Set(
+    (process.env.API_FOOTBALL_LEAGUE_IDS ?? "2,39,40,61,71,78,88,94,135,140")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+}
+
+function apiFootballCapabilities(league: AfLeague): SportsCapability[] {
+  const current = league.seasons?.find((season) => season.current);
+  const coverage = current?.coverage;
+  const capabilities: SportsCapability[] = [
+    "fixtures",
+    "results",
+    "live_score",
+    "logos",
+    "transfers",
+  ];
+  if (coverage?.standings && !process.env.API_FOOTBALL_FREE_SEASON)
+    capabilities.push("standings");
+  if (coverage?.fixtures?.events) capabilities.push("events");
+  if (coverage?.fixtures?.lineups) capabilities.push("lineups");
+  if (coverage?.fixtures?.statistics_fixtures)
+    capabilities.push("statistics");
+  if (coverage?.players || coverage?.fixtures?.statistics_players)
+    capabilities.push("players");
+  if (coverage?.injuries) capabilities.push("injuries");
+  return capabilities;
+}
+
+function apiFootballEventType(event: AfEvent): string {
+  const type = event.type?.toLowerCase() ?? "";
+  const detail = event.detail?.toLowerCase() ?? "";
+  if (type === "goal") {
+    if (detail.includes("own")) return "own_goal";
+    if (detail.includes("penalty")) return "penalty";
+    return "goal";
+  }
+  if (type === "card")
+    return detail.includes("red") ? "red_card" : "yellow_card";
+  if (type === "subst") return "substitution";
+  if (type === "var") return "var";
+  return "period";
+}
+
+function numericStatistic(value: number | string | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const parsed = Number(value.replace("%", "").trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function statisticValues(records: AfStatistic[] = []) {
+  const values = new Map(
+    records.map((item) => [item.type?.toLowerCase() ?? "", numericStatistic(item.value)]),
+  );
+  return {
+    possession: values.get("ball possession") ?? null,
+    shots: values.get("total shots") ?? null,
+    shotsOnTarget: values.get("shots on goal") ?? null,
+    corners: values.get("corner kicks") ?? null,
+    fouls: values.get("fouls") ?? null,
+    yellowCards: values.get("yellow cards") ?? null,
+    redCards: values.get("red cards") ?? null,
+    expectedGoals: values.get("expected goals") ?? null,
+  };
+}
+
+function normalizeApiFootballMatch(item: AfFixture, fetchedAt: string): NormalizedMatch {
+  const sourceTimestamp = new Date(item.fixture.date).toISOString();
+  return normalizedMatchSchema.parse({
+    provider: "api-football",
+    externalId: String(item.fixture.id),
+    fetchedAt,
+    sourceTimestamp,
+    dataFreshness: dataFreshness(sourceTimestamp),
+    rawMetadata: asRecord(item),
+    competitionExternalId: String(item.league.id),
+    season: String(item.league.season),
+    homeTeamExternalId: String(item.teams.home.id),
+    awayTeamExternalId: String(item.teams.away.id),
+    kickoffAt: new Date(item.fixture.date).toISOString(),
+    status: afStatus(item.fixture.status.short),
+    minute: item.fixture.status.elapsed ?? null,
+    homeScore: item.goals.home,
+    awayScore: item.goals.away,
+    venue: item.fixture.venue?.name ?? null,
+    referee: item.fixture.referee ?? null,
+    round: item.league.round ?? null,
+    stage: null,
+    matchday: null,
+  });
+}
+
+function apiFootballFixtureTeams(
+  records: AfFixture[],
+  fetchedAt: string,
+): NormalizedTeam[] {
+  const teams = records.flatMap((fixture) =>
+    (["home", "away"] as const).map((side) => {
+      const team = fixture.teams[side];
+      const name = team.name?.trim() || `Team ${team.id}`;
+      return normalizedTeamSchema.parse({
+        provider: "api-football",
+        externalId: String(team.id),
+        fetchedAt,
+        sourceTimestamp: new Date(fixture.fixture.date).toISOString(),
+        dataFreshness: dataFreshness(
+          new Date(fixture.fixture.date).toISOString(),
+        ),
+        rawMetadata: asRecord(team),
+        competitionExternalId: String(fixture.league.id),
+        name,
+        shortName: name,
+        slug: slugify(name),
+        country: null,
+        logoUrl: team.logo ?? null,
+        venue:
+          side === "home" ? (fixture.fixture.venue?.name ?? null) : null,
+      });
+    }),
+  );
+  return [
+    ...new Map(
+      teams.map((team) => [
+        `${team.competitionExternalId}:${team.externalId}`,
+        team,
+      ]),
+    ).values(),
+  ];
 }
 
 export class ApiFootballSyncAdapter implements SportsSyncAdapter {
@@ -358,6 +576,7 @@ export class ApiFootballSyncAdapter implements SportsSyncAdapter {
     "lineups",
     "statistics",
     "players",
+    "transfers",
     "injuries",
     "logos",
   ];
@@ -384,7 +603,7 @@ export class ApiFootballSyncAdapter implements SportsSyncAdapter {
       {
         headers: { "x-apisports-key": this.key(), accept: "application/json" },
       },
-      { minimumIntervalMs: 350, retries: 1 },
+      { minimumIntervalMs: 6_100, retries: 1 },
     );
     const payload = (await response.json()) as {
       response?: T;
@@ -401,26 +620,41 @@ export class ApiFootballSyncAdapter implements SportsSyncAdapter {
       );
     return payload.response ?? ([] as T);
   }
+  private async optionalRequest<T>(path: string, fallback: T): Promise<T> {
+    try {
+      return await this.request<T>(path);
+    } catch (error) {
+      if (error instanceof ProviderError) return fallback;
+      throw error;
+    }
+  }
   async discoverCompetitions(): Promise<NormalizedCompetition[]> {
     const records = await this.request<AfLeague[]>("/leagues?current=true");
     const fetchedAt = nowIso();
-    return records.map((item) =>
-      normalizedCompetitionSchema.parse({
+    const configuredIds = apiFootballLeagueIds();
+    return records.filter((item) => configuredIds.has(String(item.league.id))).map((item) =>
+      {
+        const isBrazilianSerieA = item.league.id === 71;
+        const name = isBrazilianSerieA
+          ? "Campeonato Brasileiro Série A"
+          : item.league.name;
+        return normalizedCompetitionSchema.parse({
         provider: this.name,
         externalId: String(item.league.id),
         fetchedAt,
         sourceTimestamp: null,
         dataFreshness: "unknown",
         rawMetadata: asRecord(item),
-        name: item.league.name,
-        slug: slugify(item.league.name),
+        name,
+        slug: slugify(name),
         country: item.country.name ?? null,
         season: String(
           item.seasons?.find((season) => season.current)?.year ?? "",
         ),
         logoUrl: item.league.logo ?? null,
-        capabilities: this.capabilities,
-      }),
+        capabilities: apiFootballCapabilities(item),
+        });
+      },
     );
   }
   async getTeams(
@@ -428,8 +662,10 @@ export class ApiFootballSyncAdapter implements SportsSyncAdapter {
     season = process.env.API_FOOTBALL_SEASON ??
       String(new Date().getUTCFullYear()),
   ): Promise<NormalizedTeam[]> {
+    const requestedSeason =
+      process.env.API_FOOTBALL_FREE_SEASON ?? season;
     const records = await this.request<AfTeam[]>(
-      `/teams?league=${encodeURIComponent(competitionExternalId)}&season=${encodeURIComponent(season)}`,
+      `/teams?league=${encodeURIComponent(competitionExternalId)}&season=${encodeURIComponent(requestedSeason)}`,
     );
     const fetchedAt = nowIso();
     return records.map((item) =>
@@ -464,32 +700,238 @@ export class ApiFootballSyncAdapter implements SportsSyncAdapter {
     });
     if (options.dateFrom) params.set("from", options.dateFrom);
     if (options.dateTo) params.set("to", options.dateTo);
+    params.set("timezone", "Asia/Ho_Chi_Minh");
     const records = await this.request<AfFixture[]>(`/fixtures?${params}`);
     const fetchedAt = nowIso();
-    return records.map((item) =>
-      normalizedMatchSchema.parse({
-        provider: this.name,
-        externalId: String(item.fixture.id),
-        fetchedAt,
-        sourceTimestamp: item.fixture.date,
-        dataFreshness: dataFreshness(item.fixture.date),
-        rawMetadata: asRecord(item),
-        competitionExternalId,
-        season: String(item.league.season),
-        homeTeamExternalId: String(item.teams.home.id),
-        awayTeamExternalId: String(item.teams.away.id),
-        kickoffAt: new Date(item.fixture.date).toISOString(),
-        status: afStatus(item.fixture.status.short),
-        minute: item.fixture.status.elapsed ?? null,
-        homeScore: item.goals.home,
-        awayScore: item.goals.away,
-        venue: item.fixture.venue?.name ?? null,
-        referee: item.fixture.referee ?? null,
-        round: item.league.round ?? null,
-        stage: null,
-        matchday: null,
-      }),
+    return records.map((item) => normalizeApiFootballMatch(item, fetchedAt));
+  }
+  async getDailyMatches(date: string): Promise<{
+    matches: NormalizedMatch[];
+    teams: NormalizedTeam[];
+  }> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+      throw new ProviderError("Ngày API-Football không hợp lệ.", this.name);
+    const records = await this.request<AfFixture[]>(
+      `/fixtures?date=${encodeURIComponent(date)}&timezone=Asia%2FHo_Chi_Minh`,
     );
+    const configuredIds = apiFootballLeagueIds();
+    const selected = records.filter((item) =>
+      configuredIds.has(String(item.league.id)),
+    );
+    const fetchedAt = nowIso();
+    return {
+      matches: selected.map((item) =>
+        normalizeApiFootballMatch(item, fetchedAt),
+      ),
+      teams: apiFootballFixtureTeams(selected, fetchedAt),
+    };
+  }
+  async getLiveMatches(): Promise<NormalizedMatch[]> {
+    const records = await this.request<AfFixture[]>(
+      "/fixtures?live=all&timezone=Asia%2FHo_Chi_Minh",
+    );
+    const configuredIds = apiFootballLeagueIds();
+    const fetchedAt = nowIso();
+    return records
+      .filter((item) => configuredIds.has(String(item.league.id)))
+      .map((item) => normalizeApiFootballMatch(item, fetchedAt));
+  }
+  async getMatchDetails(
+    matchExternalId: string,
+    homeTeamExternalId: string,
+    awayTeamExternalId: string,
+  ): Promise<NormalizedMatchDetails> {
+    const fixture = encodeURIComponent(matchExternalId);
+    const events = await this.optionalRequest<AfEvent[]>(
+      `/fixtures/events?fixture=${fixture}`,
+      [],
+    );
+    const statistics = await this.optionalRequest<AfFixtureStatistics[]>(
+      `/fixtures/statistics?fixture=${fixture}`,
+      [],
+    );
+    const lineups = await this.optionalRequest<AfLineup[]>(
+      `/fixtures/lineups?fixture=${fixture}`,
+      [],
+    );
+    const playerStatistics = await this.optionalRequest<AfFixturePlayers[]>(
+      `/fixtures/players?fixture=${fixture}`,
+      [],
+    );
+    const injuries = await this.optionalRequest<AfInjury[]>(
+      `/injuries?fixture=${fixture}`,
+      [],
+    );
+    const predictions = await this.optionalRequest<Array<Record<string, unknown>>>(
+      `/predictions?fixture=${fixture}`,
+      [],
+    );
+    const headToHead = await this.optionalRequest<AfFixture[]>(
+      `/fixtures/headtohead?h2h=${encodeURIComponent(`${homeTeamExternalId}-${awayTeamExternalId}`)}&last=5&timezone=Asia%2FHo_Chi_Minh`,
+      [],
+    );
+    const fetchedAt = nowIso();
+
+    const normalizedLineups = lineups.flatMap((lineup) => {
+      if (!lineup.team?.id) return [];
+      const player = (item: AfLineupPlayer) => ({
+        externalId: String(item.player?.id ?? ""),
+        name: item.player?.name?.trim() || "Chưa xác định",
+        number: item.player?.number ?? null,
+        position: item.player?.pos ?? null,
+        grid: item.player?.grid ?? null,
+      });
+      return [{
+        teamExternalId: String(lineup.team.id),
+        teamName: lineup.team.name?.trim() || "Chưa xác định",
+        formation: lineup.formation ?? null,
+        starters: (lineup.startXI ?? []).map(player).filter((item) => item.externalId),
+        substitutes: (lineup.substitutes ?? [])
+          .map(player)
+          .filter((item) => item.externalId)
+          .map((item) => ({
+            externalId: item.externalId,
+            name: item.name,
+            number: item.number,
+            position: item.position,
+          })),
+        coach: {
+          externalId: lineup.coach?.id ? String(lineup.coach.id) : null,
+          name: lineup.coach?.name ?? null,
+          imageUrl: lineup.coach?.photo ?? null,
+        },
+      }];
+    });
+
+    const normalizedPlayers = new Map<string, NormalizedPlayer>();
+    const addPlayer = (input: {
+      id?: number | null;
+      name?: string | null;
+      photo?: string | null;
+      teamId?: number | string | null;
+      position?: string | null;
+    }) => {
+      if (!input.id || !input.name?.trim()) return;
+      const externalId = String(input.id);
+      const existing = normalizedPlayers.get(externalId);
+      normalizedPlayers.set(externalId, normalizedPlayerSchema.parse({
+        provider: this.name,
+        externalId,
+        fetchedAt,
+        sourceTimestamp: fetchedAt,
+        dataFreshness: "fresh",
+        rawMetadata: {},
+        teamExternalId: input.teamId ? String(input.teamId) : existing?.teamExternalId ?? null,
+        name: input.name.trim(),
+        slug: slugify(input.name),
+        nationality: existing?.nationality ?? null,
+        position: input.position ?? existing?.position ?? null,
+        imageUrl: input.photo ?? existing?.imageUrl ?? null,
+        dateOfBirth: existing?.dateOfBirth ?? null,
+      }));
+    };
+    for (const team of playerStatistics) {
+      for (const item of team.players ?? []) {
+        addPlayer({
+          id: item.player?.id,
+          name: item.player?.name,
+          photo: item.player?.photo,
+          teamId: team.team?.id,
+          position: item.statistics?.[0]?.games?.position,
+        });
+      }
+    }
+    for (const lineup of lineups) {
+      for (const item of [...(lineup.startXI ?? []), ...(lineup.substitutes ?? [])]) {
+        addPlayer({
+          id: item.player?.id,
+          name: item.player?.name,
+          teamId: lineup.team?.id,
+          position: item.player?.pos,
+        });
+      }
+    }
+    for (const injury of injuries) {
+      addPlayer({
+        id: injury.player?.id,
+        name: injury.player?.name,
+        photo: injury.player?.photo,
+        teamId: injury.team?.id,
+      });
+    }
+
+    return {
+      matchExternalId,
+      fetchedAt,
+      events: events.map((event, index) => normalizedMatchEventSchema.parse({
+        provider: this.name,
+        externalId: `${matchExternalId}:${index}:${event.time?.elapsed ?? 0}`,
+        fetchedAt,
+        sourceTimestamp: fetchedAt,
+        dataFreshness: "fresh",
+        rawMetadata: asRecord(event),
+        matchExternalId,
+        teamExternalId: event.team?.id ? String(event.team.id) : null,
+        playerExternalId: event.player?.id ? String(event.player.id) : null,
+        relatedPlayerExternalId: event.assist?.id ? String(event.assist.id) : null,
+        type: apiFootballEventType(event),
+        minute: event.time?.elapsed ?? null,
+        extraMinute: event.time?.extra ?? null,
+      })),
+      statistics: statistics.flatMap((record) => record.team?.id ? [normalizedMatchStatisticsSchema.parse({
+        provider: this.name,
+        externalId: `${matchExternalId}:${record.team.id}`,
+        fetchedAt,
+        sourceTimestamp: fetchedAt,
+        dataFreshness: "fresh",
+        rawMetadata: asRecord(record),
+        matchExternalId,
+        teamExternalId: String(record.team.id),
+        values: statisticValues(record.statistics),
+      })] : []),
+      lineups: normalizedLineups,
+      players: [...normalizedPlayers.values()],
+      injuries: injuries.map((injury) => ({
+        teamExternalId: injury.team?.id ? String(injury.team.id) : null,
+        teamName: injury.team?.name ?? null,
+        playerExternalId: injury.player?.id ? String(injury.player.id) : null,
+        playerName: injury.player?.name?.trim() || "Chưa xác định",
+        playerImageUrl: injury.player?.photo ?? null,
+        type: injury.player?.type ?? null,
+        reason: injury.player?.reason ?? null,
+      })),
+      prediction: predictions[0] ?? null,
+      headToHead: headToHead.map((item) => normalizeApiFootballMatch(item, fetchedAt)),
+    };
+  }
+  async getTransfers(teamExternalId: string): Promise<NormalizedTransfer[]> {
+    const records = await this.request<AfTransferRecord[]>(
+      `/transfers?team=${encodeURIComponent(teamExternalId)}`,
+    );
+    return records.flatMap((record) => {
+      if (!record.player?.id || !record.player.name?.trim()) return [];
+      return (record.transfers ?? []).flatMap((transfer) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(transfer.date ?? "")) return [];
+        const fromId = transfer.teams?.out?.id
+          ? String(transfer.teams.out.id)
+          : null;
+        const toId = transfer.teams?.in?.id
+          ? String(transfer.teams.in.id)
+          : null;
+        return [{
+          externalId: `${record.player!.id}:${transfer.date}:${fromId ?? "none"}:${toId ?? "none"}`,
+          playerExternalId: String(record.player!.id),
+          playerName: record.player!.name!.trim(),
+          fromTeamExternalId: fromId,
+          fromTeamName: transfer.teams?.out?.name ?? null,
+          toTeamExternalId: toId,
+          toTeamName: transfer.teams?.in?.name ?? null,
+          transferDate: transfer.date!,
+          transferType: transfer.type?.trim() || "Không công bố",
+          rawMetadata: asRecord(transfer),
+        }];
+      });
+    });
   }
   async getStandings(
     competitionExternalId: string,

@@ -28,8 +28,12 @@
     "sync:teams": "tsx scripts/sports.ts teams",
     "sync:fixtures": "tsx scripts/sports.ts fixtures",
     "sync:results": "tsx scripts/sports.ts results",
+    "sync:matches": "tsx scripts/sports.ts matches",
+    "sync:daily": "tsx scripts/sports.ts daily",
     "sync:standings": "tsx scripts/sports.ts standings",
     "sync:live": "tsx scripts/sports.ts live",
+    "sync:match-details": "tsx scripts/sports.ts details",
+    "sync:transfers": "tsx scripts/sports.ts transfers",
     "sync:metadata": "tsx scripts/sports.ts teams",
     "report:coverage": "tsx scripts/sports.ts coverage"
     ,"rss:test": "tsx scripts/rss.ts test"

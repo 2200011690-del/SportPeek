@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  scheduledApiFootballTask,
   scheduledFootballDataTask,
   scheduledPipelineTask,
   scheduledSportsTask,
@@ -71,4 +72,39 @@ test("football-data cron backfills and refreshes one competition per slot", () =
     competitionIds: ["CLI"],
   });
   assert.equal(scheduledFootballDataTask(Date.UTC(2026, 6, 15, 5, 30)), null);
+});
+
+test("API-Football cron stays within the free daily request budget", () => {
+  assert.deepEqual(
+    scheduledApiFootballTask(Date.UTC(2026, 6, 15, 0, 48)),
+    { command: "competitions" },
+  );
+  assert.equal(
+    scheduledApiFootballTask(Date.UTC(2026, 6, 15, 0, 49))?.command,
+    "teams",
+  );
+  assert.deepEqual(
+    scheduledApiFootballTask(Date.UTC(2026, 6, 15, 4, 40)),
+    { command: "daily", dateOffset: -1 },
+  );
+  assert.deepEqual(
+    scheduledApiFootballTask(Date.UTC(2026, 6, 15, 4, 42)),
+    { command: "daily", dateOffset: 1 },
+  );
+  assert.deepEqual(
+    scheduledApiFootballTask(Date.UTC(2026, 6, 15, 9, 50)),
+    { command: "live" },
+  );
+  assert.deepEqual(
+    scheduledApiFootballTask(Date.UTC(2026, 6, 15, 13, 52)),
+    { command: "details" },
+  );
+  assert.equal(
+    scheduledApiFootballTask(Date.UTC(2026, 6, 15, 0, 53))?.command,
+    "transfers",
+  );
+  assert.equal(
+    scheduledApiFootballTask(Date.UTC(2026, 6, 15, 8, 50)),
+    null,
+  );
 });

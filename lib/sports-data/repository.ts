@@ -8,12 +8,17 @@ import type {
   MatchCapability,
   MatchDetailData,
   MatchEvent,
+  MatchInjury,
+  MatchLineup,
+  MatchPrediction,
   MatchStatistic,
+  HeadToHeadMatch,
   Player,
   PlayerDetailData,
   Standing,
   Team,
   TeamDetailData,
+  TransferRecord,
 } from "@/lib/types";
 
 type Joined<T> = T | T[] | null;
@@ -100,6 +105,10 @@ type PlayerRow = {
 
 const one = <T>(value: Joined<T>): T | null =>
   Array.isArray(value) ? (value[0] ?? null) : value;
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 const timeLabel = (value: string) =>
   new Intl.DateTimeFormat("vi-VN", {
     day: "2-digit",
@@ -337,7 +346,7 @@ export class SportsCacheRepository {
       .from("teams")
       .select("id,name,short_name,slug,country,stadium,logo_url,updated_at")
       .order("name")
-      .limit(500);
+      .limit(1_000);
     if (error)
       throw new ProviderError("Không thể đọc danh sách đội cache.", "supabase");
     const rows = (data ?? []) as unknown as TeamRow[];
@@ -394,7 +403,7 @@ export class SportsCacheRepository {
         "id,name,slug,nationality,position,image_url,date_of_birth,updated_at,teams(id,name,slug)",
       )
       .order("name")
-      .limit(500);
+      .limit(1_000);
     if (error)
       throw new ProviderError(
         "Không thể đọc danh sách cầu thủ cache.",
@@ -427,6 +436,66 @@ export class SportsCacheRepository {
     };
   }
 
+  async readTransfers(): Promise<CachedSportsRead<TransferRecord>> {
+    const { data, error } = await this.client()
+      .from("transfers")
+      .select(
+        "id,transfer_type,fee_text,status,transfer_date,provider,updated_at,players(name,slug),from_team:teams!transfers_from_team_id_fkey(name,slug),to_team:teams!transfers_to_team_id_fkey(name,slug)",
+      )
+      .eq("provider", "api-football")
+      .order("transfer_date", { ascending: false, nullsFirst: false })
+      .limit(100);
+    if (error)
+      throw new ProviderError(
+        "Không thể đọc chuyển nhượng API-Football.",
+        "supabase",
+      );
+    const rows = (data ?? []) as unknown as Array<{
+      id: string;
+      transfer_type: string;
+      fee_text: string | null;
+      status: "rumor" | "negotiating" | "confirmed" | "cancelled";
+      transfer_date: string | null;
+      provider: string | null;
+      updated_at: string;
+      players: Joined<NamedRow>;
+      from_team: Joined<NamedRow>;
+      to_team: Joined<NamedRow>;
+    }>;
+    const updatedAt = maxTimestamp(rows.map((row) => row.updated_at));
+    return {
+      data: rows.flatMap((row) => {
+        const player = one(row.players);
+        if (!player?.slug) return [];
+        const from = one(row.from_team);
+        const to = one(row.to_team);
+        return [
+          {
+            id: row.id,
+            player: player.name,
+            playerSlug: player.slug,
+            fromTeam: from?.name,
+            fromTeamSlug: from?.slug,
+            toTeam: to?.name,
+            toTeamSlug: to?.slug,
+            transferType: row.transfer_type,
+            fee: row.fee_text ?? undefined,
+            status: row.status,
+            transferDate: row.transfer_date ?? undefined,
+            provider: row.provider ?? undefined,
+          },
+        ];
+      }),
+      updatedAt,
+      stale: Boolean(
+        updatedAt &&
+          Date.now() - Date.parse(updatedAt) > 7 * 24 * 60 * 60_000,
+      ),
+      provider: "api-football",
+      source: "supabase",
+    };
+  }
+
   async readMatch(id: string): Promise<MatchDetailData | null> {
     const client = this.client();
     const { data, error } = await client
@@ -442,7 +511,13 @@ export class SportsCacheRepository {
     const competition = one(row.competitions);
     const home = one(row.home_team);
     const away = one(row.away_team);
-    const [eventsResult, statisticsResult, standingsResult, coverageResult] =
+    const [
+      eventsResult,
+      statisticsResult,
+      detailsResult,
+      standingsResult,
+      coverageResult,
+    ] =
       await Promise.all([
         client
           .from("match_events")
@@ -457,6 +532,15 @@ export class SportsCacheRepository {
             "possession,shots,shots_on_target,corners,fouls,yellow_cards,red_cards,expected_goals,teams(name)",
           )
           .eq("match_id", id),
+        client
+          .from("match_provider_details")
+          .select(
+            "provider,lineups,injuries,prediction,head_to_head,updated_at",
+          )
+          .eq("match_id", id)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
         client
           .from("standings")
           .select(
@@ -474,6 +558,7 @@ export class SportsCacheRepository {
     const readError =
       eventsResult.error ??
       statisticsResult.error ??
+      detailsResult.error ??
       standingsResult.error ??
       coverageResult.error;
     if (readError)
@@ -523,6 +608,138 @@ export class SportsCacheRepository {
       redCards: stat.red_cards ?? undefined,
       expectedGoals: stat.expected_goals ?? undefined,
     }));
+    const providerDetails = detailsResult.data as unknown as {
+      provider: string;
+      lineups: unknown;
+      injuries: unknown;
+      prediction: unknown;
+      head_to_head: unknown;
+      updated_at: string;
+    } | null;
+    const lineups = (Array.isArray(providerDetails?.lineups)
+      ? providerDetails.lineups
+      : []
+    ).flatMap<MatchLineup>((value) => {
+      const item = record(value);
+      const lineupPlayer = (player: unknown) => {
+        const data = record(player);
+        return {
+          name:
+            typeof data.name === "string" ? data.name : "Chưa xác định",
+          number:
+            typeof data.number === "number" ? data.number : undefined,
+          position:
+            typeof data.position === "string" ? data.position : undefined,
+          grid: typeof data.grid === "string" ? data.grid : undefined,
+        };
+      };
+      const coach = record(item.coach);
+      return typeof item.teamName === "string"
+        ? [
+            {
+              team: item.teamName,
+              formation:
+                typeof item.formation === "string"
+                  ? item.formation
+                  : undefined,
+              starters: (Array.isArray(item.starters)
+                ? item.starters
+                : []
+              ).map(lineupPlayer),
+              substitutes: (Array.isArray(item.substitutes)
+                ? item.substitutes
+                : []
+              ).map(lineupPlayer),
+              coach:
+                typeof coach.name === "string" ? coach.name : undefined,
+            },
+          ]
+        : [];
+    });
+    const injuries = (Array.isArray(providerDetails?.injuries)
+      ? providerDetails.injuries
+      : []
+    ).flatMap<MatchInjury>((value) => {
+      const item = record(value);
+      if (typeof item.playerName !== "string") return [];
+      return [
+        {
+          team:
+            typeof item.teamName === "string" ? item.teamName : undefined,
+          player: item.playerName,
+          imageUrl:
+            typeof item.playerImageUrl === "string"
+              ? item.playerImageUrl
+              : undefined,
+          type: typeof item.type === "string" ? item.type : undefined,
+          reason:
+            typeof item.reason === "string" ? item.reason : undefined,
+        },
+      ];
+    });
+    const predictionRecord = record(providerDetails?.prediction);
+    const predictionValues = record(predictionRecord.predictions);
+    const predictionPercent = record(predictionValues.percent);
+    const predictionWinner = record(predictionValues.winner);
+    const prediction: MatchPrediction | null = Object.keys(
+      predictionValues,
+    ).length
+      ? {
+          advice:
+            typeof predictionValues.advice === "string"
+              ? predictionValues.advice
+              : undefined,
+          winner:
+            typeof predictionWinner.name === "string"
+              ? predictionWinner.name
+              : undefined,
+          homePercent:
+            typeof predictionPercent.home === "string"
+              ? predictionPercent.home
+              : undefined,
+          drawPercent:
+            typeof predictionPercent.draw === "string"
+              ? predictionPercent.draw
+              : undefined,
+          awayPercent:
+            typeof predictionPercent.away === "string"
+              ? predictionPercent.away
+              : undefined,
+          underOver:
+            typeof predictionValues.under_over === "string"
+              ? predictionValues.under_over
+              : undefined,
+        }
+      : null;
+    const headToHead = (Array.isArray(providerDetails?.head_to_head)
+      ? providerDetails.head_to_head
+      : []
+    ).flatMap<HeadToHeadMatch>((value) => {
+      const item = record(value);
+      const raw = record(item.rawMetadata);
+      const teams = record(raw.teams);
+      const homeTeam = record(teams.home);
+      const awayTeam = record(teams.away);
+      if (
+        typeof item.externalId !== "string" ||
+        typeof item.kickoffAt !== "string" ||
+        typeof homeTeam.name !== "string" ||
+        typeof awayTeam.name !== "string"
+      )
+        return [];
+      return [
+        {
+          id: item.externalId,
+          date: item.kickoffAt,
+          home: homeTeam.name,
+          away: awayTeam.name,
+          homeScore:
+            typeof item.homeScore === "number" ? item.homeScore : undefined,
+          awayScore:
+            typeof item.awayScore === "number" ? item.awayScore : undefined,
+        },
+      ];
+    });
     const standingsRows = (standingsResult.data ??
       []) as unknown as StandingRow[];
     const standings = standingsRows.map((standing) => mapStanding(standing));
@@ -542,6 +759,10 @@ export class SportsCacheRepository {
         referee: row.referee,
         eventCount: events.length,
         statisticCount: statistics.length,
+        lineupCount: lineups.length,
+        injuryCount: injuries.length,
+        headToHeadCount: headToHead.length,
+        hasPrediction: Boolean(prediction),
         standings,
       });
     const stale =
@@ -562,13 +783,20 @@ export class SportsCacheRepository {
       },
       events,
       statistics,
+      lineups,
+      injuries,
+      prediction,
+      headToHead,
       standings: standings.map((standing) => ({
         ...standing,
         dataFreshness: stale ? "stale" : standing.dataFreshness,
       })),
       capabilities,
       providerCoverage,
-      updatedAt: row.updated_at,
+      updatedAt: maxTimestamp([
+        row.updated_at,
+        providerDetails?.updated_at,
+      ]) ?? row.updated_at,
       stale,
     };
   }

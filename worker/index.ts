@@ -6,6 +6,7 @@ import {
 } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import {
+  scheduledApiFootballTask,
   scheduledFootballDataTask,
   scheduledPipelineTask,
   scheduledSportsTask,
@@ -115,6 +116,7 @@ const worker = {
     const task = scheduledPipelineTask(scheduledAt);
     const openLigaTask = scheduledSportsTask(scheduledAt);
     const footballDataTask = scheduledFootballDataTask(scheduledAt);
+    const apiFootballTask = scheduledApiFootballTask(scheduledAt);
 
     const run = async () => {
       try {
@@ -137,18 +139,23 @@ const worker = {
           const aiBackfill = await summarizePersistedStories({ limit: 1 });
           console.log("[Cron] AI backfill result:", JSON.stringify(aiBackfill));
         }
-        // Run at most one sports job per invocation. football-data receives
-        // priority in its reserved slots; OpenLigaDB continues in all others.
-        const sportsTask = footballDataTask ?? openLigaTask;
-        const sportsProvider = footballDataTask
-          ? "football-data"
-          : "openligadb";
-        const sportsConfigured = footballDataTask
-          ? Boolean(
-              process.env.FOOTBALL_DATA_API_KEY ||
-              process.env.SPORTS_DATA_API_KEY,
-            )
-          : process.env.OPENLIGADB_ENABLED === "true";
+        // Run at most one sports job per invocation. Each provider owns
+        // separate slots; API-Football is quota-budgeted by its scheduler.
+        const sportsTask =
+          apiFootballTask ?? footballDataTask ?? openLigaTask;
+        const sportsProvider = apiFootballTask
+          ? "api-football"
+          : footballDataTask
+            ? "football-data"
+            : "openligadb";
+        const sportsConfigured = apiFootballTask
+          ? Boolean(process.env.API_FOOTBALL_KEY)
+          : footballDataTask
+            ? Boolean(
+                process.env.FOOTBALL_DATA_API_KEY ||
+                process.env.SPORTS_DATA_API_KEY,
+              )
+            : process.env.OPENLIGADB_ENABLED === "true";
         if (sportsTask && sportsConfigured) {
           console.log(
             `[Cron] Running ${sportsProvider} sync...`,
@@ -158,6 +165,14 @@ const worker = {
           const sportsSummary = await syncSports(sportsTask.command, {
             provider: sportsProvider,
             competitionIds: sportsTask.competitionIds,
+            date:
+              sportsTask.dateOffset === undefined
+                ? undefined
+                : new Date(
+                    scheduledAt + sportsTask.dateOffset * 24 * 60 * 60_000,
+                  )
+                    .toISOString()
+                    .slice(0, 10),
           });
           console.log(
             `[Cron] ${sportsProvider} sync result:`,

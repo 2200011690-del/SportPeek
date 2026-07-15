@@ -161,6 +161,12 @@ export async function GET(request: NextRequest, { params }: Context) {
   if (route === "teams") {
     const result = await sportsService.read("teams"); return NextResponse.json({ ...result, demo: false }, { status: result.status === "error" || result.status === "configuration_required" ? 503 : 200 });
   }
+  if (route === "transfers") {
+    try {
+      const result = await sportsCacheRepository.readTransfers();
+      return NextResponse.json({ status: result.data.length ? "success" : "empty", ...result, demo: false });
+    } catch (error) { const safe = toSafeError(error); return NextResponse.json({ status: "error", data: [], error: safe }, { status: safe.status }); }
+  }
   if (route === "competitions" || route === "players") {
     try {
       const result = route === "competitions" ? await sportsCacheRepository.readCompetitions() : await sportsCacheRepository.readPlayers();

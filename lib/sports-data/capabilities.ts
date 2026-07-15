@@ -6,6 +6,10 @@ export function deriveMatchCapabilities(input: {
   referee?: string | null;
   eventCount: number;
   statisticCount: number;
+  lineupCount?: number;
+  injuryCount?: number;
+  headToHeadCount?: number;
+  hasPrediction?: boolean;
   standings: Standing[];
 }): Record<MatchCapability, boolean> {
   return {
@@ -13,12 +17,13 @@ export function deriveMatchCapabilities(input: {
     venue: Boolean(input.venue),
     referee: Boolean(input.referee),
     events: input.eventCount > 0,
-    lineups: false,
+    lineups: (input.lineupCount ?? 0) > 0,
     statistics: input.statisticCount > 0,
+    injuries: (input.injuryCount ?? 0) > 0,
     standings: input.standings.length > 0,
     form: input.standings.some((standing) => standing.form.length > 0),
-    head_to_head: false,
-    preview: false,
+    head_to_head: (input.headToHeadCount ?? 0) > 0,
+    preview: Boolean(input.hasPrediction),
     recap: false,
     official_highlights: false,
   };

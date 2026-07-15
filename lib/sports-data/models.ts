@@ -49,7 +49,7 @@ export const normalizedMatchSchema = z.object({
 });
 export type NormalizedMatch = z.infer<typeof normalizedMatchSchema>;
 
-export const normalizedMatchEventSchema = z.object({ ...providerFields, matchExternalId: z.string(), teamExternalId: z.string().nullable(), playerExternalId: z.string().nullable(), type: z.string(), minute: z.number().int().nullable(), extraMinute: z.number().int().nullable() });
+export const normalizedMatchEventSchema = z.object({ ...providerFields, matchExternalId: z.string(), teamExternalId: z.string().nullable(), playerExternalId: z.string().nullable(), relatedPlayerExternalId: z.string().nullable(), type: z.string(), minute: z.number().int().nullable(), extraMinute: z.number().int().nullable() });
 export type NormalizedMatchEvent = z.infer<typeof normalizedMatchEventSchema>;
 
 export const normalizedStandingSchema = z.object({
@@ -65,6 +65,50 @@ export type NormalizedLineup = z.infer<typeof normalizedLineupSchema>;
 
 export const normalizedMatchStatisticsSchema = z.object({ ...providerFields, matchExternalId: z.string(), teamExternalId: z.string(), values: z.record(z.string(), z.number().nullable()) });
 export type NormalizedMatchStatistics = z.infer<typeof normalizedMatchStatisticsSchema>;
+
+export type NormalizedMatchLineup = {
+  teamExternalId: string;
+  teamName: string;
+  formation: string | null;
+  starters: Array<{ externalId: string; name: string; number: number | null; position: string | null; grid: string | null }>;
+  substitutes: Array<{ externalId: string; name: string; number: number | null; position: string | null }>;
+  coach: { externalId: string | null; name: string | null; imageUrl: string | null };
+};
+
+export type NormalizedMatchInjury = {
+  teamExternalId: string | null;
+  teamName: string | null;
+  playerExternalId: string | null;
+  playerName: string;
+  playerImageUrl: string | null;
+  type: string | null;
+  reason: string | null;
+};
+
+export type NormalizedMatchDetails = {
+  matchExternalId: string;
+  fetchedAt: string;
+  events: NormalizedMatchEvent[];
+  statistics: NormalizedMatchStatistics[];
+  lineups: NormalizedMatchLineup[];
+  players: NormalizedPlayer[];
+  injuries: NormalizedMatchInjury[];
+  prediction: Record<string, unknown> | null;
+  headToHead: NormalizedMatch[];
+};
+
+export type NormalizedTransfer = {
+  externalId: string;
+  playerExternalId: string;
+  playerName: string;
+  fromTeamExternalId: string | null;
+  fromTeamName: string | null;
+  toTeamExternalId: string | null;
+  toTeamName: string | null;
+  transferDate: string;
+  transferType: string;
+  rawMetadata: Record<string, unknown>;
+};
 
 export function dataFreshness(sourceTimestamp: string | null, now = Date.now()): DataFreshness {
   if (!sourceTimestamp) return "unknown";

@@ -150,6 +150,10 @@ test("match center exposes only sections backed by persisted data", () => {
     referee: "Referee",
     eventCount: 4,
     statisticCount: 2,
+    lineupCount: 2,
+    injuryCount: 3,
+    headToHeadCount: 5,
+    hasPrediction: true,
     standings: [
       {
         position: 1,
@@ -171,7 +175,10 @@ test("match center exposes only sections backed by persisted data", () => {
   assert.equal(available.statistics, true);
   assert.equal(available.standings, true);
   assert.equal(available.form, true);
-  assert.equal(available.lineups, false);
+  assert.equal(available.lineups, true);
+  assert.equal(available.injuries, true);
+  assert.equal(available.head_to_head, true);
+  assert.equal(available.preview, true);
 });
 
 test("season sync requests the full provider season while live stays narrow", () => {

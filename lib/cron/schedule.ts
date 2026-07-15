@@ -1,8 +1,18 @@
 export type ScheduledPipelineTask = "rss" | "stories";
 export type ScheduledSportsTask = {
   command:
-    "competitions" | "teams" | "fixtures" | "results" | "standings" | "live";
+    | "competitions"
+    | "teams"
+    | "fixtures"
+    | "results"
+    | "matches"
+    | "daily"
+    | "standings"
+    | "live"
+    | "details"
+    | "transfers";
   competitionIds?: string[];
+  dateOffset?: number;
 };
 
 const OPENLIGA_COMPETITIONS = [
@@ -31,6 +41,19 @@ const FOOTBALL_DATA_COMPETITIONS = [
   "ELC",
   "WC",
   "CLI",
+];
+
+const API_FOOTBALL_COMPETITIONS = [
+  "2",
+  "39",
+  "40",
+  "61",
+  "71",
+  "78",
+  "88",
+  "94",
+  "135",
+  "140",
 ];
 
 /**
@@ -134,5 +157,53 @@ export function scheduledFootballDataTask(
   const live = hour >= 9 && hour <= 22 ? competitionAt(35) : null;
   if (live) return { command: "live", competitionIds: live };
 
+  return null;
+}
+
+/**
+ * API-Football Free allows 100 calls/day and 10 calls/minute. This schedule
+ * stays around 48 calls/day: one catalog call, one rotating metadata refresh,
+ * three free-plan match-date calls, fourteen global live calls and four rich
+ * match-detail runs (seven sequential endpoints each), plus one rotating
+ * team transfer refresh.
+ */
+export function scheduledApiFootballTask(
+  timestampMs: number,
+): ScheduledSportsTask | null {
+  if (!Number.isFinite(timestampMs))
+    throw new TypeError("Scheduled timestamp must be finite");
+  const date = new Date(timestampMs);
+  const hour = date.getUTCHours();
+  const minute = date.getUTCMinutes();
+  const dayBucket = Math.floor(timestampMs / (24 * 60 * 60_000));
+
+  if (hour === 0 && minute === 48) return { command: "competitions" };
+  if (hour === 0 && minute === 49)
+    return {
+      command: "teams",
+      competitionIds: [
+        API_FOOTBALL_COMPETITIONS[
+          dayBucket % API_FOOTBALL_COMPETITIONS.length
+        ],
+      ],
+    };
+  if (hour === 0 && minute === 53)
+    return {
+      command: "transfers",
+      competitionIds: [
+        API_FOOTBALL_COMPETITIONS[
+          dayBucket % API_FOOTBALL_COMPETITIONS.length
+        ],
+      ],
+    };
+  if (hour === 4 && minute >= 40 && minute < 43)
+    return {
+      command: "daily",
+      dateOffset: minute - 41,
+    };
+  if (hour >= 9 && hour <= 22 && minute === 50)
+    return { command: "live" };
+  if ([1, 7, 13, 19].includes(hour) && minute === 52)
+    return { command: "details" };
   return null;
 }

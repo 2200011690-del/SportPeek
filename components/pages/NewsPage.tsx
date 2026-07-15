@@ -7,7 +7,7 @@ import { useRuntimeData } from "@/components/SportPeekApp";
 import { HotnessBadge, ReliabilityBadge, NewsVisual, SectionHeading, DataLoadingState, EmptyState, Pagination, TeamMark } from "@/components/ui/badges";
 import { FilterBar } from "@/components/ui/Search";
 import { filterNewsItems, paginateItems, personalizedNewsItems, isTransferNews } from "@/lib/ui-logic";
-import type { NewsItem } from "@/lib/types";
+import type { NewsItem, TransferRecord } from "@/lib/types";
 
 const storyStatusLabels = {
   official: "Nguồn chính thức",
@@ -107,8 +107,45 @@ export function ForYouPage({ followed, onFollow, bookmarks, onBookmark }: { foll
 export function TransfersPage({ bookmarks, onBookmark }: { bookmarks: Set<string>; onBookmark: (id: string) => void }) {
   const { newsItems, newsReal, loading } = useRuntimeData();
   const [query, setQuery] = useState("");
+  const [market, setMarket] = useState<TransferRecord[]>([]);
+  const [marketLoading, setMarketLoading] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/transfers", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return (await response.json()) as { data?: TransferRecord[] };
+      })
+      .then((payload) => setMarket(payload.data ?? []))
+      .catch(() => {
+        if (!controller.signal.aborted) setMarket([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setMarketLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
   const transferNews = filterNewsItems(newsItems.filter(isTransferNews), { query });
-  return <div className="page-content"><PageHero eyebrow="MARKET WATCH" title="Tin chuyển nhượng" description="Chỉ hiển thị bài từ mạng lưới RSS; SportPeek không tự tạo cầu thủ, mức phí hay trạng thái thương vụ."><div className="window-status"><i />{newsReal ? "Nguồn báo chí đang hoạt động" : "Nguồn tin tạm gián đoạn"}</div></PageHero><div className="personalization-banner"><div className="ai-orb"><ShieldCheck size={22} /></div><div><strong>Phân biệt rõ tin đồn và xác nhận chính thức</strong><p>Hãy mở các nguồn đối chiếu trong từng bài trước khi xem một thương vụ là hoàn tất.</p></div><Link href="/sources">Nguồn & phương pháp<ArrowRight size={15} /></Link></div><FilterBar search query={query} onQueryChange={setQuery} />{loading ? <DataLoadingState /> : transferNews.length ? <><div className="results-summary">Tìm thấy {transferNews.length} tin chuyển nhượng từ các nguồn đang theo dõi</div><div className="news-page-grid">{transferNews.map((item) => <NewsCard item={item} key={item.id} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div></> : <EmptyState title="Chưa có tin chuyển nhượng phù hợp" description="SportPeek sẽ hiển thị khi các nguồn RSS đăng tin có liên quan; hệ thống không điền dữ liệu giả." />}</div>;
+  const normalizedQuery = query.trim().toLocaleLowerCase("vi");
+  const filteredMarket = market.filter((item) =>
+    !normalizedQuery ||
+    `${item.player} ${item.fromTeam ?? ""} ${item.toTeam ?? ""}`
+      .toLocaleLowerCase("vi")
+      .includes(normalizedQuery),
+  );
+  return <div className="page-content">
+    <PageHero eyebrow="MARKET WATCH" title="Tin chuyển nhượng" description="Dữ liệu thương vụ xác nhận từ API-Football được tách riêng khỏi tin đồn và bài báo tổng hợp."><div className="window-status"><i />{newsReal ? "Nguồn báo chí đang hoạt động" : "Nguồn tin tạm gián đoạn"}</div></PageHero>
+    <div className="personalization-banner"><div className="ai-orb"><ShieldCheck size={22} /></div><div><strong>Phân biệt rõ dữ liệu provider và tin báo chí</strong><p>Thương vụ API-Football mang nhãn xác nhận; bài RSS vẫn giữ trạng thái tin đồn hoặc nguồn đối chiếu.</p></div><Link href="/sources">Nguồn & phương pháp<ArrowRight size={15} /></Link></div>
+    <FilterBar search query={query} onQueryChange={setQuery} />
+    <section>
+      <SectionHeading eyebrow="API-FOOTBALL" title="Thương vụ đã ghi nhận" />
+      {marketLoading ? <DataLoadingState label="Đang tải dữ liệu chuyển nhượng" /> : filteredMarket.length ? <div className="transfer-data-grid">{filteredMarket.map((item) => <article key={item.id} className="transfer-data-card"><div><span className="status-pill">ĐÃ XÁC NHẬN</span><time>{item.transferDate ?? "Chưa rõ ngày"}</time></div><Link href={`/players/${item.playerSlug}`}><h3>{item.player}</h3></Link><p><strong>{item.fromTeam ?? "Không rõ đội"}</strong><ArrowRight size={14} /><strong>{item.toTeam ?? "Không rõ đội"}</strong></p><small>{item.fee ?? item.transferType} · {item.provider ?? "provider"}</small></article>)}</div> : <EmptyState title="Chưa có thương vụ API-Football phù hợp" description="Cache sẽ xoay vòng đội bóng mỗi ngày trong giới hạn gói miễn phí." />}
+    </section>
+    <section>
+      <SectionHeading eyebrow="BÁO CHÍ" title="Tin tức và diễn biến thị trường" />
+      {loading ? <DataLoadingState /> : transferNews.length ? <><div className="results-summary">Tìm thấy {transferNews.length} tin chuyển nhượng từ các nguồn đang theo dõi</div><div className="news-page-grid">{transferNews.map((item) => <NewsCard item={item} key={item.id} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div></> : <EmptyState title="Chưa có tin chuyển nhượng phù hợp" description="SportPeek sẽ hiển thị khi các nguồn RSS đăng tin có liên quan; hệ thống không điền dữ liệu giả." />}
+    </section>
+  </div>;
 }
 
 function PageHero({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {

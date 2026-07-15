@@ -7,6 +7,7 @@ import {
 } from "@/lib/core/errors";
 import { logger } from "@/lib/core/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { slugify } from "@/lib/validation";
 import {
   configuredSportsAdapters,
   getSportsAdapterDescriptors,
@@ -16,14 +17,17 @@ import {
 import type {
   NormalizedCompetition,
   NormalizedMatch,
+  NormalizedMatchDetails,
+  NormalizedPlayer,
   NormalizedStanding,
   NormalizedTeam,
+  NormalizedTransfer,
   SportsCapability,
   SportsProviderName,
 } from "./models";
 
 export type SportsSyncCommand =
-  "competitions" | "teams" | "fixtures" | "results" | "standings" | "live";
+  "competitions" | "teams" | "fixtures" | "results" | "matches" | "daily" | "standings" | "live" | "details" | "transfers";
 export type SportsSyncSummary = {
   jobId: string;
   provider: SportsProviderName;
@@ -38,7 +42,7 @@ export type SportsSyncSummary = {
 };
 
 export function sportsMatchQueryOptions(
-  command: "fixtures" | "results" | "live",
+  command: "fixtures" | "results" | "matches" | "live",
   season: string | null,
   now = Date.now(),
 ): { dateFrom?: string; dateTo?: string; season?: string } {
@@ -108,7 +112,7 @@ async function footballSportId(): Promise<string> {
 
 async function mappings(
   provider: SportsProviderName,
-  entityType: "competition" | "team" | "match",
+  entityType: "competition" | "team" | "player" | "match",
 ): Promise<Map<string, Mapping>> {
   const { data, error } = await admin()
     .from("provider_entity_mappings")
@@ -127,7 +131,7 @@ async function mappings(
 
 async function upsertMappings(
   provider: SportsProviderName,
-  entityType: "competition" | "team" | "match",
+  entityType: "competition" | "team" | "player" | "match",
   rows: Array<{
     internalId: string;
     externalId: string;
@@ -318,7 +322,7 @@ async function persistCompetitions(
     : { data: [], error: null };
   if (upsertError)
     throw new ProviderError(
-      "Không thể lưu hàng loạt giải đấu.",
+      `Không thể lưu hàng loạt giải đấu (${upsertError.code ?? "database_error"}: ${upsertError.message}).`,
       "supabase",
       false,
     );
@@ -643,6 +647,17 @@ async function persistMatches(
   const client = admin();
   const teamMappings = await mappings(adapter.name, "team");
   const matchMappings = await mappings(adapter.name, "match");
+  const { data: existingMatches, error: existingMatchesError } = await client
+    .from("matches")
+    .select("id,home_team_id,away_team_id,start_time")
+    .eq("competition_id", competition.id)
+    .limit(2_000);
+  if (existingMatchesError)
+    throw new ProviderError(
+      "Không thể đối chiếu trận giữa các provider.",
+      "supabase",
+      false,
+    );
   const resolved: Array<{
     record: NormalizedMatch;
     payload: Record<string, unknown>;
@@ -698,7 +713,25 @@ async function persistMatches(
     const mapped =
       matchMappings.get(`${record.externalId}:${record.season}`) ??
       matchMappings.get(`${record.externalId}:`);
-    resolved.push({ record, payload, mappedId: mapped?.internal_id });
+    const equivalent = (
+      (existingMatches ?? []) as Array<{
+        id: string;
+        home_team_id: string;
+        away_team_id: string;
+        start_time: string;
+      }>
+    ).find(
+      (item) =>
+        item.home_team_id === home.internal_id &&
+        item.away_team_id === away.internal_id &&
+        Math.abs(Date.parse(item.start_time) - Date.parse(record.kickoffAt)) <=
+          30 * 60_000,
+    );
+    resolved.push({
+      record,
+      payload,
+      mappedId: mapped?.internal_id ?? equivalent?.id,
+    });
   }
   if (conflicts.length) {
     const { error } = await client.from("provider_conflicts").insert(conflicts);
@@ -837,6 +870,526 @@ async function persistStandings(
   summary.updated += rows.length;
 }
 
+async function persistPlayers(
+  adapter: SportsSyncAdapter,
+  records: NormalizedPlayer[],
+  summary: SportsSyncSummary,
+) {
+  if (!records.length) return;
+  const client = admin();
+  const unique = [
+    ...new Map(records.map((record) => [record.externalId, record])).values(),
+  ];
+  const playerMappings = await mappings(adapter.name, "player");
+  const teamMappings = await mappings(adapter.name, "team");
+  const teamsByExternal = new Map(
+    [...teamMappings.values()].map((mapping) => [
+      mapping.external_id,
+      mapping.internal_id,
+    ]),
+  );
+  const mapped = unique.filter((record) =>
+    playerMappings.has(`${record.externalId}:`),
+  );
+  if (mapped.length) {
+    const mappedIds = mapped.map(
+      (record) => playerMappings.get(`${record.externalId}:`)!.internal_id,
+    );
+    const { data: mappedPlayers, error: mappedPlayersError } = await client
+      .from("players")
+      .select("id,slug")
+      .in("id", mappedIds);
+    if (mappedPlayersError)
+      throw new ProviderError(
+        "Không thể đọc slug cầu thủ đã map.",
+        "supabase",
+        false,
+      );
+    const mappedSlugById = new Map(
+      ((mappedPlayers ?? []) as Array<{ id: string; slug: string }>).map(
+        (row) => [row.id, row.slug],
+      ),
+    );
+    const { error } = await client.from("players").upsert(
+      mapped.map((record) => {
+        const internalId =
+          playerMappings.get(`${record.externalId}:`)!.internal_id;
+        return {
+          id: internalId,
+          team_id: record.teamExternalId
+            ? (teamsByExternal.get(record.teamExternalId) ?? null)
+            : null,
+          name: record.name,
+          slug: mappedSlugById.get(internalId) ?? record.slug,
+          image_url: record.imageUrl,
+          nationality: record.nationality,
+          date_of_birth: record.dateOfBirth,
+          position: record.position,
+        };
+      }),
+      { onConflict: "id" },
+    );
+    if (error)
+      throw new ProviderError(
+        "Không thể cập nhật cầu thủ API-Football.",
+        "supabase",
+        false,
+      );
+  }
+
+  const unmapped = unique.filter(
+    (record) => !playerMappings.has(`${record.externalId}:`),
+  );
+  const { data: existingPlayers, error: existingError } = unmapped.length
+    ? await client
+        .from("players")
+        .select("id,slug")
+        .in(
+          "slug",
+          [...new Set(unmapped.map((record) => record.slug))],
+        )
+    : { data: [], error: null };
+  if (existingError)
+    throw new ProviderError(
+      "Không thể đối chiếu cầu thủ hiện có.",
+      "supabase",
+      false,
+    );
+  const existingBySlug = new Map(
+    ((existingPlayers ?? []) as Array<{ id: string; slug: string }>).map(
+      (row) => [row.slug, row.id],
+    ),
+  );
+  const existingRecords = unmapped.filter((record) =>
+    existingBySlug.has(record.slug),
+  );
+  if (existingRecords.length) {
+    const { error } = await client.from("players").upsert(
+      existingRecords.map((record) => ({
+        id: existingBySlug.get(record.slug)!,
+        team_id: record.teamExternalId
+          ? (teamsByExternal.get(record.teamExternalId) ?? null)
+          : null,
+        name: record.name,
+        slug: record.slug,
+        image_url: record.imageUrl,
+        nationality: record.nationality,
+        date_of_birth: record.dateOfBirth,
+        position: record.position,
+      })),
+      { onConflict: "id" },
+    );
+    if (error)
+      throw new ProviderError(
+        "Không thể hợp nhất hồ sơ cầu thủ.",
+        "supabase",
+        false,
+      );
+  }
+
+  const newRecords = unmapped.filter(
+    (record) => !existingBySlug.has(record.slug),
+  );
+  const duplicateSlugs = new Map<string, number>();
+  const rowsToInsert = newRecords.map((record) => {
+    const count = duplicateSlugs.get(record.slug) ?? 0;
+    duplicateSlugs.set(record.slug, count + 1);
+    return {
+      record,
+      slug: count ? `${record.slug}-${record.externalId}` : record.slug,
+    };
+  });
+  const { data: insertedPlayers, error: insertError } = rowsToInsert.length
+    ? await client
+        .from("players")
+        .insert(
+          rowsToInsert.map(({ record, slug }) => ({
+            team_id: record.teamExternalId
+              ? (teamsByExternal.get(record.teamExternalId) ?? null)
+              : null,
+            name: record.name,
+            slug,
+            image_url: record.imageUrl,
+            nationality: record.nationality,
+            date_of_birth: record.dateOfBirth,
+            position: record.position,
+          })),
+        )
+        .select("id,slug")
+    : { data: [], error: null };
+  if (insertError)
+    throw new ProviderError(
+      "Không thể lưu cầu thủ API-Football.",
+      "supabase",
+      false,
+    );
+  const insertedBySlug = new Map(
+    ((insertedPlayers ?? []) as Array<{ id: string; slug: string }>).map(
+      (row) => [row.slug, row.id],
+    ),
+  );
+  const mappingRows = unique.flatMap((record) => {
+    const rowWithSlug = rowsToInsert.find(
+      (item) => item.record.externalId === record.externalId,
+    );
+    const internalId =
+      playerMappings.get(`${record.externalId}:`)?.internal_id ??
+      existingBySlug.get(record.slug) ??
+      insertedBySlug.get(rowWithSlug?.slug ?? record.slug);
+    return internalId
+      ? [
+          {
+            internalId,
+            externalId: record.externalId,
+            season: "",
+            metadata: record.rawMetadata,
+          },
+        ]
+      : [];
+  });
+  await upsertMappings(adapter.name, "player", mappingRows);
+  summary.updated += mapped.length + existingRecords.length;
+  summary.inserted += rowsToInsert.length;
+}
+
+async function persistMatchDetails(
+  adapter: SportsSyncAdapter,
+  matchId: string,
+  details: NormalizedMatchDetails,
+  summary: SportsSyncSummary,
+) {
+  const client = admin();
+  await persistPlayers(adapter, details.players, summary);
+  const [teamMappings, playerMappings] = await Promise.all([
+    mappings(adapter.name, "team"),
+    mappings(adapter.name, "player"),
+  ]);
+  const teamsByExternal = new Map(
+    [...teamMappings.values()].map((mapping) => [
+      mapping.external_id,
+      mapping.internal_id,
+    ]),
+  );
+  const playersByExternal = new Map(
+    [...playerMappings.values()].map((mapping) => [
+      mapping.external_id,
+      mapping.internal_id,
+    ]),
+  );
+
+  const { error: deleteEventsError } = await client
+    .from("match_events")
+    .delete()
+    .eq("match_id", matchId);
+  if (deleteEventsError)
+    throw new ProviderError(
+      "Không thể làm mới sự kiện trận đấu.",
+      "supabase",
+      false,
+    );
+  const eventRows = details.events.flatMap((event) =>
+    event.minute === null
+      ? []
+      : [
+          {
+            match_id: matchId,
+            team_id: event.teamExternalId
+              ? (teamsByExternal.get(event.teamExternalId) ?? null)
+              : null,
+            player_id: event.playerExternalId
+              ? (playersByExternal.get(event.playerExternalId) ?? null)
+              : null,
+            related_player_id: event.relatedPlayerExternalId
+              ? (playersByExternal.get(event.relatedPlayerExternalId) ?? null)
+              : null,
+            event_type: event.type,
+            minute: event.minute,
+            extra_minute: event.extraMinute,
+            metadata: event.rawMetadata,
+          },
+        ],
+  );
+  if (eventRows.length) {
+    const { error } = await client.from("match_events").insert(eventRows);
+    if (error)
+      throw new ProviderError(
+        "Không thể lưu sự kiện trận đấu.",
+        "supabase",
+        false,
+      );
+  }
+
+  const statisticRows = details.statistics.flatMap((statistic) => {
+    const teamId = teamsByExternal.get(statistic.teamExternalId);
+    if (!teamId) return [];
+    return [
+      {
+        match_id: matchId,
+        team_id: teamId,
+        possession: statistic.values.possession,
+        shots: statistic.values.shots,
+        shots_on_target: statistic.values.shotsOnTarget,
+        corners: statistic.values.corners,
+        fouls: statistic.values.fouls,
+        yellow_cards: statistic.values.yellowCards,
+        red_cards: statistic.values.redCards,
+        expected_goals: statistic.values.expectedGoals,
+        metadata: statistic.rawMetadata,
+      },
+    ];
+  });
+  if (statisticRows.length) {
+    const { error } = await client
+      .from("match_statistics")
+      .upsert(statisticRows, { onConflict: "match_id,team_id" });
+    if (error)
+      throw new ProviderError(
+        "Không thể lưu thống kê trận đấu.",
+        "supabase",
+        false,
+      );
+  }
+
+  const { error: detailsError } = await client
+    .from("match_provider_details")
+    .upsert(
+      {
+        match_id: matchId,
+        provider: adapter.name,
+        lineups: details.lineups,
+        injuries: details.injuries,
+        player_statistics: details.players,
+        prediction: details.prediction,
+        head_to_head: details.headToHead,
+        source_timestamp: details.fetchedAt,
+        updated_at: details.fetchedAt,
+      },
+      { onConflict: "match_id,provider" },
+    );
+  if (detailsError)
+    throw new ProviderError(
+      "Không thể lưu dữ liệu mở rộng trận đấu.",
+      "supabase",
+      false,
+    );
+  summary.updated += eventRows.length + statisticRows.length + 1;
+}
+
+async function syncOneMatchDetails(
+  adapter: SportsSyncAdapter,
+  summary: SportsSyncSummary,
+) {
+  if (!adapter.getMatchDetails)
+    throw new ConfigurationError(
+      `${adapter.name} không hỗ trợ dữ liệu chi tiết trận đấu.`,
+      adapter.name,
+    );
+  const client = admin();
+  const [matchMappings, teamMappings] = await Promise.all([
+    mappings(adapter.name, "match"),
+    mappings(adapter.name, "team"),
+  ]);
+  const externalMatchByInternal = new Map(
+    [...matchMappings.values()].map((mapping) => [
+      mapping.internal_id,
+      mapping.external_id,
+    ]),
+  );
+  const externalTeamByInternal = new Map(
+    [...teamMappings.values()].map((mapping) => [
+      mapping.internal_id,
+      mapping.external_id,
+    ]),
+  );
+  const { data: candidates, error: candidateError } = await client
+    .from("matches")
+    .select(
+      "id,competition_id,home_team_id,away_team_id,start_time,status",
+    )
+    .eq("provider", adapter.name)
+    .in("status", ["live", "paused", "finished"])
+    .gte("start_time", new Date(Date.now() - 14 * 24 * 60 * 60_000).toISOString())
+    .order("start_time", { ascending: false })
+    .limit(150);
+  if (candidateError)
+    throw new ProviderError(
+      "Không thể chọn trận cần làm giàu.",
+      "supabase",
+      false,
+    );
+  const candidateIds = (candidates ?? []).map((row) => row.id);
+  const { data: existingDetails, error: detailsError } = candidateIds.length
+    ? await client
+        .from("match_provider_details")
+        .select("match_id,updated_at")
+        .eq("provider", adapter.name)
+        .in("match_id", candidateIds)
+    : { data: [], error: null };
+  if (detailsError)
+    throw new ProviderError(
+      "Không thể đọc trạng thái dữ liệu chi tiết.",
+      "supabase",
+      false,
+    );
+  const updatedByMatch = new Map(
+    ((existingDetails ?? []) as Array<{ match_id: string; updated_at: string }>).map(
+      (row) => [row.match_id, Date.parse(row.updated_at)],
+    ),
+  );
+  const sorted = [...(candidates ?? [])].sort((a, b) => {
+    const liveA = ["live", "paused"].includes(a.status) ? 1 : 0;
+    const liveB = ["live", "paused"].includes(b.status) ? 1 : 0;
+    if (liveA !== liveB) return liveB - liveA;
+    return (updatedByMatch.get(a.id) ?? 0) - (updatedByMatch.get(b.id) ?? 0);
+  });
+  const candidate = sorted.find(
+    (row) =>
+      externalMatchByInternal.has(row.id) &&
+      externalTeamByInternal.has(row.home_team_id) &&
+      externalTeamByInternal.has(row.away_team_id) &&
+      (Date.now() - (updatedByMatch.get(row.id) ?? 0) >=
+        (["live", "paused"].includes(row.status)
+          ? 5 * 60_000
+          : 12 * 60 * 60_000)),
+  );
+  if (!candidate) return;
+  const matchExternalId = externalMatchByInternal.get(candidate.id)!;
+  const details = await adapter.getMatchDetails(
+    matchExternalId,
+    externalTeamByInternal.get(candidate.home_team_id)!,
+    externalTeamByInternal.get(candidate.away_team_id)!,
+  );
+  summary.fetched +=
+    details.events.length +
+    details.statistics.length +
+    details.lineups.length +
+    details.players.length +
+    details.injuries.length +
+    details.headToHead.length +
+    (details.prediction ? 1 : 0);
+  if (!summary.dryRun)
+    await persistMatchDetails(adapter, candidate.id, details, summary);
+  summary.competitions.push(candidate.competition_id);
+}
+
+async function persistTransfers(
+  adapter: SportsSyncAdapter,
+  records: NormalizedTransfer[],
+  summary: SportsSyncSummary,
+) {
+  const recentCutoff = new Date(Date.now() - 2 * 365 * 24 * 60 * 60_000)
+    .toISOString()
+    .slice(0, 10);
+  const recent = records.filter(
+    (record) => record.transferDate >= recentCutoff,
+  );
+  if (!recent.length) return;
+  const fetchedAt = new Date().toISOString();
+  await persistPlayers(
+    adapter,
+    recent.map((record) => ({
+      provider: adapter.name,
+      externalId: record.playerExternalId,
+      fetchedAt,
+      sourceTimestamp: fetchedAt,
+      dataFreshness: "fresh",
+      rawMetadata: record.rawMetadata,
+      teamExternalId: record.toTeamExternalId,
+      name: record.playerName,
+      slug: slugify(record.playerName),
+      nationality: null,
+      position: null,
+      imageUrl: null,
+      dateOfBirth: null,
+    })),
+    summary,
+  );
+  const [playerMappings, teamMappings] = await Promise.all([
+    mappings(adapter.name, "player"),
+    mappings(adapter.name, "team"),
+  ]);
+  const playersByExternal = new Map(
+    [...playerMappings.values()].map((mapping) => [
+      mapping.external_id,
+      mapping.internal_id,
+    ]),
+  );
+  const teamsByExternal = new Map(
+    [...teamMappings.values()].map((mapping) => [
+      mapping.external_id,
+      mapping.internal_id,
+    ]),
+  );
+  const rows = recent.flatMap((record) => {
+    const playerId = playersByExternal.get(record.playerExternalId);
+    if (!playerId) return [];
+    const type = record.transferType.toLowerCase();
+    return [
+      {
+        player_id: playerId,
+        from_team_id: record.fromTeamExternalId
+          ? (teamsByExternal.get(record.fromTeamExternalId) ?? null)
+          : null,
+        to_team_id: record.toTeamExternalId
+          ? (teamsByExternal.get(record.toTeamExternalId) ?? null)
+          : null,
+        transfer_type: type.includes("loan")
+          ? "loan"
+          : type.includes("free")
+            ? "free"
+            : "permanent",
+        fee_text: record.transferType,
+        status: "confirmed",
+        reliability_score: 85,
+        transfer_date: record.transferDate,
+        provider: adapter.name,
+        provider_external_id: record.externalId,
+        raw_metadata: record.rawMetadata,
+      },
+    ];
+  });
+  if (!rows.length) return;
+  const { error } = await admin()
+    .from("transfers")
+    .upsert(rows, { onConflict: "provider,provider_external_id" });
+  if (error)
+    throw new ProviderError(
+      `Không thể lưu chuyển nhượng API-Football (${error.code ?? "database_error"}: ${error.message}).`,
+      "supabase",
+      false,
+    );
+  summary.updated += rows.length;
+}
+
+async function syncOneTeamTransfers(
+  adapter: SportsSyncAdapter,
+  competitionIds: string[] | undefined,
+  summary: SportsSyncSummary,
+) {
+  if (!adapter.getTransfers)
+    throw new ConfigurationError(
+      `${adapter.name} không hỗ trợ chuyển nhượng.`,
+      adapter.name,
+    );
+  const competitions = await selectedCompetitions(
+    adapter.name,
+    competitionIds,
+  );
+  const competition = competitions[0];
+  if (!competition) return;
+  const teamMappings = await mappings(adapter.name, "team");
+  const candidates = [...teamMappings.values()]
+    .filter((mapping) => mapping.season === competition.externalId)
+    .sort((a, b) => a.external_id.localeCompare(b.external_id));
+  if (!candidates.length) return;
+  const dayBucket = Math.floor(Date.now() / (24 * 60 * 60_000));
+  const team = candidates[dayBucket % candidates.length];
+  const records = await adapter.getTransfers(team.external_id);
+  summary.fetched = records.length;
+  summary.competitions.push(competition.externalId);
+  if (!summary.dryRun) await persistTransfers(adapter, records, summary);
+}
+
 async function writeSyncState(
   provider: SportsProviderName,
   capability: SportsCapability,
@@ -878,6 +1431,7 @@ export async function syncSports(
   options: {
     provider?: SportsProviderName;
     competitionIds?: string[];
+    date?: string;
     dryRun?: boolean;
   } = {},
 ): Promise<SportsSyncSummary> {
@@ -922,6 +1476,77 @@ export async function syncSports(
       summary.fetched = records.length;
       summary.competitions = records.map((item) => item.externalId);
       if (!summary.dryRun) await persistCompetitions(adapter, records, summary);
+    } else if (command === "details") {
+      await syncOneMatchDetails(adapter, summary);
+    } else if (command === "transfers") {
+      await syncOneTeamTransfers(adapter, options.competitionIds, summary);
+    } else if (command === "daily") {
+      if (!adapter.getDailyMatches)
+        throw new ConfigurationError(
+          `${adapter.name} không hỗ trợ đồng bộ theo ngày.`,
+          adapter.name,
+        );
+      const date = options.date ?? new Date().toISOString().slice(0, 10);
+      const bundle = await adapter.getDailyMatches(date);
+      const competitions = await selectedCompetitions(provider);
+      summary.fetched = bundle.matches.length + bundle.teams.length;
+      for (const competition of competitions) {
+        const teams = bundle.teams.filter(
+          (team) => team.competitionExternalId === competition.externalId,
+        );
+        const matches = bundle.matches.filter(
+          (match) =>
+            match.competitionExternalId === competition.externalId,
+        );
+        if (!teams.length && !matches.length) continue;
+        summary.competitions.push(competition.externalId);
+        if (!summary.dryRun) {
+          await persistTeams(adapter, competition, teams, summary);
+          await persistMatches(adapter, competition, matches, summary);
+          await writeSyncState(
+            provider,
+            "fixtures",
+            competition.id,
+            true,
+          );
+          await writeSyncState(
+            provider,
+            "results",
+            competition.id,
+            true,
+          );
+        }
+      }
+    } else if (
+      command === "live" &&
+      adapter.getLiveMatches &&
+      !options.competitionIds?.length
+    ) {
+      const competitions = await selectedCompetitions(provider);
+      const records = await adapter.getLiveMatches();
+      summary.fetched = records.length;
+      for (const competition of competitions) {
+        const competitionRecords = records.filter(
+          (record) =>
+            record.competitionExternalId === competition.externalId,
+        );
+        if (!competitionRecords.length) continue;
+        summary.competitions.push(competition.externalId);
+        if (!summary.dryRun)
+          await persistMatches(
+            adapter,
+            competition,
+            competitionRecords,
+            summary,
+          );
+        if (!summary.dryRun)
+          await writeSyncState(
+            provider,
+            "live_score",
+            competition.id,
+            true,
+          );
+      }
     } else {
       const competitions = await selectedCompetitions(
         provider,
@@ -967,6 +1592,8 @@ export async function syncSports(
                   )
                 : command === "results"
                   ? records.filter((item) => item.status === "finished")
+                  : command === "matches"
+                    ? records
                   : records.filter((item) =>
                       ["scheduled", "postponed", "cancelled"].includes(
                         item.status,
@@ -977,31 +1604,44 @@ export async function syncSports(
             if (!summary.dryRun)
               await persistMatches(adapter, competition, filtered, summary);
           }
-          const capability: SportsCapability =
+          const capabilities: SportsCapability[] =
             command === "live"
-              ? "live_score"
+              ? ["live_score"]
               : command === "teams"
-                ? "logos"
-                : command;
-          if (!summary.dryRun)
-            await writeSyncState(provider, capability, competition.id, true);
+                ? ["logos"]
+                : command === "matches"
+                  ? ["fixtures", "results"]
+                  : [command];
+          if (!summary.dryRun) {
+            for (const capability of capabilities)
+              await writeSyncState(
+                provider,
+                capability,
+                competition.id,
+                true,
+              );
+          }
         } catch (error) {
           const safe = toSafeError(error);
-          const capability: SportsCapability =
+          const capabilities: SportsCapability[] =
             command === "live"
-              ? "live_score"
+              ? ["live_score"]
               : command === "teams"
-                ? "logos"
-                : command;
+                ? ["logos"]
+                : command === "matches"
+                  ? ["fixtures", "results"]
+                  : [command];
           summary.errors.push(`${competition.externalId}: ${safe.message}`);
-          if (!summary.dryRun)
-            await writeSyncState(
-              provider,
-              capability,
-              competition.id,
-              false,
-              safe.message,
-            );
+          if (!summary.dryRun) {
+            for (const capability of capabilities)
+              await writeSyncState(
+                provider,
+                capability,
+                competition.id,
+                false,
+                safe.message,
+              );
+          }
         }
       }
     }

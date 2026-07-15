@@ -33,6 +33,21 @@ export interface Player {
   dateOfBirth?: string;
 }
 
+export interface TransferRecord {
+  id: string;
+  player: string;
+  playerSlug: string;
+  fromTeam?: string;
+  fromTeamSlug?: string;
+  toTeam?: string;
+  toTeamSlug?: string;
+  transferType: string;
+  fee?: string;
+  status: "rumor" | "negotiating" | "confirmed" | "cancelled";
+  transferDate?: string;
+  provider?: string;
+}
+
 export interface NewsItem {
   id: string;
   title: string;
@@ -118,7 +133,41 @@ export interface MatchStatistic {
   expectedGoals?: number;
 }
 
-export type MatchCapability = "score" | "venue" | "referee" | "events" | "lineups" | "statistics" | "standings" | "form" | "head_to_head" | "preview" | "recap" | "official_highlights";
+export interface MatchLineup {
+  team: string;
+  formation?: string;
+  starters: Array<{ name: string; number?: number; position?: string; grid?: string }>;
+  substitutes: Array<{ name: string; number?: number; position?: string }>;
+  coach?: string;
+}
+
+export interface MatchInjury {
+  team?: string;
+  player: string;
+  imageUrl?: string;
+  type?: string;
+  reason?: string;
+}
+
+export interface MatchPrediction {
+  advice?: string;
+  winner?: string;
+  homePercent?: string;
+  drawPercent?: string;
+  awayPercent?: string;
+  underOver?: string;
+}
+
+export interface HeadToHeadMatch {
+  id: string;
+  date: string;
+  home: string;
+  away: string;
+  homeScore?: number;
+  awayScore?: number;
+}
+
+export type MatchCapability = "score" | "venue" | "referee" | "events" | "lineups" | "statistics" | "injuries" | "standings" | "form" | "head_to_head" | "preview" | "recap" | "official_highlights";
 
 export interface MatchDetailData {
   match: Match & {
@@ -133,6 +182,10 @@ export interface MatchDetailData {
   };
   events: MatchEvent[];
   statistics: MatchStatistic[];
+  lineups: MatchLineup[];
+  injuries: MatchInjury[];
+  prediction: MatchPrediction | null;
+  headToHead: HeadToHeadMatch[];
   standings: Standing[];
   capabilities: Record<MatchCapability, boolean>;
   providerCoverage: Array<{ capability: string; provider: string }>;

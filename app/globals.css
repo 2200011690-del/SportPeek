@@ -1289,6 +1289,44 @@ h3 {
   font-size: 10px;
   font-weight: 700;
 }
+.transfer-data-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.transfer-data-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 14px;
+}
+.transfer-data-card > div,
+.transfer-data-card p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.transfer-data-card > div {
+  justify-content: space-between;
+}
+.transfer-data-card time,
+.transfer-data-card small {
+  color: var(--muted);
+  font-size: 8px;
+}
+.transfer-data-card h3 {
+  margin: 14px 0 10px;
+  font-size: 14px;
+}
+.transfer-data-card p {
+  margin: 0 0 12px;
+  font-size: 9px;
+}
+@media (max-width: 720px) {
+  .transfer-data-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .match-groups {
   display: grid;
   gap: 14px;
@@ -3608,6 +3646,86 @@ h3 {
 }
 .match-event-list strong {
   text-transform: capitalize;
+}
+.lineup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.lineup-team {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 14px;
+}
+.lineup-team h3 {
+  margin: 0 0 5px;
+  font-size: 12px;
+}
+.lineup-team p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 8px;
+}
+.lineup-team > strong {
+  display: block;
+  margin: 12px 0 6px;
+  color: var(--accent);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.lineup-team ol,
+.lineup-team ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 8px;
+}
+.lineup-team li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.lineup-team li span {
+  width: 22px;
+  color: var(--muted);
+  text-align: right;
+}
+.prediction-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.prediction-grid > div {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 16px 10px;
+  text-align: center;
+}
+.prediction-grid span,
+.prediction-grid strong {
+  display: block;
+}
+.prediction-grid span {
+  color: var(--muted);
+  font-size: 8px;
+}
+.prediction-grid strong {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 18px;
+}
+@media (max-width: 720px) {
+  .lineup-grid {
+    grid-template-columns: 1fr;
+  }
+  .match-event-list > div {
+    grid-template-columns: 42px 1fr;
+  }
+  .match-event-list > div > span {
+    grid-column: 2;
+  }
 }
 .why-recommended {
   display: flex;

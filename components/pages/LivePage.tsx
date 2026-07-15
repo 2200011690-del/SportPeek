@@ -158,6 +158,10 @@ export function MatchDetail({ id }: { id: string }) {
     match,
     events,
     statistics,
+    lineups,
+    injuries,
+    prediction,
+    headToHead,
     standings: matchStandings,
     capabilities,
     providerCoverage,
@@ -180,6 +184,10 @@ export function MatchDetail({ id }: { id: string }) {
     ["overview", "Tổng quan"],
     ...(capabilities.events ? [["events", "Sự kiện"]] : []),
     ...(capabilities.statistics ? [["stats", "Thống kê"]] : []),
+    ...(capabilities.lineups ? [["lineups", "Đội hình"]] : []),
+    ...(capabilities.injuries ? [["injuries", "Vắng mặt"]] : []),
+    ...(capabilities.preview ? [["prediction", "Dự đoán"]] : []),
+    ...(capabilities.head_to_head ? [["h2h", "Đối đầu"]] : []),
     ...(capabilities.standings ? [["standings", "Bảng xếp hạng"]] : []),
   ] as Array<[string, string]>;
   const statusLabel =
@@ -370,6 +378,128 @@ export function MatchDetail({ id }: { id: string }) {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </>
+            )}
+            {activeTab === "lineups" && (
+              <>
+                <SectionHeading
+                  eyebrow="ĐỘI HÌNH"
+                  title="Danh sách thi đấu từ API-Football"
+                />
+                <div className="lineup-grid">
+                  {lineups.map((lineup) => (
+                    <section key={lineup.team} className="lineup-team">
+                      <h3>
+                        {lineup.team}
+                        {lineup.formation ? ` · ${lineup.formation}` : ""}
+                      </h3>
+                      {lineup.coach && <p>HLV: {lineup.coach}</p>}
+                      <strong>Đá chính</strong>
+                      <ol>
+                        {lineup.starters.map((player, index) => (
+                          <li key={`${player.name}-${index}`}>
+                            <span>{player.number ?? "–"}</span>
+                            {player.name}
+                            {player.position ? ` · ${player.position}` : ""}
+                          </li>
+                        ))}
+                      </ol>
+                      {lineup.substitutes.length > 0 && (
+                        <>
+                          <strong>Dự bị</strong>
+                          <ul>
+                            {lineup.substitutes.map((player, index) => (
+                              <li key={`${player.name}-${index}`}>
+                                <span>{player.number ?? "–"}</span>
+                                {player.name}
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
+                    </section>
+                  ))}
+                </div>
+              </>
+            )}
+            {activeTab === "injuries" && (
+              <>
+                <SectionHeading
+                  eyebrow="VẮNG MẶT"
+                  title="Chấn thương và treo giò"
+                />
+                <div className="match-event-list">
+                  {injuries.map((injury, index) => (
+                    <div key={`${injury.player}-${index}`}>
+                      <strong>{injury.player}</strong>
+                      <span>
+                        {[injury.team, injury.type, injury.reason]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {activeTab === "prediction" && prediction && (
+              <>
+                <SectionHeading
+                  eyebrow="DỰ ĐOÁN DỮ LIỆU"
+                  title={prediction.advice ?? "Phân tích trước trận"}
+                />
+                <div className="prediction-grid">
+                  <div>
+                    <span>{match.home}</span>
+                    <strong>{prediction.homePercent ?? "–"}</strong>
+                  </div>
+                  <div>
+                    <span>Hòa</span>
+                    <strong>{prediction.drawPercent ?? "–"}</strong>
+                  </div>
+                  <div>
+                    <span>{match.away}</span>
+                    <strong>{prediction.awayPercent ?? "–"}</strong>
+                  </div>
+                </div>
+                <p className="muted-copy">
+                  {[
+                    prediction.winner
+                      ? `Nghiêng về ${prediction.winner}`
+                      : "",
+                    prediction.underOver
+                      ? `Mốc bàn thắng ${prediction.underOver}`
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              </>
+            )}
+            {activeTab === "h2h" && (
+              <>
+                <SectionHeading
+                  eyebrow="ĐỐI ĐẦU"
+                  title="Năm lần gặp gần nhất"
+                />
+                <div className="match-event-list">
+                  {headToHead.map((previous) => (
+                    <div key={previous.id}>
+                      <time>
+                        {new Intl.DateTimeFormat("vi-VN", {
+                          timeZone: "Asia/Ho_Chi_Minh",
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                        }).format(new Date(previous.date))}
+                      </time>
+                      <strong>
+                        {previous.home} {previous.homeScore ?? "–"}–
+                        {previous.awayScore ?? "–"} {previous.away}
+                      </strong>
+                    </div>
+                  ))}
                 </div>
               </>
             )}
