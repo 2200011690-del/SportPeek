@@ -211,13 +211,26 @@ export async function POST(request: NextRequest, { params }: Context) {
   }
   if (["cron/ingest", "admin/ingest"].includes(route)) {
     if (!protectedBySecret(request)) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
-    const rate = rateLimit(`cron:${clientKey(request)}`, 5, 300_000);
+    const rate = rateLimit(`cron:${clientKey(request)}`, 10, 300_000);
     if (!rate.allowed) return NextResponse.json({ error: "Đã vượt giới hạn" }, { status: 429 });
+    const mode = body && typeof body === "object" && "mode" in body ? String((body as any).mode) : "both";
+    const recluster = body && typeof body === "object" && "recluster" in body ? Boolean((body as any).recluster) : false;
+    const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
     try {
+      if (mode === "rss") {
+        const rssResult = await syncRss();
+        return NextResponse.json({ rss: rssResult });
+      }
+      if (mode === "stories") {
+        // useAi defaults to false to avoid hitting Cloudflare's 50-subrequest limit;
+        // pass { mode: 'stories', useAi: true } explicitly to enable AI processing
+        const explicitUseAi = body && typeof body === "object" && "useAi" in body ? Boolean((body as any).useAi) : false;
+        const storyResult = await processStories({ useAi: explicitUseAi, recluster, limit: 5 });
+        return NextResponse.json({ stories: storyResult });
+      }
+      // mode === "both": run sequentially with small limits
       const rssResult = await syncRss();
-      const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
-      const recluster = body && typeof body === "object" && "recluster" in body ? Boolean((body as any).recluster) : false;
-      const storyResult = await processStories({ useAi, recluster, limit: 30 });
+      const storyResult = await processStories({ useAi, recluster, limit: 5 });
       return NextResponse.json({ rss: rssResult, stories: storyResult });
     }
     catch (error) { const safe = toSafeError(error); return NextResponse.json({ status: "configuration_required", error: { code: safe.code, message: safe.message } }, { status: safe.status }); }

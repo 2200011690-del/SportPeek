@@ -65,16 +65,24 @@ const worker = {
     }
     globalThis.__SPORTPEEK_WORKERS_AI__ = runtimeEnv.AI;
 
+    // Alternate between RSS sync and story processing to stay within
+    // Cloudflare Workers' 50-subrequest-per-invocation limit.
+    // Even minutes -> RSS sync only. Odd minutes -> story processing only.
+    const minuteOfDay = Math.floor(Date.now() / 60_000) % 2;
+
     const run = async () => {
       try {
-        console.log("[Cron] Running scheduled RSS sync...");
-        const rssSummary = await syncRss();
-        console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
-
-        console.log("[Cron] Running scheduled story processing...");
-        const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
-        const storySummary = await processStories({ useAi, limit: 30 });
-        console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
+        if (minuteOfDay === 0) {
+          // Even invocation: sync RSS feeds
+          console.log("[Cron] Running RSS sync...");
+          const rssSummary = await syncRss();
+          console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
+        } else {
+          // Odd invocation: process stories (small batch, no AI to stay under subrequest limit)
+          console.log("[Cron] Running story processing...");
+          const storySummary = await processStories({ useAi: false, limit: 5 });
+          console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
+        }
       } catch (error) {
         console.error("[Cron] Error running scheduled task:", error);
       }
