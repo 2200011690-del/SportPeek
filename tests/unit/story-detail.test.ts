@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getHighResolutionStoryImageUrl } from "../../lib/stories/images";
-import { cleanSummaryParagraphs, prioritizeAISummaryCandidates } from "../../lib/stories/summary";
+import { cleanSummaryParagraphs, prioritizeAISummaryCandidates, storyDisplaySummaryParagraphs } from "../../lib/stories/summary";
+import { CLUSTER_SUMMARY_TASK } from "../../lib/ai/remote-base";
 
 test("story detail upgrades known publisher thumbnails without changing unrelated images", () => {
   assert.equal(
@@ -22,6 +23,17 @@ test("story detail hides obsolete processing notices but keeps full summaries", 
     "Bản tin chưa được xử lý bởi AI; nội dung đang hiển thị từ metadata nguồn.",
     "Thông tin mở rộng từ bài nguồn.",
   ), ["Bản tóm tắt AI đầy đủ.", "Thông tin mở rộng từ bài nguồn."]);
+});
+
+test("AI stories render one editorial summary instead of appending source excerpts", () => {
+  assert.deepEqual(storyDisplaySummaryParagraphs({
+    aiGenerated: true,
+    summary: "AI đã gộp dữ kiện chung thành một bản tin duy nhất.",
+    summaryLong: "AI đã gộp dữ kiện chung thành một bản tin duy nhất.\n\nNguồn A kể lại cùng sự kiện.\n\nNguồn B tiếp tục kể lại cùng sự kiện.",
+  }), ["AI đã gộp dữ kiện chung thành một bản tin duy nhất."]);
+  assert.match(CLUSTER_SUMMARY_TASK, /gộp các dữ kiện chung/);
+  assert.match(CLUSTER_SUMMARY_TASK, /không lặp cùng một ý/);
+  assert.match(CLUSTER_SUMMARY_TASK, /không nối các trích đoạn/);
 });
 
 test("AI backfill prioritizes unprocessed international stories", () => {

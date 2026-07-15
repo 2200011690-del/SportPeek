@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/ui/badges";
 import { fetchStoryDetail, loadingStoryReaderState, type StoryReaderState } from "@/lib/stories/client";
 import { getHighResolutionStoryImageUrl } from "@/lib/stories/images";
 import { isSafeExternalUrl } from "@/lib/stories/schema";
-import { cleanSummaryParagraphs } from "@/lib/stories/summary";
+import { storyDisplaySummaryParagraphs } from "@/lib/stories/summary";
 
 export default function RichNewsDetail({ slug }: { slug: string; bookmarks: Set<string>; onBookmark: (id: string) => void }) {
   const router = useRouter();
@@ -51,7 +51,7 @@ export default function RichNewsDetail({ slug }: { slug: string; bookmarks: Set<
   }
 
   const { story } = readerState.data;
-  const summaryParagraphs = cleanSummaryParagraphs(story.summary, story.summaryLong);
+  const summaryParagraphs = storyDisplaySummaryParagraphs(story);
   const imageUrl = getHighResolutionStoryImageUrl(story.imageUrl);
   const sourceLinks = [...new Map(story.articles
     .filter((article) => isSafeExternalUrl(article.originalUrl))

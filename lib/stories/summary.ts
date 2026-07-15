@@ -16,6 +16,12 @@ export function buildLongSummary(...values: Array<string | null | undefined>): s
   return cleanSummaryParagraphs(...values).join("\n\n").slice(0, 12_000);
 }
 
+export function storyDisplaySummaryParagraphs(story: Pick<StoryCluster, "aiGenerated" | "summary" | "summaryLong">): string[] {
+  return story.aiGenerated
+    ? cleanSummaryParagraphs(story.summary)
+    : cleanSummaryParagraphs(story.summary, story.summaryLong);
+}
+
 export function prioritizeAISummaryCandidates<T extends Pick<StoryCluster, "aiGenerated" | "language" | "updatedAt">>(stories: T[], limit: number): T[] {
   return stories
     .filter((story) => !story.aiGenerated)
