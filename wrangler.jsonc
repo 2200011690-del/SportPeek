@@ -25,7 +25,7 @@
     "NEXT_PUBLIC_SUPABASE_URL": "https://atlvqdryzgsohbjglxng.supabase.co",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_r5Ul01CZq9gJ-NhtbBP6DA_YmfNGYJg",
     "AI_PROVIDER": "cloudflare",
-    "CLOUDFLARE_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
+    "CLOUDFLARE_AI_MODEL": "@cf/meta/llama-3.2-1b-instruct",
     "SPORTS_DATA_PROVIDER": "football-data",
     "FOOTBALL_DATA_BASE_URL": "https://api.football-data.org/v4",
     "FOOTBALL_DATA_COMPETITIONS": "PL,CL,PD,SA,BL1,FL1,DED,PPL,BSA,ELC,WC",

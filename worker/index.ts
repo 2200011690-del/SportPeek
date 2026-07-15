@@ -84,7 +84,7 @@ const worker = {
         } else {
           // Odd invocation: process a small newest-first batch with Workers AI.
           console.log("[Cron] Running story processing...");
-          const storySummary = await processStories({ useAi: true, limit: 5 });
+          const storySummary = await processStories({ useAi: true, aiLimit: 1, limit: 5 });
           console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
         }
       } catch (error) {

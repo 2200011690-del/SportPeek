@@ -4,7 +4,7 @@ import type { NewsEnrichment } from "./openai";
 import { agreementsSchema, answerSchema, disputesSchema, matchEvaluationSchema, timelineSchema } from "./remote-base";
 import type { ClusterArticleInput } from "./types";
 
-export const DEFAULT_CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+export const DEFAULT_CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.2-1b-instruct";
 
 type WorkersAIInput = {
   messages: Array<{ role: "system" | "user"; content: string }>;
@@ -181,7 +181,7 @@ export class CloudflareAIProvider implements AIProvider {
         keyPoints: { type: "array", maxItems: 3, items: { type: "string" } },
       },
     };
-    const result = await runStructured(schema, jsonSchema, "Tóm tắt cụm tin thể thao bằng tiếng Việt. Chỉ dùng dữ kiện trong đầu vào, không suy đoán.", input, 1200);
+    const result = await runStructured(schema, jsonSchema, "Tóm tắt cụm tin thể thao bằng tiếng Việt. Chỉ dùng dữ kiện trong đầu vào, không suy đoán.", input, 500);
     return { ...result, sourceIds: input.articles.map((article) => article.id) };
   }
 

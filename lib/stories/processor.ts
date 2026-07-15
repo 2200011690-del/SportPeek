@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getAIProvider } from "@/lib/ai";
 import { HeuristicAIProvider } from "@/lib/ai/heuristic";
+import { isAIQuotaExceeded, safeAIErrorMessage } from "@/lib/ai/quota";
 import type { AIProvider, ClusterArticleInput } from "@/lib/ai/types";
 import { ConfigurationError, ProviderError, toSafeError } from "@/lib/core/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -16,7 +17,8 @@ type RawRow = { id: string; source_id: string; external_id: string | null; origi
 type ArticleRecord = ClusterableArticle & { sourceName: string; sourceLogoUrl: string | null; reliability: number; isOfficial: boolean; originalUrl: string; canonicalUrl: string | null; author: string | null; imageUrl: string | null; fetchedAt: string; language: "vi" | "en"; contentHash: string; rawMetadata: Record<string, unknown> };
 type EntityRecord = { id: string; name: string; slug: string };
 type Draft = { id: string; clusterKey: string; articles: ArticleRecord[]; existing: boolean; touched: boolean };
-export type StoryProcessingSummary = { jobId: string; dryRun: boolean; inputArticles: number; createdClusters: number; updatedClusters: number; mergedArticles: number; failedArticles: number; aiProvider: string; errors: string[] };
+type RemoteAIExecution = { remaining: number; attempts: number; generated: number; errors: string[] };
+export type StoryProcessingSummary = { jobId: string; dryRun: boolean; inputArticles: number; createdClusters: number; updatedClusters: number; mergedArticles: number; failedArticles: number; aiProvider: string; aiAttempts: number; aiGenerated: number; aiErrors: string[]; errors: string[] };
 
 function admin() { const client = createAdminClient(); if (!client) throw new ConfigurationError("Thiếu Supabase service role cho story processor.", "supabase"); return client; }
 function one<T>(value: T | T[] | null): T | null { return Array.isArray(value) ? value[0] ?? null : value; }
@@ -47,20 +49,26 @@ function transparentSummary(articles: ArticleRecord[], suggested?: string): stri
   return words(result).slice(0, 180).join(" ");
 }
 
-async function buildStory(draft: Draft, provider: AIProvider, teams: EntityRecord[], competitions: EntityRecord[], useRemoteAi: boolean): Promise<{ story: StoryCluster; teamIds: string[]; competitionId: string | null }> {
+async function buildStory(draft: Draft, provider: AIProvider, teams: EntityRecord[], competitions: EntityRecord[], remoteAI: RemoteAIExecution): Promise<{ story: StoryCluster; teamIds: string[]; competitionId: string | null }> {
   const articles = [...draft.articles].sort((a, b) => Number(b.isOfficial) - Number(a.isOfficial) || b.reliability - a.reliability || Date.parse(b.publishedAt) - Date.parse(a.publishedAt)); const lead = articles[0];
   const input: ClusterArticleInput[] = articles.map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt, publishedAt: article.publishedAt, sourceName: article.sourceName })); const heuristic = new HeuristicAIProvider();
   let generated = false; let generatedSummary = await heuristic.summarizeCluster({ articles: input });
-  if (useRemoteAi && !["heuristic", "disabled", "mock"].includes(provider.name)) {
+  if (remoteAI.remaining > 0 && !["heuristic", "disabled", "mock"].includes(provider.name)) {
+    remoteAI.remaining -= 1;
+    remoteAI.attempts += 1;
     try {
       const candidate = await provider.summarizeCluster({ articles: input });
       const allowed = new Set(input.map((article) => article.id));
       if (!candidate.sourceIds.every((id) => allowed.has(id))) throw new Error("AI returned unknown source IDs");
       generatedSummary = candidate;
       generated = true;
+      remoteAI.generated += 1;
     } catch (error) {
       // AI must enhance the feed, never hold fresh source metadata hostage.
-      console.warn(`[Story AI] Falling back to heuristic for ${draft.id}:`, error);
+      const message = safeAIErrorMessage(error);
+      remoteAI.errors.push(message);
+      if (isAIQuotaExceeded(error)) remoteAI.remaining = 0;
+      console.warn(`[Story AI] Falling back to heuristic for ${draft.id}: ${message}`);
     }
   }
   // One remote call per story keeps cron execution predictable. The validated
@@ -112,8 +120,8 @@ async function persistDrafts(drafts: Array<{ draft: Draft; story: StoryCluster; 
   const articleIds = [...new Set(drafts.flatMap(({ draft }) => draft.articles.map((article) => article.id)))]; for (let index = 0; index < articleIds.length; index += 200) { const { error } = await client.from("raw_articles").update({ processing_status: "completed" }).in("id", articleIds.slice(index, index + 200)); if (error) throw new ProviderError("Không thể hoàn tất raw articles.", "supabase"); }
 }
 
-export async function processStories(options: { dryRun?: boolean; includeFailed?: boolean; recluster?: boolean; useAi?: boolean; limit?: number } = {}): Promise<StoryProcessingSummary> {
-  const client = admin(); const jobId = randomUUID(); const provider = getAIProvider(); const summary: StoryProcessingSummary = { jobId, dryRun: Boolean(options.dryRun), inputArticles: 0, createdClusters: 0, updatedClusters: 0, mergedArticles: 0, failedArticles: 0, aiProvider: provider.name, errors: [] };
+export async function processStories(options: { dryRun?: boolean; includeFailed?: boolean; recluster?: boolean; useAi?: boolean; aiLimit?: number; limit?: number } = {}): Promise<StoryProcessingSummary> {
+  const client = admin(); const jobId = randomUUID(); const provider = getAIProvider(); const remoteAI: RemoteAIExecution = { remaining: options.useAi ? Math.max(0, options.aiLimit ?? 1) : 0, attempts: 0, generated: 0, errors: [] }; const summary: StoryProcessingSummary = { jobId, dryRun: Boolean(options.dryRun), inputArticles: 0, createdClusters: 0, updatedClusters: 0, mergedArticles: 0, failedArticles: 0, aiProvider: provider.name, aiAttempts: 0, aiGenerated: 0, aiErrors: [], errors: [] };
   if (options.recluster && !options.dryRun) { await client.from("story_cluster_articles").delete().not("cluster_id", "is", null); await client.from("story_clusters").delete().not("id", "is", null); await client.from("raw_articles").update({ processing_status: "pending" }).neq("processing_status", "pending"); }
   let query = client.from("raw_articles").select("id,source_id,external_id,original_url,canonical_url,title,normalized_title,excerpt,author,image_url,published_at,fetched_at,content_hash,language,processing_status,raw_metadata,news_sources(name,logo_url,is_official,reliability_score)").order("published_at", { ascending: false }).limit(options.limit ?? 1000); query = options.recluster ? query : query.in("processing_status", ["pending", "failed"]);
   const { data, error } = await query; if (error) throw new ProviderError("Không thể đọc raw articles pending.", "supabase"); const incoming = ((data ?? []) as unknown as RawRow[]).map(toArticle); summary.inputArticles = incoming.length;
@@ -126,8 +134,10 @@ export async function processStories(options: { dryRun?: boolean; includeFailed?
     else { drafts.push({ id: randomUUID(), clusterKey: stableClusterKey(article), articles: [article], existing: false, touched: true }); summary.createdClusters += 1; }
   }
   const touched = drafts.filter((draft) => draft.touched); const entities = await loadEntities(); const built = [] as Array<{ draft: Draft; story: StoryCluster; teamIds: string[]; competitionId: string | null }>;
-  for (const draft of touched) { try { built.push({ draft, ...(await buildStory(draft, provider, entities.teams, entities.competitions, Boolean(options.useAi))) }); if (draft.existing) summary.updatedClusters += 1; } catch (error) { const message = error instanceof Error ? error.message.slice(0, 600) : toSafeError(error).message; summary.errors.push(`${draft.id}: ${message}`); summary.failedArticles += draft.articles.length; const failedIds = draft.articles.map((a) => a.id); try { await client.from("raw_articles").update({ processing_status: "failed" }).in("id", failedIds); } catch { /* ignore */ } } }
-  if (!summary.dryRun) { await client.from("ingestion_jobs").insert({ id: jobId, job_type: "stories:process", provider: provider.name, status: "processing", fetched_count: incoming.length, metadata: { useAi: Boolean(options.useAi), recluster: Boolean(options.recluster) } }); try { if (built.length) await persistDrafts(built, summary); await client.from("ingestion_jobs").update({ status: summary.errors.length ? "failed" : "completed", fetched_count: incoming.length, inserted_count: summary.createdClusters, updated_count: summary.updatedClusters, skipped_count: summary.failedArticles, error_code: summary.errors.length ? "PARTIAL_FAILURE" : null, error_message: summary.errors.join("; ").slice(0, 1000) || null, completed_at: new Date().toISOString() }).eq("id", jobId); } catch (error) { const safe = toSafeError(error); await client.from("ingestion_jobs").update({ status: "failed", error_code: safe.code, error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId); throw error; } }
+  for (const draft of touched) { try { built.push({ draft, ...(await buildStory(draft, provider, entities.teams, entities.competitions, remoteAI)) }); if (draft.existing) summary.updatedClusters += 1; } catch (error) { const message = error instanceof Error ? error.message.slice(0, 600) : toSafeError(error).message; summary.errors.push(`${draft.id}: ${message}`); summary.failedArticles += draft.articles.length; const failedIds = draft.articles.map((a) => a.id); try { await client.from("raw_articles").update({ processing_status: "failed" }).in("id", failedIds); } catch { /* ignore */ } } }
+  summary.aiAttempts = remoteAI.attempts; summary.aiGenerated = remoteAI.generated; summary.aiErrors = remoteAI.errors;
+  const jobMetadata = { useAi: Boolean(options.useAi), aiLimit: options.aiLimit ?? 1, aiAttempts: summary.aiAttempts, aiGenerated: summary.aiGenerated, aiErrors: summary.aiErrors, recluster: Boolean(options.recluster) };
+  if (!summary.dryRun) { await client.from("ingestion_jobs").insert({ id: jobId, job_type: "stories:process", provider: provider.name, status: "processing", fetched_count: incoming.length, metadata: jobMetadata }); try { if (built.length) await persistDrafts(built, summary); await client.from("ingestion_jobs").update({ status: summary.errors.length ? "failed" : "completed", fetched_count: incoming.length, inserted_count: summary.createdClusters, updated_count: summary.updatedClusters, skipped_count: summary.failedArticles, error_code: summary.errors.length ? "PARTIAL_FAILURE" : null, error_message: summary.errors.join("; ").slice(0, 1000) || null, metadata: jobMetadata, completed_at: new Date().toISOString() }).eq("id", jobId); } catch (error) { const safe = toSafeError(error); await client.from("ingestion_jobs").update({ status: "failed", error_code: safe.code, error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId); throw error; } }
   return summary;
 }
 
@@ -138,4 +148,4 @@ export async function summarizePersistedStories(options: { dryRun?: boolean; lim
   return { provider: provider.name, dryRun: Boolean(options.dryRun), updated, errors };
 }
 
-export async function storyProcessingReport() { const client = admin(); const [raw, clusters, links, aiJobs, jobs] = await Promise.all([client.from("raw_articles").select("processing_status"), client.from("story_clusters").select("id,status,ai_generated,ai_provider,last_updated_at"), client.from("story_cluster_articles").select("cluster_id,raw_article_id"), client.from("ai_jobs").select("id,status,provider,error_message,created_at,completed_at").order("created_at", { ascending: false }).limit(20), client.from("ingestion_jobs").select("id,status,fetched_count,inserted_count,updated_count,skipped_count,error_code,started_at,completed_at").eq("job_type", "stories:process").order("started_at", { ascending: false }).limit(10)]); const error = raw.error ?? clusters.error ?? links.error ?? aiJobs.error ?? jobs.error; if (error) throw new ProviderError("Không thể tạo stories report.", "supabase"); const rawCounts = Object.groupBy(raw.data ?? [], (item) => item.processing_status); return { generatedAt: new Date().toISOString(), rawArticles: Object.fromEntries(Object.entries(rawCounts).map(([key, values]) => [key, values?.length ?? 0])), clusters: clusters.data?.length ?? 0, clusteredArticleLinks: links.data?.length ?? 0, aiGeneratedClusters: clusters.data?.filter((item) => item.ai_generated).length ?? 0, recentAiJobs: aiJobs.data ?? [], recentJobs: jobs.data ?? [] }; }
+export async function storyProcessingReport() { const client = admin(); const [raw, clusters, links, aiJobs, jobs] = await Promise.all([client.from("raw_articles").select("processing_status"), client.from("story_clusters").select("id,status,ai_generated,ai_provider,last_updated_at"), client.from("story_cluster_articles").select("cluster_id,raw_article_id"), client.from("ai_jobs").select("id,status,provider,error_message,created_at,completed_at").order("created_at", { ascending: false }).limit(20), client.from("ingestion_jobs").select("id,status,fetched_count,inserted_count,updated_count,skipped_count,error_code,metadata,started_at,completed_at").eq("job_type", "stories:process").order("started_at", { ascending: false }).limit(10)]); const error = raw.error ?? clusters.error ?? links.error ?? aiJobs.error ?? jobs.error; if (error) throw new ProviderError("Không thể tạo stories report.", "supabase"); const rawCounts = Object.groupBy(raw.data ?? [], (item) => item.processing_status); return { generatedAt: new Date().toISOString(), rawArticles: Object.fromEntries(Object.entries(rawCounts).map(([key, values]) => [key, values?.length ?? 0])), clusters: clusters.data?.length ?? 0, clusteredArticleLinks: links.data?.length ?? 0, aiGeneratedClusters: clusters.data?.filter((item) => item.ai_generated).length ?? 0, recentAiJobs: aiJobs.data ?? [], recentJobs: jobs.data ?? [] }; }
