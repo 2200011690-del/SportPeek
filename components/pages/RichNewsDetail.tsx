@@ -48,8 +48,9 @@ export default function RichNewsDetail({ slug }: { slug: string; bookmarks: Set<
   }
 
   const { story } = readerState.data;
-  const summaryParagraphs = story.summaryLong.split(/\n{2,}/).map((paragraph) => paragraph.trim()).filter(Boolean);
-  if (!summaryParagraphs.length) summaryParagraphs.push(story.summary);
+  const summaryParagraphs = [...new Set([story.summary, ...story.summaryLong.split(/\n{2,}/)]
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean))];
   const sourceLinks = [...new Map(story.articles
     .filter((article) => isSafeExternalUrl(article.originalUrl))
     .map((article) => [article.originalUrl, article])).values()];
