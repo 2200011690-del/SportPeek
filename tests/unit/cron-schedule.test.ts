@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  scheduledFootballDataTask,
   scheduledPipelineTask,
   scheduledSportsTask,
   scheduledStoryProcessingOptions,
@@ -43,4 +44,31 @@ test("sports cron rotates one curated OpenLigaDB competition per slot", () => {
     competitionIds: ["dfb"],
   });
   assert.equal(scheduledSportsTask(Date.UTC(2026, 6, 15, 5, 30)), null);
+});
+
+test("football-data cron backfills and refreshes one competition per slot", () => {
+  assert.deepEqual(scheduledFootballDataTask(Date.UTC(2026, 6, 15, 0, 18)), {
+    command: "competitions",
+  });
+  assert.deepEqual(scheduledFootballDataTask(Date.UTC(2026, 6, 15, 0, 20)), {
+    command: "teams",
+    competitionIds: ["PL"],
+  });
+  assert.deepEqual(scheduledFootballDataTask(Date.UTC(2026, 6, 15, 13, 24)), {
+    command: "fixtures",
+    competitionIds: ["BL1"],
+  });
+  assert.deepEqual(scheduledFootballDataTask(Date.UTC(2026, 6, 15, 20, 31)), {
+    command: "results",
+    competitionIds: ["CLI"],
+  });
+  assert.deepEqual(scheduledFootballDataTask(Date.UTC(2026, 6, 15, 15, 30)), {
+    command: "standings",
+    competitionIds: ["WC"],
+  });
+  assert.deepEqual(scheduledFootballDataTask(Date.UTC(2026, 6, 15, 12, 46)), {
+    command: "live",
+    competitionIds: ["CLI"],
+  });
+  assert.equal(scheduledFootballDataTask(Date.UTC(2026, 6, 15, 5, 30)), null);
 });

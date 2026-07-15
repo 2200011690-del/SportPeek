@@ -37,6 +37,24 @@ export type SportsSyncSummary = {
   errors: string[];
 };
 
+export function sportsMatchQueryOptions(
+  command: "fixtures" | "results" | "live",
+  season: string | null,
+  now = Date.now(),
+): { dateFrom?: string; dateTo?: string; season?: string } {
+  const seasonOption = season ?? undefined;
+  if (command !== "live") return { season: seasonOption };
+  const from = new Date(now);
+  from.setUTCDate(from.getUTCDate() - 1);
+  const to = new Date(now);
+  to.setUTCDate(to.getUTCDate() + 1);
+  return {
+    dateFrom: from.toISOString().slice(0, 10),
+    dateTo: to.toISOString().slice(0, 10),
+    season: seasonOption,
+  };
+}
+
 type Mapping = { internal_id: string; external_id: string; season: string };
 type CompetitionRecord = {
   id: string;
@@ -118,26 +136,93 @@ async function upsertMappings(
   }>,
 ) {
   if (!rows.length) return;
-  const { error } = await admin()
-    .from("provider_entity_mappings")
-    .upsert(
-      rows.map((row) => ({
-        provider,
-        entity_type: entityType,
-        internal_id: row.internalId,
-        external_id: row.externalId,
-        season: row.season,
-        metadata: row.metadata,
-        confidence: 1,
-      })),
-      { onConflict: "provider,entity_type,external_id,season" },
+  const client = admin();
+  const deduped = rows.filter((row, index, all) => {
+    const externalKey = `${row.externalId}:${row.season}`;
+    const internalKey = `${row.internalId}:${row.season}`;
+    return (
+      all.findIndex(
+        (candidate) =>
+          `${candidate.externalId}:${candidate.season}` === externalKey,
+      ) === index &&
+      all.findIndex(
+        (candidate) =>
+          `${candidate.internalId}:${candidate.season}` === internalKey,
+      ) === index
     );
+  });
+  const { data: existing, error: readError } = await client
+    .from("provider_entity_mappings")
+    .select("id,internal_id,external_id,season")
+    .eq("provider", provider)
+    .eq("entity_type", entityType);
+  if (readError)
+    throw new ProviderError(
+      "Không thể đối chiếu provider mapping.",
+      "supabase",
+    );
+  const staleIds = new Set<string>();
+  for (const row of deduped) {
+    for (const current of (existing ?? []) as Array<{
+      id: string;
+      internal_id: string;
+      external_id: string;
+      season: string;
+    }>) {
+      const sameSeason = current.season === row.season;
+      if (
+        sameSeason &&
+        ((current.external_id === row.externalId &&
+          current.internal_id !== row.internalId) ||
+          (current.internal_id === row.internalId &&
+            current.external_id !== row.externalId))
+      )
+        staleIds.add(current.id);
+    }
+  }
+  if (staleIds.size) {
+    const { error: deleteError } = await client
+      .from("provider_entity_mappings")
+      .delete()
+      .in("id", [...staleIds]);
+    if (deleteError)
+      throw new ProviderError(
+        "Không thể dọn provider mapping xung đột.",
+        "supabase",
+      );
+  }
+  const { error } = await client.from("provider_entity_mappings").upsert(
+    deduped.map((row) => ({
+      provider,
+      entity_type: entityType,
+      internal_id: row.internalId,
+      external_id: row.externalId,
+      season: row.season,
+      metadata: row.metadata,
+      confidence: 1,
+    })),
+    { onConflict: "provider,entity_type,external_id,season" },
+  );
   if (error)
     throw new ProviderError(
       `Không thể lưu provider mapping (${error.code ?? "database_error"}: ${error.message}).`,
       "supabase",
       false,
     );
+}
+
+export function competitionRecordIsActive(
+  record: NormalizedCompetition,
+  now = Date.now(),
+): boolean {
+  const rawSeason = record.rawMetadata.currentSeason;
+  if (!rawSeason || typeof rawSeason !== "object" || Array.isArray(rawSeason))
+    return true;
+  const endDate = (rawSeason as Record<string, unknown>).endDate;
+  if (typeof endDate !== "string") return true;
+  const parsed = Date.parse(`${endDate}T23:59:59.999Z`);
+  if (!Number.isFinite(parsed)) return true;
+  return parsed >= now - 365 * 24 * 60 * 60_000;
 }
 
 async function writeCapabilities(adapter: SportsSyncAdapter) {
@@ -182,7 +267,7 @@ async function persistCompetitions(
     country: record.country,
     logo_url: record.logoUrl,
     current_season: record.season,
-    is_active: true,
+    is_active: competitionRecordIsActive(record),
   }));
   if (mappedRows.length) {
     const { error } = await client
@@ -225,7 +310,7 @@ async function persistCompetitions(
             country: record.country,
             logo_url: record.logoUrl,
             current_season: record.season,
-            is_active: true,
+            is_active: competitionRecordIsActive(record),
           })),
           { onConflict: "slug" },
         )
@@ -273,7 +358,7 @@ async function persistCompetitions(
 
   const configRows = records.flatMap((record) => {
     const internalId = competitionId(record);
-    if (!internalId) return [];
+    if (!internalId || !competitionRecordIsActive(record)) return [];
     return record.capabilities.map((capability) => ({
       competition_id: internalId,
       capability,
@@ -295,10 +380,66 @@ async function persistCompetitions(
       .from("competition_provider_config")
       .upsert(configRows, {
         onConflict: "competition_id,capability,season",
-        ignoreDuplicates: true,
       });
     if (error)
       summary.errors.push("competition provider config: bulk upsert failed");
+  }
+
+  const desiredCapabilities = new Map<string, Set<string>>();
+  for (const record of records) {
+    const internalId = competitionId(record);
+    if (!internalId) continue;
+    desiredCapabilities.set(
+      internalId,
+      new Set(competitionRecordIsActive(record) ? record.capabilities : []),
+    );
+  }
+  const competitionIds = [...desiredCapabilities.keys()];
+  if (competitionIds.length) {
+    const { data: existingConfig, error: configReadError } = await client
+      .from("competition_provider_config")
+      .select("id,competition_id,capability")
+      .eq("primary_provider", adapter.name)
+      .in("competition_id", competitionIds);
+    if (configReadError) {
+      summary.errors.push("competition provider config: reconcile failed");
+    } else {
+      const staleConfigIds = (
+        (existingConfig ?? []) as Array<{
+          id: string;
+          competition_id: string;
+          capability: string;
+        }>
+      )
+        .filter(
+          (row) =>
+            !desiredCapabilities.get(row.competition_id)?.has(row.capability),
+        )
+        .map((row) => row.id);
+      if (staleConfigIds.length) {
+        const { error } = await client
+          .from("competition_provider_config")
+          .delete()
+          .in("id", staleConfigIds);
+        if (error)
+          summary.errors.push(
+            "competition provider config: stale cleanup failed",
+          );
+      }
+    }
+
+    const withoutStandings = competitionIds.filter(
+      (id) => !desiredCapabilities.get(id)?.has("standings"),
+    );
+    if (withoutStandings.length) {
+      const { error } = await client
+        .from("standings")
+        .delete()
+        .eq("provider", adapter.name)
+        .in("competition_id", withoutStandings);
+      if (error)
+        summary.errors.push("stale unsupported standings cleanup failed");
+    }
   }
   await writeCapabilities(adapter);
 }
@@ -331,7 +472,8 @@ async function providerCompetitions(
 function configuredCompetitionIds(provider: SportsProviderName): Set<string> {
   const value =
     provider === "football-data"
-      ? (process.env.FOOTBALL_DATA_COMPETITIONS ?? "PL,CL,PD,SA,BL1")
+      ? (process.env.FOOTBALL_DATA_COMPETITIONS ??
+        "PL,CL,PD,SA,BL1,FL1,DED,PPL,BSA,ELC,WC,CLI")
       : provider === "openligadb"
         ? (process.env.OPENLIGADB_COMPETITIONS ??
           "bl2,bl3,dfb,ffb1,regio-bayern,BLSupercup,unl")
@@ -633,6 +775,23 @@ async function persistStandings(
   summary: SportsSyncSummary,
 ) {
   const client = admin();
+  if (!records.length) {
+    let cleanup = client
+      .from("standings")
+      .delete()
+      .eq("competition_id", competition.id)
+      .eq("provider", adapter.name);
+    if (competition.current_season)
+      cleanup = cleanup.eq("season", competition.current_season);
+    const { error } = await cleanup;
+    if (error)
+      throw new ProviderError(
+        "Không thể dọn bảng xếp hạng không còn hợp lệ.",
+        "supabase",
+        false,
+      );
+    return;
+  }
   const teamMappings = await mappings(adapter.name, "team");
   const now = new Date().toISOString();
   const rows = records.flatMap((record) => {
@@ -792,17 +951,10 @@ export async function syncSports(
             if (!summary.dryRun)
               await persistStandings(adapter, competition, records, summary);
           } else {
-            const from = new Date();
-            from.setUTCDate(
-              from.getUTCDate() - (command === "results" ? 14 : 1),
+            const records = await adapter.getMatches(
+              competition.externalId,
+              sportsMatchQueryOptions(command, competition.current_season),
             );
-            const to = new Date();
-            to.setUTCDate(to.getUTCDate() + (command === "fixtures" ? 30 : 1));
-            const records = await adapter.getMatches(competition.externalId, {
-              dateFrom: from.toISOString().slice(0, 10),
-              dateTo: to.toISOString().slice(0, 10),
-              season: competition.current_season ?? undefined,
-            });
             const filtered =
               command === "live"
                 ? records.filter(

@@ -108,12 +108,15 @@ function fdStatus(value: string): NormalizedMatch["status"] {
   return "scheduled";
 }
 
+const FOOTBALL_DATA_WITHOUT_FLAT_STANDINGS = new Set(["WC", "CLI", "EC"]);
+
 export class FootballDataSyncAdapter implements SportsSyncAdapter {
   readonly name = "football-data" as const;
   readonly capabilities: SportsCapability[] = [
     "fixtures",
     "results",
     "standings",
+    "live_score",
     "logos",
   ];
   private readonly baseUrl =
@@ -164,13 +167,24 @@ export class FootballDataSyncAdapter implements SportsSyncAdapter {
         country: item.area?.name ?? null,
         season: item.currentSeason?.startDate?.slice(0, 4) ?? null,
         logoUrl: item.emblem ?? null,
-        capabilities: this.capabilities,
+        capabilities: this.capabilities.filter(
+          (capability) =>
+            capability !== "standings" ||
+            !FOOTBALL_DATA_WITHOUT_FLAT_STANDINGS.has(
+              (item.code || String(item.id)).toUpperCase(),
+            ),
+        ),
       }),
     );
   }
-  async getTeams(competitionExternalId: string): Promise<NormalizedTeam[]> {
+  async getTeams(
+    competitionExternalId: string,
+    season?: string,
+  ): Promise<NormalizedTeam[]> {
+    const params = new URLSearchParams();
+    if (season) params.set("season", season);
     const payload = await this.request<{ teams?: FdTeam[] }>(
-      `/competitions/${encodeURIComponent(competitionExternalId)}/teams`,
+      `/competitions/${encodeURIComponent(competitionExternalId)}/teams${params.size ? `?${params}` : ""}`,
     );
     const fetchedAt = nowIso();
     return (payload.teams ?? []).map((team) =>
@@ -198,6 +212,7 @@ export class FootballDataSyncAdapter implements SportsSyncAdapter {
     const params = new URLSearchParams();
     if (options.dateFrom) params.set("dateFrom", options.dateFrom);
     if (options.dateTo) params.set("dateTo", options.dateTo);
+    if (options.season) params.set("season", options.season);
     const payload = await this.request<{ matches?: FdMatch[] }>(
       `/competitions/${encodeURIComponent(competitionExternalId)}/matches${params.size ? `?${params}` : ""}`,
     );
@@ -236,9 +251,19 @@ export class FootballDataSyncAdapter implements SportsSyncAdapter {
     competitionExternalId: string,
     season = "unknown",
   ): Promise<NormalizedStanding[]> {
+    if (
+      FOOTBALL_DATA_WITHOUT_FLAT_STANDINGS.has(
+        competitionExternalId.toUpperCase(),
+      )
+    )
+      return [];
+    const params = new URLSearchParams();
+    if (season !== "unknown") params.set("season", season);
     const payload = await this.request<{
       standings?: Array<{ type?: string; table?: FdStanding[] }>;
-    }>(`/competitions/${encodeURIComponent(competitionExternalId)}/standings`);
+    }>(
+      `/competitions/${encodeURIComponent(competitionExternalId)}/standings${params.size ? `?${params}` : ""}`,
+    );
     const table =
       payload.standings?.find((item) => item.type === "TOTAL")?.table ??
       payload.standings?.[0]?.table ??
@@ -590,6 +615,11 @@ const OPENLIGA_METADATA: Record<string, { name: string; country: string }> = {
   blsupercup: { name: "Franz-Beckenbauer-Supercup", country: "Germany" },
   unl: { name: "UEFA Nations League", country: "Europe" },
 };
+const OPENLIGA_WITHOUT_STANDINGS = new Set(["dfb", "blsupercup"]);
+
+function openLigaSupportsStandings(competitionExternalId: string): boolean {
+  return !OPENLIGA_WITHOUT_STANDINGS.has(competitionExternalId.toLowerCase());
+}
 
 function openLigaSeason(): string {
   const configured = (process.env.OPENLIGADB_SEASON ?? "").trim();
@@ -621,7 +651,11 @@ function openLigaLogoUrl(value: string | null | undefined): string | null {
     const url = new URL(value);
     const parts = url.pathname.split("/");
     const thumbIndex = parts.indexOf("thumb");
-    if (url.hostname === "upload.wikimedia.org" && thumbIndex >= 0 && parts.length > thumbIndex + 4) {
+    if (
+      url.hostname === "upload.wikimedia.org" &&
+      thumbIndex >= 0 &&
+      parts.length > thumbIndex + 4
+    ) {
       parts.splice(thumbIndex, 1);
       parts.pop();
       url.pathname = parts.join("/");
@@ -726,7 +760,10 @@ export class OpenLigaDbAdapter implements SportsSyncAdapter {
         country: metadata.country,
         season: String(item.leagueSeason),
         logoUrl: null,
-        capabilities: this.capabilities,
+        capabilities: this.capabilities.filter(
+          (capability) =>
+            capability !== "standings" || openLigaSupportsStandings(shortcut),
+        ),
       });
     });
   }
@@ -754,7 +791,7 @@ export class OpenLigaDbAdapter implements SportsSyncAdapter {
         shortName: team.shortName || team.teamName,
         slug: slugify(team.teamName),
         country,
-          logoUrl: openLigaLogoUrl(team.teamIconUrl),
+        logoUrl: openLigaLogoUrl(team.teamIconUrl),
         venue: null,
       }),
     );
@@ -814,10 +851,14 @@ export class OpenLigaDbAdapter implements SportsSyncAdapter {
     competitionExternalId: string,
     season = openLigaSeason(),
   ): Promise<NormalizedStanding[]> {
+    if (!openLigaSupportsStandings(competitionExternalId)) return [];
     const records = await this.request<OlStanding[]>(
       `/getbltable/${encodeURIComponent(competitionExternalId)}/${encodeURIComponent(season)}`,
     );
     const fetchedAt = nowIso();
+    // Community tables with only one or two rows are incomplete pre-season
+    // fragments, not a meaningful league table. Do not publish them as real.
+    if (records.length < 4) return [];
     return records.map((row, index) =>
       normalizedStandingSchema.parse({
         provider: this.name,

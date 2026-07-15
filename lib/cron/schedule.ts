@@ -15,6 +15,24 @@ const OPENLIGA_COMPETITIONS = [
   "unl",
 ];
 
+// All current free-tier competitions discovered from football-data.org. EC is
+// intentionally excluded because its "current" season is still Euro 2024 and
+// would create a stale, empty competition in the live product.
+const FOOTBALL_DATA_COMPETITIONS = [
+  "PL",
+  "CL",
+  "PD",
+  "SA",
+  "BL1",
+  "FL1",
+  "DED",
+  "PPL",
+  "BSA",
+  "ELC",
+  "WC",
+  "CLI",
+];
+
 /**
  * The Worker is triggered once per minute. Keeping the phase selection pure
  * makes the production schedule deterministic and straightforward to test.
@@ -74,5 +92,47 @@ export function scheduledSportsTask(
       ],
     };
   }
+  return null;
+}
+
+/**
+ * Refresh football-data.org one competition at a time. This keeps every run
+ * below the free-tier rate limit and the Workers subrequest ceiling while
+ * ensuring discovered competitions are populated instead of remaining empty
+ * shells forever.
+ */
+export function scheduledFootballDataTask(
+  timestampMs: number,
+): ScheduledSportsTask | null {
+  if (!Number.isFinite(timestampMs))
+    throw new TypeError("Scheduled timestamp must be finite");
+  const date = new Date(timestampMs);
+  const hour = date.getUTCHours();
+  const minute = date.getUTCMinutes();
+  const competitionAt = (startMinute: number) => {
+    const index = minute - startMinute;
+    return index >= 0 && index < FOOTBALL_DATA_COMPETITIONS.length
+      ? [FOOTBALL_DATA_COMPETITIONS[index]]
+      : null;
+  };
+
+  if (hour === 0 && minute === 18) return { command: "competitions" };
+
+  const dailyTeam = hour === 0 ? competitionAt(20) : null;
+  if (dailyTeam) return { command: "teams", competitionIds: dailyTeam };
+
+  const fixture = [1, 13].includes(hour) ? competitionAt(20) : null;
+  if (fixture) return { command: "fixtures", competitionIds: fixture };
+
+  const result = [2, 8, 14, 20].includes(hour) ? competitionAt(20) : null;
+  if (result) return { command: "results", competitionIds: result };
+
+  const standing = [3, 15].includes(hour) ? competitionAt(20) : null;
+  if (standing) return { command: "standings", competitionIds: standing };
+
+  // Rotate all competitions once per hour during the main match window.
+  const live = hour >= 9 && hour <= 22 ? competitionAt(35) : null;
+  if (live) return { command: "live", competitionIds: live };
+
   return null;
 }

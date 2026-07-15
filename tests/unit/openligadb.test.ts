@@ -38,7 +38,8 @@ test("OpenLigaDB adapter filters community junk and normalizes logos, fixtures a
               teamId: 10,
               teamName: "Test FC",
               shortName: "TFC",
-              teamIconUrl: "https://upload.wikimedia.org/wikipedia/de/thumb/1/13/Test_FC.svg/240px-Test_FC.svg.png",
+              teamIconUrl:
+                "https://upload.wikimedia.org/wikipedia/de/thumb/1/13/Test_FC.svg/240px-Test_FC.svg.png",
             },
           ]
         : url.includes("/getmatchdata/")
@@ -69,19 +70,17 @@ test("OpenLigaDB adapter filters community junk and normalizes logos, fixtures a
                 location: { locationStadium: "Test Arena" },
               },
             ]
-          : [
-              {
-                teamInfoId: 10,
-                teamName: "Test FC",
-                points: 3,
-                opponentGoals: 1,
-                goals: 2,
-                matches: 1,
-                won: 1,
-                lost: 0,
-                draw: 0,
-              },
-            ];
+          : Array.from({ length: 4 }, (_, index) => ({
+              teamInfoId: 10 + index,
+              teamName: `Test FC ${index + 1}`,
+              points: 3 - index,
+              opponentGoals: 1,
+              goals: 2,
+              matches: 1,
+              won: index === 0 ? 1 : 0,
+              lost: index === 0 ? 0 : 1,
+              draw: 0,
+            }));
     return new Response(JSON.stringify(payload), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -98,16 +97,21 @@ test("OpenLigaDB adapter filters community junk and normalizes logos, fixtures a
       dateTo: "2026-08-31",
     });
     const standings = await adapter.getStandings("bl2", "2026");
+    const cupStandings = await adapter.getStandings("dfb", "2026");
     assert.deepEqual(
       competitions.map((item) => item.name),
       ["2. Bundesliga"],
     );
-    assert.equal(teams[0].logoUrl, "https://upload.wikimedia.org/wikipedia/de/1/13/Test_FC.svg");
+    assert.equal(
+      teams[0].logoUrl,
+      "https://upload.wikimedia.org/wikipedia/de/1/13/Test_FC.svg",
+    );
     assert.equal(matches[0].status, "finished");
     assert.equal(matches[0].homeScore, 2);
     assert.equal(matches[0].venue, "Test Arena");
     assert.equal(standings[0].position, 1);
     assert.equal(standings[0].points, 3);
+    assert.deepEqual(cupStandings, []);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalEnabled === undefined) delete process.env.OPENLIGADB_ENABLED;

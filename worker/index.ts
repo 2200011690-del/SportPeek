@@ -6,6 +6,7 @@ import {
 } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import {
+  scheduledFootballDataTask,
   scheduledPipelineTask,
   scheduledSportsTask,
   scheduledStoryProcessingOptions,
@@ -112,7 +113,8 @@ const worker = {
     // within Cloudflare Workers' subrequest limit without starving either one.
     const scheduledAt = controller.scheduledTime ?? Date.now();
     const task = scheduledPipelineTask(scheduledAt);
-    const sportsTask = scheduledSportsTask(scheduledAt);
+    const openLigaTask = scheduledSportsTask(scheduledAt);
+    const footballDataTask = scheduledFootballDataTask(scheduledAt);
 
     const run = async () => {
       try {
@@ -135,18 +137,30 @@ const worker = {
           const aiBackfill = await summarizePersistedStories({ limit: 1 });
           console.log("[Cron] AI backfill result:", JSON.stringify(aiBackfill));
         }
-        if (sportsTask && process.env.OPENLIGADB_ENABLED === "true") {
+        // Run at most one sports job per invocation. football-data receives
+        // priority in its reserved slots; OpenLigaDB continues in all others.
+        const sportsTask = footballDataTask ?? openLigaTask;
+        const sportsProvider = footballDataTask
+          ? "football-data"
+          : "openligadb";
+        const sportsConfigured = footballDataTask
+          ? Boolean(
+              process.env.FOOTBALL_DATA_API_KEY ||
+              process.env.SPORTS_DATA_API_KEY,
+            )
+          : process.env.OPENLIGADB_ENABLED === "true";
+        if (sportsTask && sportsConfigured) {
           console.log(
-            "[Cron] Running OpenLigaDB sync...",
+            `[Cron] Running ${sportsProvider} sync...`,
             sportsTask.command,
             sportsTask.competitionIds ?? [],
           );
           const sportsSummary = await syncSports(sportsTask.command, {
-            provider: "openligadb",
+            provider: sportsProvider,
             competitionIds: sportsTask.competitionIds,
           });
           console.log(
-            "[Cron] OpenLigaDB sync result:",
+            `[Cron] ${sportsProvider} sync result:`,
             JSON.stringify(sportsSummary),
           );
         }

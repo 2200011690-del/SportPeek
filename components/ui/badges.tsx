@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -31,8 +31,8 @@ export function TeamMark({
 }) {
   const { teams } = useRuntimeData();
   const team = teams.find((item) => item.name === name);
-  const [logoFailed, setLogoFailed] = useState(false);
-  useEffect(() => setLogoFailed(false), [team?.logoUrl]);
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string>();
+  const hasLogo = Boolean(team?.logoUrl && team.logoUrl !== failedLogoUrl);
   return (
     <span
       className={`team-mark ${size}`}
@@ -41,14 +41,18 @@ export function TeamMark({
       }
       aria-label={name}
     >
-      {team?.logoUrl && !logoFailed ? (
-        <img
-          src={team.logoUrl}
-          alt=""
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={() => setLogoFailed(true)}
-        />
+      {team?.logoUrl && hasLogo ? (
+        <>
+          {/* Provider crests load directly; failed URLs fall back to initials. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={team.logoUrl}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setFailedLogoUrl(team.logoUrl)}
+          />
+        </>
       ) : (
         getInitials(name)
       )}
@@ -65,18 +69,23 @@ export function CompetitionMark({
 }) {
   const { competitions } = useRuntimeData();
   const competition = competitions.find((item) => item.name === name);
-  const [logoFailed, setLogoFailed] = useState(false);
-  useEffect(() => setLogoFailed(false), [competition?.logoUrl]);
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string>();
+  const hasLogo = Boolean(
+    competition?.logoUrl && competition.logoUrl !== failedLogoUrl,
+  );
   return (
     <span className={`competition-mark ${size}`} aria-label={name}>
-      {competition?.logoUrl && !logoFailed ? (
-        <img
-          src={competition.logoUrl}
-          alt=""
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={() => setLogoFailed(true)}
-        />
+      {competition?.logoUrl && hasLogo ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={competition.logoUrl}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setFailedLogoUrl(competition.logoUrl)}
+          />
+        </>
       ) : (
         getInitials(name)
       )}
