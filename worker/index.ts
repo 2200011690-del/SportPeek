@@ -1,6 +1,7 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { scheduledPipelineTask } from "../lib/cron/schedule";
 import { syncRss } from "../lib/rss/sync";
 import { processStories } from "../lib/stories/processor";
 
@@ -20,6 +21,10 @@ interface Env {
 interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
   passThroughOnException(): void;
+}
+
+interface ScheduledController {
+  scheduledTime?: number;
 }
 
 // Image security config. SVG sources with .svg extension auto-skip the
@@ -58,29 +63,28 @@ const worker = {
     return handler.fetch(request, runtimeEnv, ctx);
   },
 
-  async scheduled(controller: unknown, env?: Env, ctx?: ExecutionContext): Promise<void> {
+  async scheduled(controller: ScheduledController, env?: Env, ctx?: ExecutionContext): Promise<void> {
     const runtimeEnv = env ?? ({} as Env);
     for (const [key, value] of Object.entries(runtimeEnv as unknown as Record<string, unknown>)) {
       if (typeof value === "string") process.env[key] = value;
     }
     globalThis.__SPORTPEEK_WORKERS_AI__ = runtimeEnv.AI;
 
-    // Alternate between RSS sync and story processing to stay within
-    // Cloudflare Workers' 50-subrequest-per-invocation limit.
-    // Even minutes -> RSS sync only. Odd minutes -> story processing only.
-    const minuteOfDay = Math.floor(Date.now() / 60_000) % 2;
+    // The trigger runs every minute. Alternate the two isolated phases to stay
+    // within Cloudflare Workers' subrequest limit without starving either one.
+    const task = scheduledPipelineTask(controller.scheduledTime ?? Date.now());
 
     const run = async () => {
       try {
-        if (minuteOfDay === 0) {
+        if (task === "rss") {
           // Even invocation: sync RSS feeds
           console.log("[Cron] Running RSS sync...");
           const rssSummary = await syncRss();
           console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
         } else {
-          // Odd invocation: process stories (small batch, no AI to stay under subrequest limit)
+          // Odd invocation: process a small newest-first batch with Workers AI.
           console.log("[Cron] Running story processing...");
-          const storySummary = await processStories({ useAi: false, limit: 5 });
+          const storySummary = await processStories({ useAi: true, limit: 5 });
           console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
         }
       } catch (error) {

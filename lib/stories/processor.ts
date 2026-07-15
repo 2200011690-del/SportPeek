@@ -52,18 +52,24 @@ async function buildStory(draft: Draft, provider: AIProvider, teams: EntityRecor
   const input: ClusterArticleInput[] = articles.map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt, publishedAt: article.publishedAt, sourceName: article.sourceName })); const heuristic = new HeuristicAIProvider();
   let generated = false; let generatedSummary = await heuristic.summarizeCluster({ articles: input });
   if (useRemoteAi && !["heuristic", "disabled", "mock"].includes(provider.name)) {
-    const candidate = await provider.summarizeCluster({ articles: input });
-    const allowed = new Set(input.map((article) => article.id));
-    if (candidate.sourceIds.every((id) => allowed.has(id))) {
+    try {
+      const candidate = await provider.summarizeCluster({ articles: input });
+      const allowed = new Set(input.map((article) => article.id));
+      if (!candidate.sourceIds.every((id) => allowed.has(id))) throw new Error("AI returned unknown source IDs");
       generatedSummary = candidate;
       generated = true;
-    } else {
-      throw new Error("AI returned unknown source IDs");
+    } catch (error) {
+      // AI must enhance the feed, never hold fresh source metadata hostage.
+      console.warn(`[Story AI] Falling back to heuristic for ${draft.id}:`, error);
     }
   }
-  const agreements = generated ? await provider.identifyAgreements({ articles: input }).catch(() => heuristic.identifyAgreements({ articles: input })) : await heuristic.identifyAgreements({ articles: input });
-  const disputes = generated ? await provider.identifyDisputes({ articles: input }).catch(() => heuristic.identifyDisputes({ articles: input })) : await heuristic.identifyDisputes({ articles: input });
-  const timeline = generated ? await provider.generateTimeline({ articles: input }).catch(() => heuristic.generateTimeline({ articles: input })) : await heuristic.generateTimeline({ articles: input });
+  // One remote call per story keeps cron execution predictable. The validated
+  // AI key points back the visible facts; deterministic helpers cover the rest.
+  const agreements = generated
+    ? generatedSummary.keyPoints.map((text) => ({ text, sourceArticleIds: generatedSummary.sourceIds }))
+    : await heuristic.identifyAgreements({ articles: input });
+  const disputes = await heuristic.identifyDisputes({ articles: input });
+  const timeline = await heuristic.generateTimeline({ articles: input });
   const sourceNames = unique(articles.map((article) => article.sourceName)); const official = articles.some((article) => article.isOfficial); const speculative = /tin đồn|có thể|được cho là|reportedly|rumou?r|could|may\b/i.test(articles.map((article) => `${article.title} ${article.excerpt}`).join(" ")); const type = storyEventType(`${lead.title} ${lead.excerpt}`);
   const reliability = calculateReliability({ sourceScores: unique(articles.map((article) => String(article.reliability))).map(Number), independentSources: sourceNames.length, official, speculativeLanguage: speculative, contradictionPenalty: disputes.length ? 8 : 0 }); const ageHours = Math.max(0, (Date.now() - Math.max(...articles.map((article) => Date.parse(article.publishedAt)))) / 3_600_000); const hotness = calculateHotness({ ageHours, sourceCount: sourceNames.length, averageSourceReliability: articles.reduce((sum, article) => sum + article.reliability, 0) / articles.length, entityPopularity: 60, readVelocity: 0, eventImportance: /world cup|chung kết|final|vô địch/i.test(lead.title) ? 90 : 60, verified: official || sourceNames.length >= 2 });
   const title = generated ? generatedSummary.title : lead.title; const matchedTeams = entityMatches(`${title} ${articles.map((article) => article.title).join(" ")}`, teams); const matchedCompetitions = entityMatches(`${title} ${articles.map((article) => article.title).join(" ")}`, competitions);
@@ -109,7 +115,7 @@ async function persistDrafts(drafts: Array<{ draft: Draft; story: StoryCluster; 
 export async function processStories(options: { dryRun?: boolean; includeFailed?: boolean; recluster?: boolean; useAi?: boolean; limit?: number } = {}): Promise<StoryProcessingSummary> {
   const client = admin(); const jobId = randomUUID(); const provider = getAIProvider(); const summary: StoryProcessingSummary = { jobId, dryRun: Boolean(options.dryRun), inputArticles: 0, createdClusters: 0, updatedClusters: 0, mergedArticles: 0, failedArticles: 0, aiProvider: provider.name, errors: [] };
   if (options.recluster && !options.dryRun) { await client.from("story_cluster_articles").delete().not("cluster_id", "is", null); await client.from("story_clusters").delete().not("id", "is", null); await client.from("raw_articles").update({ processing_status: "pending" }).neq("processing_status", "pending"); }
-  let query = client.from("raw_articles").select("id,source_id,external_id,original_url,canonical_url,title,normalized_title,excerpt,author,image_url,published_at,fetched_at,content_hash,language,processing_status,raw_metadata,news_sources(name,logo_url,is_official,reliability_score)").order("published_at", { ascending: true }).limit(options.limit ?? 1000); query = options.recluster ? query : query.in("processing_status", ["pending", "failed"]);
+  let query = client.from("raw_articles").select("id,source_id,external_id,original_url,canonical_url,title,normalized_title,excerpt,author,image_url,published_at,fetched_at,content_hash,language,processing_status,raw_metadata,news_sources(name,logo_url,is_official,reliability_score)").order("published_at", { ascending: false }).limit(options.limit ?? 1000); query = options.recluster ? query : query.in("processing_status", ["pending", "failed"]);
   const { data, error } = await query; if (error) throw new ProviderError("Không thể đọc raw articles pending.", "supabase"); const incoming = ((data ?? []) as unknown as RawRow[]).map(toArticle); summary.inputArticles = incoming.length;
   const drafts = options.recluster ? [] : await loadExistingDrafts();
   for (const article of incoming) {
@@ -121,7 +127,7 @@ export async function processStories(options: { dryRun?: boolean; includeFailed?
   }
   const touched = drafts.filter((draft) => draft.touched); const entities = await loadEntities(); const built = [] as Array<{ draft: Draft; story: StoryCluster; teamIds: string[]; competitionId: string | null }>;
   for (const draft of touched) { try { built.push({ draft, ...(await buildStory(draft, provider, entities.teams, entities.competitions, Boolean(options.useAi))) }); if (draft.existing) summary.updatedClusters += 1; } catch (error) { const message = error instanceof Error ? error.message.slice(0, 600) : toSafeError(error).message; summary.errors.push(`${draft.id}: ${message}`); summary.failedArticles += draft.articles.length; const failedIds = draft.articles.map((a) => a.id); try { await client.from("raw_articles").update({ processing_status: "failed" }).in("id", failedIds); } catch { /* ignore */ } } }
-  if (!summary.dryRun && built.length) { await client.from("ingestion_jobs").insert({ id: jobId, job_type: "stories:process", provider: provider.name, status: "processing", fetched_count: incoming.length, metadata: { useAi: Boolean(options.useAi), recluster: Boolean(options.recluster) } }); try { await persistDrafts(built, summary); await client.from("ingestion_jobs").update({ status: summary.errors.length ? "failed" : "completed", fetched_count: incoming.length, inserted_count: summary.createdClusters, updated_count: summary.updatedClusters, skipped_count: summary.failedArticles, error_code: summary.errors.length ? "PARTIAL_FAILURE" : null, error_message: summary.errors.join("; ").slice(0, 1000) || null, completed_at: new Date().toISOString() }).eq("id", jobId); } catch (error) { const safe = toSafeError(error); await client.from("ingestion_jobs").update({ status: "failed", error_code: safe.code, error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId); throw error; } }
+  if (!summary.dryRun) { await client.from("ingestion_jobs").insert({ id: jobId, job_type: "stories:process", provider: provider.name, status: "processing", fetched_count: incoming.length, metadata: { useAi: Boolean(options.useAi), recluster: Boolean(options.recluster) } }); try { if (built.length) await persistDrafts(built, summary); await client.from("ingestion_jobs").update({ status: summary.errors.length ? "failed" : "completed", fetched_count: incoming.length, inserted_count: summary.createdClusters, updated_count: summary.updatedClusters, skipped_count: summary.failedArticles, error_code: summary.errors.length ? "PARTIAL_FAILURE" : null, error_message: summary.errors.join("; ").slice(0, 1000) || null, completed_at: new Date().toISOString() }).eq("id", jobId); } catch (error) { const safe = toSafeError(error); await client.from("ingestion_jobs").update({ status: "failed", error_code: safe.code, error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId); throw error; } }
   return summary;
 }
 
