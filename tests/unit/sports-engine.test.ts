@@ -11,10 +11,20 @@ import {
 } from "../../lib/sports-data/models";
 import { resolveProvider } from "../../lib/sports-data/resolver";
 import { deriveMatchCapabilities } from "../../lib/sports-data/capabilities";
+import { vietnamDateRange } from "../../lib/sports-data/repository";
 import {
   competitionRecordIsActive,
   sportsMatchQueryOptions,
 } from "../../lib/sports-data/sync";
+
+test("Vietnam date filters use the complete GMT+7 calendar day", () => {
+  assert.deepEqual(vietnamDateRange("2026-08-29"), {
+    from: "2026-08-28T17:00:00.000Z",
+    to: "2026-08-29T17:00:00.000Z",
+  });
+  assert.equal(vietnamDateRange("2026-02-30"), null);
+  assert.equal(vietnamDateRange("29-08-2026"), null);
+});
 
 test("entity matching prefers persisted mapping and exact aliases", () => {
   const candidates = [

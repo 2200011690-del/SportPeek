@@ -1,6 +1,6 @@
 import { ConfigurationError, toSafeError } from "@/lib/core/errors";
 import { logger } from "@/lib/core/logger";
-import { sportsCacheRepository } from "@/lib/sports-data/repository";
+import { sportsCacheRepository, type MatchReadOptions } from "@/lib/sports-data/repository";
 import type { Match, Standing, Team } from "@/lib/types";
 
 export type SportsReadKind = "live" | "fixtures" | "results" | "standings" | "teams";
@@ -16,9 +16,9 @@ export type SportsReadResult<T> = {
 type SportsDataByKind = { live: Match; fixtures: Match; results: Match; standings: Standing; teams: Team };
 
 export class SportsApplicationService {
-  async read<K extends SportsReadKind>(kind: K): Promise<SportsReadResult<SportsDataByKind[K]>> {
+  async read<K extends SportsReadKind>(kind: K, options: MatchReadOptions = {}): Promise<SportsReadResult<SportsDataByKind[K]>> {
     try {
-      const result = await (kind === "standings" ? sportsCacheRepository.readStandings() : kind === "teams" ? sportsCacheRepository.readTeams() : sportsCacheRepository.readMatches(kind)) as unknown as { data: SportsDataByKind[K][]; provider: string; stale: boolean; updatedAt: string | null };
+      const result = await (kind === "standings" ? sportsCacheRepository.readStandings() : kind === "teams" ? sportsCacheRepository.readTeams() : sportsCacheRepository.readMatches(kind, options)) as unknown as { data: SportsDataByKind[K][]; provider: string; stale: boolean; updatedAt: string | null };
       return { status: result.data.length ? "success" : "empty", data: result.data, provider: result.provider, stale: result.stale, updatedAt: result.updatedAt, error: result.stale ? { code: "STALE_DATA", message: "Dữ liệu có thể đã cũ.", retryable: true } : null };
     } catch (error) {
       const safe = toSafeError(error);

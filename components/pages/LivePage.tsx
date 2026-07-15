@@ -424,7 +424,74 @@ export function LivePage({ mode }: { mode: "live" | "fixtures" | "results" }) {
   const [competition, setCompetition] = useState("");
   const [team, setTeam] = useState("");
   const [dateFilter, setDateFilter] = useState("");
-  const byMode = matchItems.filter((item) =>
+  const [dateFilterReady, setDateFilterReady] = useState(false);
+  const [datedMatches, setDatedMatches] = useState<Match[] | null>(null);
+  const [dateLoading, setDateLoading] = useState(false);
+  const [dateError, setDateError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const initialDate = new URLSearchParams(window.location.search).get("date");
+    queueMicrotask(() => {
+      if (!active) return;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(initialDate ?? "")) {
+        setDateFilter(initialDate ?? "");
+      }
+      setDateFilterReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!dateFilterReady || mode === "live") return;
+    const url = new URL(window.location.href);
+    if (dateFilter) url.searchParams.set("date", dateFilter);
+    else url.searchParams.delete("date");
+    window.history.replaceState(
+      null,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, [dateFilter, dateFilterReady, mode]);
+
+  useEffect(() => {
+    if (!dateFilterReady || mode === "live" || !dateFilter) return;
+
+    const controller = new AbortController();
+    const endpoint = mode === "fixtures" ? "/api/fixtures" : "/api/results";
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setDatedMatches(null);
+      setDateLoading(true);
+      setDateError(false);
+      void fetch(`${endpoint}?date=${encodeURIComponent(dateFilter)}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return (await response.json()) as { data?: Match[] };
+        })
+        .then((payload) => setDatedMatches(payload.data ?? []))
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setDatedMatches([]);
+            setDateError(true);
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setDateLoading(false);
+        });
+    });
+
+    return () => controller.abort();
+  }, [dateFilter, dateFilterReady, mode]);
+
+  const sourceMatches =
+    mode !== "live" && dateFilter ? (datedMatches ?? []) : matchItems;
+  const byMode = sourceMatches.filter((item) =>
     mode === "live"
       ? item.status === "live"
       : mode === "fixtures"
@@ -466,6 +533,14 @@ export function LivePage({ mode }: { mode: "live" | "fixtures" | "results" }) {
     const date = new Date(`${base}T00:00:00Z`);
     date.setUTCDate(date.getUTCDate() + days);
     setDateFilter(date.toISOString().slice(0, 10));
+  };
+  const selectDate = (value: string) => {
+    setDateFilter(value);
+    if (!value) {
+      setDatedMatches(null);
+      setDateLoading(false);
+      setDateError(false);
+    }
   };
   const labels =
     mode === "live"
@@ -519,14 +594,14 @@ export function LivePage({ mode }: { mode: "live" | "fixtures" | "results" }) {
             <input
               type="date"
               value={dateFilter}
-              onChange={(event) => setDateFilter(event.target.value)}
+              onChange={(event) => selectDate(event.target.value)}
               aria-label="Chọn ngày"
             />
             <button onClick={() => shiftDate(1)} aria-label="Ngày sau">
               <ChevronRight size={16} />
             </button>
             {dateFilter && (
-              <button onClick={() => setDateFilter("")}>Mọi ngày</button>
+              <button onClick={() => selectDate("")}>Mọi ngày</button>
             )}
           </div>
         </div>
@@ -542,7 +617,7 @@ export function LivePage({ mode }: { mode: "live" | "fixtures" | "results" }) {
         onTeamChange={setTeam}
         teamOptions={teamOptions}
       />
-      {loading ? (
+      {loading || dateLoading ? (
         <DataLoadingState label="Đang tải dữ liệu trận đấu" />
       ) : filtered.length ? (
         <div className="match-groups">
@@ -584,7 +659,9 @@ export function LivePage({ mode }: { mode: "live" | "fixtures" | "results" }) {
                 : "Dữ liệu thể thao chưa khả dụng"
             }
             description={
-              sportsReal
+              dateError
+                ? "Không thể tải dữ liệu của ngày đã chọn. Hãy thử lại sau."
+                : sportsReal
                 ? mode === "live"
                   ? "Trang này chỉ hiển thị trận thực sự đang diễn ra. Hãy mở Lịch thi đấu để xem các trận sắp tới."
                   : "Hãy thử bỏ bộ lọc ngày, giải hoặc đội."

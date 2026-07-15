@@ -208,6 +208,31 @@ export type CachedSportsRead<T> = {
   source: "supabase";
 };
 
+export type MatchReadOptions = { date?: string };
+
+export function vietnamDateRange(
+  value: string,
+): { from: string; to: string } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const localMidnightAsUtc = Date.UTC(year, month - 1, day);
+  const verification = new Date(localMidnightAsUtc);
+  if (
+    verification.getUTCFullYear() !== year ||
+    verification.getUTCMonth() !== month - 1 ||
+    verification.getUTCDate() !== day
+  )
+    return null;
+  const from = localMidnightAsUtc - 7 * 60 * 60_000;
+  return {
+    from: new Date(from).toISOString(),
+    to: new Date(from + 24 * 60 * 60_000).toISOString(),
+  };
+}
+
 export class SportsCacheRepository {
   private client() {
     const client = createAdminClient();
@@ -225,8 +250,16 @@ export class SportsCacheRepository {
 
   async readMatches(
     kind: "live" | "fixtures" | "results",
+    options: MatchReadOptions = {},
   ): Promise<CachedSportsRead<Match>> {
     let query = this.client().from("matches").select(this.matchSelect());
+    const dateRange = options.date ? vietnamDateRange(options.date) : null;
+    if (options.date && !dateRange)
+      throw new ProviderError("Ngày lọc không hợp lệ.", "sports-cache");
+    if (dateRange)
+      query = query
+        .gte("start_time", dateRange.from)
+        .lt("start_time", dateRange.to);
     if (kind === "live")
       query = query
         .in("status", ["live", "paused"])
@@ -235,14 +268,18 @@ export class SportsCacheRepository {
     if (kind === "fixtures")
       query = query
         .in("status", ["scheduled", "postponed", "cancelled"])
-        .gte("start_time", new Date(Date.now() - 6 * 60 * 60_000).toISOString())
+        .gte(
+          "start_time",
+          dateRange?.from ??
+            new Date(Date.now() - 6 * 60 * 60_000).toISOString(),
+        )
         .order("start_time", { ascending: true })
-        .limit(200);
+        .limit(dateRange ? 500 : 200);
     if (kind === "results")
       query = query
         .eq("status", "finished")
         .order("start_time", { ascending: false })
-        .limit(200);
+        .limit(dateRange ? 500 : 200);
     const { data, error } = await query;
     if (error)
       throw new ProviderError("Không thể đọc sports cache.", "supabase");

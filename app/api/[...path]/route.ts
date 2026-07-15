@@ -8,7 +8,7 @@ import { syncRss } from "@/lib/rss/sync";
 import { processStories, summarizePersistedStoryById } from "@/lib/stories/processor";
 import { readNewsSourceCatalog } from "@/lib/rss/repository";
 import { getHealthSnapshot } from "@/lib/health";
-import { sportsCacheRepository } from "@/lib/sports-data/repository";
+import { sportsCacheRepository, vietnamDateRange } from "@/lib/sports-data/repository";
 import { handleTelegramUpdate } from "@/lib/telegram/commands";
 import { rateLimit } from "@/lib/rate-limit";
 import { storyToNewsItem } from "@/lib/stories/presenter";
@@ -150,7 +150,11 @@ export async function GET(request: NextRequest, { params }: Context) {
   }
   if (["matches/live", "fixtures", "results", "standings"].includes(route)) {
     const kind = route === "matches/live" ? "live" : route as "fixtures" | "results" | "standings";
-    const result = await sportsService.read(kind);
+    const requestedDate = request.nextUrl.searchParams.get("date")?.trim() || undefined;
+    if (requestedDate && !vietnamDateRange(requestedDate)) {
+      return NextResponse.json({ status: "error", data: [], error: { code: "INVALID_DATE", message: "Ngày lọc phải có định dạng YYYY-MM-DD." } }, { status: 400 });
+    }
+    const result = await sportsService.read(kind, { date: requestedDate });
     const httpStatus = result.status === "configuration_required" || result.status === "error" ? 503 : 200;
     return NextResponse.json({ ...result, demo: false, timezone: "Asia/Ho_Chi_Minh" }, { status: httpStatus, headers: { "cache-control": route === "matches/live" ? "private, max-age=10" : "private, max-age=120" } });
   }
