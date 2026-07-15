@@ -82,15 +82,13 @@ const worker = {
           const rssSummary = await syncRss();
           console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
         } else {
-          // Odd invocation: finish one new story with AI. When the queue is
-          // empty, translate one older unprocessed story (international first).
+          // Odd invocation: finish one new story with AI, then translate one
+          // older unprocessed story (international first) on every run.
           console.log("[Cron] Running story processing...");
           const storySummary = await processStories(scheduledStoryProcessingOptions());
           console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
-          if (storySummary.inputArticles === 0) {
-            const aiBackfill = await summarizePersistedStories({ limit: 1 });
-            console.log("[Cron] AI backfill result:", JSON.stringify(aiBackfill));
-          }
+          const aiBackfill = await summarizePersistedStories({ limit: 1 });
+          console.log("[Cron] AI backfill result:", JSON.stringify(aiBackfill));
         }
       } catch (error) {
         console.error("[Cron] Error running scheduled task:", error);
