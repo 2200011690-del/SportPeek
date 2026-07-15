@@ -26,7 +26,7 @@
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_r5Ul01CZq9gJ-NhtbBP6DA_YmfNGYJg",
     "AI_PROVIDER": "failover",
     "AI_PROVIDER_CHAIN": "gemini,groq,cloudflare",
-    "GEMINI_MODEL": "gemini-2.5-flash-lite",
+    "GEMINI_MODEL": "gemini-3.1-flash-lite",
     "GROQ_MODEL": "openai/gpt-oss-20b",
     "CLOUDFLARE_AI_MODEL": "@cf/meta/llama-3.2-1b-instruct",
     "SPORTS_DATA_PROVIDER": "football-data",
