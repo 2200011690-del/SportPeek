@@ -1,9 +1,21 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
-import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
+import {
+  handleImageOptimization,
+  DEFAULT_DEVICE_SIZES,
+  DEFAULT_IMAGE_SIZES,
+} from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { scheduledPipelineTask, scheduledStoryProcessingOptions } from "../lib/cron/schedule";
+import {
+  scheduledPipelineTask,
+  scheduledSportsTask,
+  scheduledStoryProcessingOptions,
+} from "../lib/cron/schedule";
 import { syncRss } from "../lib/rss/sync";
-import { processStories, summarizePersistedStories } from "../lib/stories/processor";
+import { syncSports } from "../lib/sports-data/sync";
+import {
+  processStories,
+  summarizePersistedStories,
+} from "../lib/stories/processor";
 
 interface Env {
   ASSETS: Fetcher;
@@ -12,7 +24,10 @@ interface Env {
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
-        output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
+        output(options: {
+          format: string;
+          quality: number;
+        }): Promise<{ response(): Response }>;
       };
     };
   };
@@ -34,7 +49,11 @@ interface ScheduledController {
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 const worker = {
-  async fetch(request: Request, env?: Env, ctx?: ExecutionContext): Promise<Response> {
+  async fetch(
+    request: Request,
+    env?: Env,
+    ctx?: ExecutionContext,
+  ): Promise<Response> {
     // Vinext server modules read configuration through `process.env`, while
     // Cloudflare supplies runtime variables and secrets through the Worker
     // `env` binding. Bridge string bindings before dispatching the request so
@@ -42,37 +61,58 @@ const worker = {
     // Node production adapter and Sites may omit the Cloudflare env argument,
     // so keep the entry compatible with both invocation shapes.
     const runtimeEnv = env ?? ({} as Env);
-    for (const [key, value] of Object.entries(runtimeEnv as unknown as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(
+      runtimeEnv as unknown as Record<string, unknown>,
+    )) {
       if (typeof value === "string") process.env[key] = value;
     }
     globalThis.__SPORTPEEK_WORKERS_AI__ = runtimeEnv.AI;
 
     const url = new URL(request.url);
 
-    if (url.pathname === "/_vinext/image" && runtimeEnv.ASSETS && runtimeEnv.IMAGES) {
+    if (
+      url.pathname === "/_vinext/image" &&
+      runtimeEnv.ASSETS &&
+      runtimeEnv.IMAGES
+    ) {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
-        fetchAsset: (path) => runtimeEnv.ASSETS.fetch(new Request(new URL(path, request.url))),
-        transformImage: async (body, { width, format, quality }) => {
-          const result = await runtimeEnv.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
-          return result.response();
+      return handleImageOptimization(
+        request,
+        {
+          fetchAsset: (path) =>
+            runtimeEnv.ASSETS.fetch(new Request(new URL(path, request.url))),
+          transformImage: async (body, { width, format, quality }) => {
+            const result = await runtimeEnv.IMAGES.input(body)
+              .transform(width > 0 ? { width } : {})
+              .output({ format, quality });
+            return result.response();
+          },
         },
-      }, allowedWidths);
+        allowedWidths,
+      );
     }
 
     return handler.fetch(request, runtimeEnv, ctx);
   },
 
-  async scheduled(controller: ScheduledController, env?: Env, ctx?: ExecutionContext): Promise<void> {
+  async scheduled(
+    controller: ScheduledController,
+    env?: Env,
+    ctx?: ExecutionContext,
+  ): Promise<void> {
     const runtimeEnv = env ?? ({} as Env);
-    for (const [key, value] of Object.entries(runtimeEnv as unknown as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(
+      runtimeEnv as unknown as Record<string, unknown>,
+    )) {
       if (typeof value === "string") process.env[key] = value;
     }
     globalThis.__SPORTPEEK_WORKERS_AI__ = runtimeEnv.AI;
 
     // The trigger runs every minute. Alternate the two isolated phases to stay
     // within Cloudflare Workers' subrequest limit without starving either one.
-    const task = scheduledPipelineTask(controller.scheduledTime ?? Date.now());
+    const scheduledAt = controller.scheduledTime ?? Date.now();
+    const task = scheduledPipelineTask(scheduledAt);
+    const sportsTask = scheduledSportsTask(scheduledAt);
 
     const run = async () => {
       try {
@@ -85,10 +125,30 @@ const worker = {
           // Odd invocation: finish one new story with AI, then translate one
           // older unprocessed story (international first) on every run.
           console.log("[Cron] Running story processing...");
-          const storySummary = await processStories(scheduledStoryProcessingOptions());
-          console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
+          const storySummary = await processStories(
+            scheduledStoryProcessingOptions(),
+          );
+          console.log(
+            "[Cron] Story processing result:",
+            JSON.stringify(storySummary),
+          );
           const aiBackfill = await summarizePersistedStories({ limit: 1 });
           console.log("[Cron] AI backfill result:", JSON.stringify(aiBackfill));
+        }
+        if (sportsTask && process.env.OPENLIGADB_ENABLED === "true") {
+          console.log(
+            "[Cron] Running OpenLigaDB sync...",
+            sportsTask.command,
+            sportsTask.competitionIds ?? [],
+          );
+          const sportsSummary = await syncSports(sportsTask.command, {
+            provider: "openligadb",
+            competitionIds: sportsTask.competitionIds,
+          });
+          console.log(
+            "[Cron] OpenLigaDB sync result:",
+            JSON.stringify(sportsSummary),
+          );
         }
       } catch (error) {
         console.error("[Cron] Error running scheduled task:", error);
@@ -96,7 +156,7 @@ const worker = {
     };
     if (ctx) ctx.waitUntil(run());
     else await run();
-  }
+  },
 };
 
 export default worker;
