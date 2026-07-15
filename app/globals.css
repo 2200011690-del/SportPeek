@@ -362,3 +362,22 @@ h1,h2,h3 { font-family:var(--font-display),sans-serif; line-height:1.15; margin:
 @keyframes story-shimmer{to{background-position:-220% 0}}
 @media (max-width:980px){.story-tabs{max-width:none}.story-reader-page .article-aside{display:grid;grid-template-columns:1fr 1fr}.story-skeleton-grid{grid-template-columns:1fr}}
 @media (max-width:720px){.story-tabs{margin-bottom:20px}.story-reader-page .article-aside{grid-template-columns:1fr}.story-skeleton-line.title{height:34px}.story-skeleton-media{height:230px}.story-timeline{margin-left:0}.story-timeline time{position:static;display:block;width:auto;margin-bottom:5px;text-align:left}.story-timeline>div{padding-left:18px}.story-source-card{padding:14px}.story-source-card h3{font-size:14px}}
+
+/* Focused article reader: title, full summary, and original source links only. */
+.simple-news-detail{width:min(820px,100%);margin:0 auto;padding-bottom:70px}
+.simple-news-back{display:inline-flex;margin-bottom:25px;color:var(--muted);font-size:10px;font-weight:750}
+.simple-news-back:hover{color:var(--accent)}
+.simple-news-detail>article{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:clamp(24px,5vw,52px)}
+.simple-news-detail header{padding-bottom:27px;border-bottom:1px solid var(--line)}
+.simple-news-detail h1{max-width:760px;margin:0;font-size:clamp(29px,5vw,48px);line-height:1.12;letter-spacing:-1.2px}
+.simple-news-detail section{margin-top:36px}
+.simple-news-detail h2{margin:0 0 18px;font-size:18px}
+.simple-news-summary>div{display:grid;gap:17px}
+.simple-news-summary p{margin:0;color:var(--text);font-size:14px;line-height:1.9}
+.simple-news-sources{padding-top:30px;border-top:1px solid var(--line)}
+.simple-news-sources ul{display:grid;gap:9px;margin:0;padding:0;list-style:none}
+.simple-news-sources a{min-height:48px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--accent);font-size:11px;font-weight:800}
+.simple-news-sources a:hover{border-color:var(--accent);background:var(--accent-soft)}
+.simple-news-sources p{color:var(--muted);font-size:11px}
+.story-skeleton-summary{height:360px;border-radius:14px;background:linear-gradient(100deg,var(--surface) 20%,var(--surface-2) 45%,var(--surface) 70%);background-size:220% 100%;animation:story-shimmer 1.25s linear infinite}
+@media (max-width:720px){.simple-news-detail>article{padding:24px 18px}.simple-news-detail h1{font-size:30px;letter-spacing:-.5px}.simple-news-summary p{font-size:13px;line-height:1.82}}
