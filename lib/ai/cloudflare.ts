@@ -38,6 +38,10 @@ function modelName(): string {
   return process.env.CLOUDFLARE_AI_MODEL || DEFAULT_CLOUDFLARE_AI_MODEL;
 }
 
+function supportsNativeJsonSchema(model: string): boolean {
+  return !model.includes("llama-3.2-1b-instruct");
+}
+
 export function setWorkersAIBinding(binding: WorkersAIBinding | undefined): void {
   globalThis.__SPORTPEEK_WORKERS_AI__ = binding;
 }
@@ -58,12 +62,14 @@ function parseModelPayload(payload: unknown): unknown {
 async function runStructured<T>(schema: z.ZodType<T>, jsonSchema: Record<string, unknown>, system: string, input: unknown, maxTokens = 3500): Promise<T> {
   const ai = globalThis.__SPORTPEEK_WORKERS_AI__;
   if (!ai) throw new Error("Cloudflare Workers AI binding chưa khả dụng");
-  const payload = await ai.run(modelName(), {
+  const model = modelName();
+  const nativeSchema = supportsNativeJsonSchema(model);
+  const payload = await ai.run(model, {
     messages: [
-      { role: "system", content: system },
+      { role: "system", content: nativeSchema ? system : `${system}\nTrả về duy nhất JSON hợp lệ, không markdown, theo JSON Schema sau: ${JSON.stringify(jsonSchema)}` },
       { role: "user", content: JSON.stringify(input) },
     ],
-    response_format: { type: "json_schema", json_schema: jsonSchema },
+    ...(nativeSchema ? { response_format: { type: "json_schema" as const, json_schema: jsonSchema } } : {}),
     max_tokens: maxTokens,
     temperature: 0.1,
   });

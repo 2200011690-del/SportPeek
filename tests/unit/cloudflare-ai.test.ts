@@ -10,7 +10,8 @@ test("Cloudflare AI enriches international news with validated Vietnamese output
   setWorkersAIBinding({
     async run(model, input) {
       assert.equal(model, DEFAULT_CLOUDFLARE_AI_MODEL);
-      assert.equal(input.response_format?.type, "json_schema");
+      assert.equal(input.response_format, undefined);
+      assert.match(input.messages[0].content, /JSON Schema/);
       return {
         response: {
           items: [{
