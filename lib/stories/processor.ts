@@ -148,7 +148,7 @@ export async function summarizePersistedStories(options: { dryRun?: boolean; lim
   if (["disabled", "heuristic", "mock"].includes(provider.name)) throw new ConfigurationError("Chưa có remote AI provider để chạy AI summary.", "ai");
   const client = admin();
   const limit = Math.min(100, Math.max(1, options.limit ?? 20));
-  const { data, error } = await client.from("story_clusters").select("id,payload,ai_generated").eq("ai_generated", false).order("last_updated_at", { ascending: false }).limit(Math.min(200, limit * 4));
+  const { data, error } = await client.from("story_clusters").select("id,payload,ai_generated").eq("ai_generated", false).order("last_updated_at", { ascending: false }).limit(200);
   if (error) throw new ProviderError("Không thể đọc story cần tóm tắt.", "supabase");
   let updated = 0;
   const errors: string[] = [];
