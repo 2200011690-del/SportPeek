@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Bookmark, Check, Languages, ShieldCheck, Sparkles } from "lucide-react";
 import { useRuntimeData } from "@/components/SportPeekApp";
@@ -47,11 +47,33 @@ export function NewsPage({ bookmarks, onBookmark }: { bookmarks: Set<string>; on
   const [team, setTeam] = useState("");
   const [minHotness, setMinHotness] = useState(0);
   const [page, setPage] = useState(1);
+  const [archiveItems, setArchiveItems] = useState<NewsItem[]>([]);
+  const [archivePagination, setArchivePagination] = useState({ page: 1, pageSize: 12, total: 0, totalPages: 1 });
+  const [archiveLoading, setArchiveLoading] = useState(true);
+  const [archiveError, setArchiveError] = useState(false);
   const filtered = filterNewsItems(newsItems, { query, competition, team, minHotness });
-  const pagination = paginateItems(filtered, page, 12);
+  const localPagination = paginateItems(filtered, page, 12);
+  const filtersActive = Boolean(query.trim() || competition || team || minHotness > 0);
   const updateFilter = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1); };
   const competitionOptions = [...new Set(newsItems.map((item) => item.competition))].sort();
   const teamOptions = [...new Set(newsItems.map((item) => item.team))].filter((value) => !/thể thao|bóng đá|nhiều đội/i.test(value)).sort();
+  useEffect(() => {
+    if (filtersActive) return;
+    let active = true;
+    void fetch(`/api/news/archive?page=${page}&pageSize=12`, { cache: "no-store", signal: AbortSignal.timeout(12_000) })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<{ data: NewsItem[]; pagination: { page: number; pageSize: number; total: number; totalPages: number } }>;
+      })
+      .then((response) => { if (active) { setArchiveItems(response.data); setArchivePagination(response.pagination); setArchiveError(false); } })
+      .catch(() => { if (active) setArchiveError(true); })
+      .finally(() => { if (active) setArchiveLoading(false); });
+    return () => { active = false; };
+  }, [filtersActive, page]);
+  const displayedItems = filtersActive ? localPagination.items : archiveItems;
+  const displayedPage = filtersActive ? localPagination.page : archivePagination.page;
+  const displayedTotalPages = filtersActive ? localPagination.totalPages : archivePagination.totalPages;
+  const changePage = (nextPage: number) => { if (!filtersActive) setArchiveLoading(true); setPage(nextPage); };
   const aiMessage = aiStatus.state === "ok"
     ? aiTranslation
       ? ["Cloudflare AI đang dịch tin quốc tế sang tiếng Việt", "Bản dịch chỉ dựa trên tiêu đề và trích đoạn của nguồn, không tự thêm dữ kiện."]
@@ -59,7 +81,20 @@ export function NewsPage({ bookmarks, onBookmark }: { bookmarks: Set<string>; on
     : aiStatus.state === "error"
       ? ["Cloudflare AI đang tạm gián đoạn", "SportPeek vẫn hiển thị bản gốc và không tạo bản dịch giả khi AI lỗi hoặc hết hạn mức."]
       : ["Tin quốc tế đang hiển thị bản gốc", "AI chưa được bật trong môi trường này."];
-  return <div className="page-content"><PageHero eyebrow="NEWSROOM" title="Tin nóng Việt Nam & thế giới" description="Tổng hợp nhiều báo thể thao, gộp các bài cùng sự kiện và xếp hạng mức quan tâm bằng tín hiệu minh bạch."><div className="hero-stat"><strong>{newsSources.length || newsItems.length}</strong><span>{loading ? "đang kết nối" : newsReal ? "nguồn đang hoạt động" : "nguồn tạm gián đoạn"}</span></div></PageHero><div className="personalization-banner"><div className="ai-orb"><Languages size={22} /></div><div><strong>{aiMessage[0]}</strong><p>{aiMessage[1]}</p></div><Link href="/sources">Xem phương pháp<ArrowRight size={15} /></Link></div><FilterBar search query={query} onQueryChange={updateFilter(setQuery)} competition={competition} onCompetitionChange={updateFilter(setCompetition)} competitionOptions={competitionOptions} team={team} onTeamChange={updateFilter(setTeam)} teamOptions={teamOptions} minHotness={minHotness} onMinHotnessChange={updateFilter(setMinHotness)} />{loading ? <DataLoadingState /> : pagination.items.length ? <><div className="results-summary">Hiển thị {pagination.items.length} trong {filtered.length} tin phù hợp</div><div className="news-page-grid">{pagination.items.map((item) => <NewsCard key={item.id} item={item} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div><Pagination page={pagination.page} totalPages={pagination.totalPages} onPageChange={setPage} /></> : <EmptyState title={newsReal ? "Không có tin phù hợp" : "Nguồn tin đang tạm gián đoạn"} description={newsReal ? "Hãy thử bỏ bớt bộ lọc hoặc dùng từ khóa khác." : "SportPeek không chèn dữ liệu giả. Hãy thử tải lại sau khi các nguồn RSS hoạt động."} />}</div>;
+  const isLoadingNews = filtersActive ? loading : archiveLoading;
+  const resultSummary = filtersActive
+    ? `Hiển thị ${displayedItems.length} trong ${filtered.length} tin phù hợp gần đây`
+    : `Kho lưu trữ có ${archivePagination.total} bài · Trang ${archivePagination.page}/${archivePagination.totalPages}`;
+  return <div className="page-content">
+    <PageHero eyebrow="NEWSROOM" title="Tin nóng Việt Nam & thế giới" description="Tổng hợp nhiều báo thể thao, gộp các bài cùng sự kiện và lưu lại để bạn có thể đọc lại vào bất cứ ngày nào."><div className="hero-stat"><strong>{newsSources.length || newsItems.length}</strong><span>{loading ? "đang kết nối" : newsReal ? "nguồn đang hoạt động" : "nguồn tạm gián đoạn"}</span></div></PageHero>
+    <div className="personalization-banner"><div className="ai-orb"><Languages size={22} /></div><div><strong>{aiMessage[0]}</strong><p>{aiMessage[1]}</p></div><Link href="/sources">Xem phương pháp<ArrowRight size={15} /></Link></div>
+    <FilterBar search query={query} onQueryChange={updateFilter(setQuery)} competition={competition} onCompetitionChange={updateFilter(setCompetition)} competitionOptions={competitionOptions} team={team} onTeamChange={updateFilter(setTeam)} teamOptions={teamOptions} minHotness={minHotness} onMinHotnessChange={updateFilter(setMinHotness)} />
+    {isLoadingNews ? <DataLoadingState label={filtersActive ? "Đang lọc tin mới" : "Đang mở kho tin lưu trữ"} /> : displayedItems.length ? <>
+      <div className="results-summary">{resultSummary}</div>
+      <div className="news-page-grid">{displayedItems.map((item) => <NewsCard key={item.id} item={item} bookmarked={bookmarks.has(item.id)} onBookmark={onBookmark} />)}</div>
+      <Pagination page={displayedPage} totalPages={displayedTotalPages} onPageChange={changePage} />
+    </> : <EmptyState title={archiveError && !filtersActive ? "Chưa mở được kho tin cũ" : newsReal ? "Không có tin phù hợp" : "Nguồn tin đang tạm gián đoạn"} description={archiveError && !filtersActive ? "Hãy tải lại trang sau ít phút; các bài đã lưu không bị xoá." : newsReal ? "Hãy thử bỏ bớt bộ lọc hoặc dùng từ khóa khác." : "SportPeek không chèn dữ liệu giả. Hãy thử tải lại sau khi các nguồn RSS hoạt động."} />}
+  </div>;
 }
 
 export function ForYouPage({ followed, onFollow, bookmarks, onBookmark }: { followed: Set<string>; onFollow: (id: string) => void; bookmarks: Set<string>; onBookmark: (id: string) => void }) {

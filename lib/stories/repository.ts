@@ -2,7 +2,7 @@ import { getAggregatedNews, type AggregatedNews } from "@/lib/ingestion/official
 import type { NewsItem } from "@/lib/types";
 import { normalizeSearchText } from "@/lib/ui-logic";
 import { createStorySlug } from "./slug";
-import { createPersistedStoryRepository } from "./persisted-repository";
+import { createPersistedStoryRepository, loadPersistedStories, loadPersistedStoryArchive, loadPersistedStoryById, loadPersistedStoryBySlug } from "./persisted-repository";
 import {
   storyClusterSchema,
   type RawArticle,
@@ -244,4 +244,8 @@ export function createStoryRepository(loader: StoryNewsLoader = getAggregatedNew
   return { getStoryFeed, getLatestStories, getStoryBySlug, getStoryById, getStorySources, getRelatedStories };
 }
 
-export const storyRepository = createPersistedStoryRepository();
+export const storyRepository = createPersistedStoryRepository(loadPersistedStories, {
+  findBySlug: loadPersistedStoryBySlug,
+  findById: loadPersistedStoryById,
+  readArchive: loadPersistedStoryArchive,
+});

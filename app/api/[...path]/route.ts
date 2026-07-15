@@ -77,6 +77,19 @@ export async function GET(request: NextRequest, { params }: Context) {
       headers: { "cache-control": "public, s-maxage=90, stale-while-revalidate=300" },
     });
   }
+  if (route === "news/archive") {
+    const page = Math.max(1, Number.parseInt(request.nextUrl.searchParams.get("page") ?? "1", 10) || 1);
+    const pageSize = Math.min(48, Math.max(1, Number.parseInt(request.nextUrl.searchParams.get("pageSize") ?? "12", 10) || 12));
+    const result = await storyService.getArchive(page, pageSize);
+    const archive = result.data;
+    return NextResponse.json({
+      status: result.status,
+      data: (archive?.stories ?? []).map(storyToNewsItem),
+      pagination: archive ? { page: archive.page, pageSize: archive.pageSize, total: archive.total, totalPages: archive.totalPages } : { page, pageSize, total: 0, totalPages: 1 },
+      meta: result.meta,
+      error: result.error ?? null,
+    }, { status: repositoryHttpStatus(result.status), headers: { "cache-control": "public, s-maxage=60, stale-while-revalidate=180" } });
+  }
   if (route === "news") {
     const result = await storyService.getFeed();
     const data = (result.data ?? []).map(storyToNewsItem);

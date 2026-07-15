@@ -7,6 +7,12 @@ import type { StoryRepositoryResult } from "./repository";
 
 export type PersistedStorySnapshot = { stories: StoryCluster[]; lastSyncAt: string | null; sources: string[]; aiStatus: NewsAIStatus };
 export type PersistedStoryLoader = () => Promise<PersistedStorySnapshot>;
+export type StoryArchivePage = { stories: StoryCluster[]; page: number; pageSize: number; total: number; totalPages: number };
+type PersistedStoryAccess = {
+  findBySlug?: (slug: string) => Promise<StoryCluster | null>;
+  findById?: (id: string) => Promise<StoryCluster | null>;
+  readArchive?: (page: number, pageSize: number) => Promise<StoryArchivePage>;
+};
 type PersistedAIProvider = Exclude<NewsAIStatus["provider"], "off">;
 
 export function restoreOriginalStoryLanguage(story: StoryCluster): StoryCluster {
@@ -57,7 +63,51 @@ export const loadPersistedStories: PersistedStoryLoader = async () => {
   };
 };
 
-export function createPersistedStoryRepository(loader: PersistedStoryLoader = loadPersistedStories) {
+function persistedClient() {
+  const client = createAdminClient();
+  if (!client) throw new ConfigurationError("Supabase story cache chưa được cấu hình.", "supabase");
+  return client;
+}
+
+function storyFromPayload(payload: unknown): StoryCluster | null {
+  const parsed = storyClusterSchema.safeParse(payload);
+  return parsed.success ? restoreOriginalStoryLanguage(parsed.data) : null;
+}
+
+async function findPersistedStory(column: "slug" | "id", value: string): Promise<StoryCluster | null> {
+  const { data, error } = await persistedClient().from("story_clusters").select("payload").eq(column, value).limit(1);
+  if (error) throw new ProviderError("Không thể đọc bài viết trong kho lưu trữ.", "supabase");
+  return data?.[0] ? storyFromPayload(data[0].payload) : null;
+}
+
+export const loadPersistedStoryBySlug = (slug: string) => findPersistedStory("slug", slug);
+export const loadPersistedStoryById = (id: string) => findPersistedStory("id", id);
+
+export async function loadPersistedStoryArchive(page: number, pageSize: number): Promise<StoryArchivePage> {
+  const safePage = Math.max(1, Math.floor(page));
+  const safePageSize = Math.min(48, Math.max(1, Math.floor(pageSize)));
+  const from = (safePage - 1) * safePageSize;
+  const { data, error, count } = await persistedClient().from("story_clusters")
+    .select("payload", { count: "exact" })
+    .order("last_updated_at", { ascending: false })
+    .range(from, from + safePageSize - 1);
+  if (error) throw new ProviderError("Không thể đọc kho tin cũ.", "supabase");
+  const stories = (data ?? []).flatMap((row): StoryCluster[] => {
+    const story = storyFromPayload(row.payload);
+    return story ? [story] : [];
+  });
+  const total = count ?? from + stories.length;
+  return { stories, page: safePage, pageSize: safePageSize, total, totalPages: Math.max(1, Math.ceil(total / safePageSize)) };
+}
+
+export function createPersistedStoryRepository(loader: PersistedStoryLoader = loadPersistedStories, access: PersistedStoryAccess = {}) {
+  const findBySlug = access.findBySlug ?? (async (slug: string) => (await loader()).stories.find((story) => story.slug === slug || story.legacySlugs.includes(slug)) ?? null);
+  const findById = access.findById ?? (async (id: string) => (await loader()).stories.find((story) => story.id === id) ?? null);
+  const readArchive = access.readArchive ?? (async (page: number, pageSize: number) => {
+    const stories = (await loader()).stories.map(restoreOriginalStoryLanguage);
+    const safePage = Math.max(1, Math.floor(page)); const safePageSize = Math.max(1, Math.floor(pageSize)); const from = (safePage - 1) * safePageSize;
+    return { stories: stories.slice(from, from + safePageSize), page: safePage, pageSize: safePageSize, total: stories.length, totalPages: Math.max(1, Math.ceil(stories.length / safePageSize)) };
+  });
   const load = async (): Promise<StoryRepositoryResult<StoryCluster[]>> => {
     try {
       const snapshot = await loader(); const stale = Boolean(snapshot.lastSyncAt && Date.now() - Date.parse(snapshot.lastSyncAt) > 60 * 60_000);
@@ -70,9 +120,18 @@ export function createPersistedStoryRepository(loader: PersistedStoryLoader = lo
   };
   const getStoryFeed = () => load();
   const getLatestStories = async (limit = 60) => { const result = await load(); return { ...result, data: result.data?.slice(0, Math.max(0, limit)) ?? result.data }; };
-  const getStoryBySlug = async (slug: string): Promise<StoryRepositoryResult<StoryDetailPayload>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const story = result.data.find((item) => item.slug === slug || item.legacySlugs.includes(slug)); return story ? { status: result.status === "stale" ? "stale" : "success", data: { story, relatedStories: relatedStories(result.data, story) }, meta: { ...result.meta, canonicalSlug: story.slug } } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
-  const getStoryById = async (id: string): Promise<StoryRepositoryResult<StoryCluster>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const story = result.data.find((item) => item.id === id); return story ? { ...result, data: story } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
+  const getStoryBySlug = async (slug: string): Promise<StoryRepositoryResult<StoryDetailPayload>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const recent = result.data.find((item) => item.slug === slug || item.legacySlugs.includes(slug)); const story = recent ?? await findBySlug(slug); return story ? { status: result.status === "stale" ? "stale" : "success", data: { story, relatedStories: relatedStories(result.data, story) }, meta: { ...result.meta, canonicalSlug: story.slug } } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
+  const getStoryById = async (id: string): Promise<StoryRepositoryResult<StoryCluster>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const recent = result.data.find((item) => item.id === id); const story = recent ?? await findById(id); return story ? { ...result, data: story } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
   const getStorySources = async (id: string): Promise<StoryRepositoryResult<RawArticle[]>> => { const result = await getStoryById(id); return { ...result, data: result.data?.articles ?? null }; };
   const getRelatedStories = async (id: string, limit = 4): Promise<StoryRepositoryResult<StoryCluster[]>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const story = result.data.find((item) => item.id === id); return story ? { ...result, data: relatedStories(result.data, story, limit) } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
-  return { getStoryFeed, getLatestStories, getStoryBySlug, getStoryById, getStorySources, getRelatedStories };
+  const getStoryArchive = async (page = 1, pageSize = 12): Promise<StoryRepositoryResult<StoryArchivePage>> => {
+    try {
+      const archive = await readArchive(page, pageSize);
+      return { status: archive.stories.length ? "success" : "empty", data: archive, meta: { source: "supabase", cached: true, stale: false, lastUpdatedAt: archive.stories[0]?.updatedAt ?? null } };
+    } catch (error) {
+      if (error instanceof ConfigurationError) return { status: "configuration_required", data: null, meta: { source: "supabase", cached: false, stale: false, lastUpdatedAt: null }, error: { code: error.code, message: error.message } };
+      return { status: "error", data: null, meta: { source: "supabase", cached: false, stale: false, lastUpdatedAt: null }, error: { code: "STORY_ARCHIVE_UNAVAILABLE", message: "Không thể đọc kho tin cũ." } };
+    }
+  };
+  return { getStoryFeed, getLatestStories, getStoryBySlug, getStoryById, getStorySources, getRelatedStories, getStoryArchive };
 }
