@@ -11,6 +11,7 @@ import { calculateHotness, calculateReliability } from "@/lib/scoring";
 import { createStorySlug } from "./slug";
 import { clusterSimilarity, storyEventType, type ClusterableArticle } from "./clustering";
 import { storyClusterSchema, type StoryCluster } from "./schema";
+import { buildLongSummary, prioritizeAISummaryCandidates } from "./summary";
 
 type SourceJoin = { name: string; logo_url: string | null; is_official: boolean; reliability_score: number } | Array<{ name: string; logo_url: string | null; is_official: boolean; reliability_score: number }> | null;
 type RawRow = { id: string; source_id: string; external_id: string | null; original_url: string; canonical_url: string | null; title: string; normalized_title: string | null; excerpt: string | null; author: string | null; image_url: string | null; published_at: string; fetched_at: string; content_hash: string; language: "vi" | "en"; processing_status: string; raw_metadata: Record<string, unknown>; news_sources: SourceJoin };
@@ -95,7 +96,7 @@ async function buildStory(draft: Draft, provider: AIProvider, teams: EntityRecor
     categoryValue = isFootballSource || hasFootballKeywords ? "Bóng đá" : "Thể thao";
   }
   const publishedAt = new Date(Math.min(...articles.map((article) => Date.parse(article.publishedAt)))).toISOString(); const updatedAt = new Date(Math.max(...articles.map((article) => Date.parse(article.publishedAt)))).toISOString(); const rawArticles = articles.map((article) => ({ id: article.id, sourceId: article.sourceId, sourceName: article.sourceName, sourceLogoUrl: article.sourceLogoUrl, originalUrl: article.originalUrl, canonicalUrl: article.canonicalUrl, title: article.title, excerpt: article.excerpt || null, imageUrl: article.imageUrl, author: article.author, publishedAt: article.publishedAt, fetchedAt: article.fetchedAt, isOfficialSource: article.isOfficial, isSyndicated: false, language: article.language, processingStatus: "completed" as const })); const summary = transparentSummary(articles, generatedSummary.summary);
-  const story = storyClusterSchema.parse({ id: draft.id, slug: createStorySlug(title, draft.id), legacySlugs: [], title, summary, summaryLong: unique([...articles.map((article) => article.excerpt), sourceNames.length > 1 ? `SportPeek giữ ${articles.length} bài từ ${sourceNames.length} nhà xuất bản trong cùng cụm để người đọc đối chiếu.` : "Bản tin chưa được xử lý bởi AI; nội dung đang hiển thị từ metadata nguồn."]).filter(Boolean).join("\n\n").slice(0, 12_000), category: String(categoryValue).slice(0, 160), language: generated ? "vi" : lead.language, status: type === "correction" ? "correction" : official ? "official" : disputes.length ? "disputed" : speculative ? "rumor" : sourceNames.length >= 2 ? "reported" : ageHours <= 12 ? "developing" : "unverified", sourceCount: sourceNames.length, sourceNames, officialSources: rawArticles.filter((article) => article.isOfficialSource), hasOfficialSource: official, hotnessScore: hotness, reliabilityScore: reliability, publishedAt, updatedAt, imageUrl: articles.find((article) => article.imageUrl)?.imageUrl ?? null, agreedFacts: agreements.map((item) => ({ text: item.text, sourceArticleIds: item.sourceArticleIds })), disputedPoints: disputes, timeline: timeline.map((item, index) => ({ id: `timeline-${draft.id}-${index}`, occurredAt: item.occurredAt, description: item.content, sourceArticleIds: item.supportingArticleIds })), linkedMatch: null, competition: matchedCompetitions[0]?.name ?? null, teams: matchedTeams.map((team) => team.name), players: [], articles: rawArticles, aiGenerated: generated, reviewStatus: generated ? "auto" : "pending" });
+  const story = storyClusterSchema.parse({ id: draft.id, slug: createStorySlug(title, draft.id), legacySlugs: [], title, summary, summaryLong: buildLongSummary(summary, ...articles.map((article) => article.excerpt)), category: String(categoryValue).slice(0, 160), language: generated ? "vi" : lead.language, status: type === "correction" ? "correction" : official ? "official" : disputes.length ? "disputed" : speculative ? "rumor" : sourceNames.length >= 2 ? "reported" : ageHours <= 12 ? "developing" : "unverified", sourceCount: sourceNames.length, sourceNames, officialSources: rawArticles.filter((article) => article.isOfficialSource), hasOfficialSource: official, hotnessScore: hotness, reliabilityScore: reliability, publishedAt, updatedAt, imageUrl: articles.find((article) => article.imageUrl)?.imageUrl ?? null, agreedFacts: agreements.map((item) => ({ text: item.text, sourceArticleIds: item.sourceArticleIds })), disputedPoints: disputes, timeline: timeline.map((item, index) => ({ id: `timeline-${draft.id}-${index}`, occurredAt: item.occurredAt, description: item.content, sourceArticleIds: item.supportingArticleIds })), linkedMatch: null, competition: matchedCompetitions[0]?.name ?? null, teams: matchedTeams.map((team) => team.name), players: [], articles: rawArticles, aiGenerated: generated, reviewStatus: generated ? "auto" : "pending" });
   return { story, teamIds: matchedTeams.map((team) => team.id), competitionId: matchedCompetitions[0]?.id ?? null };
 }
 
@@ -143,10 +144,45 @@ export async function processStories(options: { dryRun?: boolean; includeFailed?
 }
 
 export async function summarizePersistedStories(options: { dryRun?: boolean; limit?: number } = {}) {
-  const provider = getAIProvider(); if (["disabled", "heuristic", "mock"].includes(provider.name)) throw new ConfigurationError("Chưa có remote AI provider để chạy AI summary.", "ai"); const client = admin(); const { data, error } = await client.from("story_clusters").select("id,payload").order("last_updated_at", { ascending: false }).limit(options.limit ?? 20); if (error) throw new ProviderError("Không thể đọc story cần tóm tắt.", "supabase"); let updated = 0; const errors: string[] = [];
-  for (const row of data ?? []) { const parsed = storyClusterSchema.safeParse(row.payload); if (!parsed.success) { errors.push(`${row.id}: invalid payload`); continue; } const story = parsed.data; const input = story.articles.map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt ?? "", publishedAt: article.publishedAt, sourceName: article.sourceName })); const jobId = randomUUID(); if (!options.dryRun) await client.from("ai_jobs").insert({ id: jobId, job_type: "summarize_cluster", input_reference: story.id, provider: provider.name, model: process.env.OPENAI_MODEL ?? process.env.GEMINI_MODEL ?? process.env.CLOUDFLARE_AI_MODEL ?? null, status: "processing" }); try { const output = await provider.summarizeCluster({ articles: input }); const allowed = new Set(input.map((article) => article.id)); if (!output.sourceIds.every((id) => allowed.has(id))) throw new Error("AI returned unknown source IDs"); const next = storyClusterSchema.parse({ ...story, title: output.title, summary: transparentSummary(story.articles.map((article) => articleFromStory(article, story.reliabilityScore ?? 70)), output.summary), agreedFacts: output.keyPoints.map((text) => ({ text, sourceArticleIds: output.sourceIds })), aiGenerated: true, reviewStatus: "auto" }); if (!options.dryRun) { await client.from("story_clusters").update({ title: next.title, summary: next.summary, key_points: output.keyPoints, ai_generated: true, ai_provider: provider.name, review_status: "auto", payload: next }).eq("id", story.id); await client.from("ai_jobs").update({ status: "completed", result: output, completed_at: new Date().toISOString() }).eq("id", jobId); } updated += 1; } catch (error) { const safe = toSafeError(error); errors.push(`${story.id}: ${safe.message}`); if (!options.dryRun) await client.from("ai_jobs").update({ status: "failed", error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId); }
+  const provider = getAIProvider();
+  if (["disabled", "heuristic", "mock"].includes(provider.name)) throw new ConfigurationError("Chưa có remote AI provider để chạy AI summary.", "ai");
+  const client = admin();
+  const limit = Math.min(100, Math.max(1, options.limit ?? 20));
+  const { data, error } = await client.from("story_clusters").select("id,payload,ai_generated").eq("ai_generated", false).order("last_updated_at", { ascending: false }).limit(Math.min(200, limit * 4));
+  if (error) throw new ProviderError("Không thể đọc story cần tóm tắt.", "supabase");
+  let updated = 0;
+  const errors: string[] = [];
+  const parsedRows = (data ?? []).flatMap((row) => {
+    const parsed = storyClusterSchema.safeParse(row.payload);
+    if (!parsed.success) { errors.push(`${row.id}: invalid payload`); return []; }
+    return [{ id: row.id, story: parsed.data }];
+  });
+  const queue = prioritizeAISummaryCandidates(parsedRows.map((row) => row.story), limit);
+  const rowIdByStoryId = new Map(parsedRows.map((row) => [row.story.id, row.id]));
+
+  for (const story of queue) {
+    const input = story.articles.map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt ?? "", publishedAt: article.publishedAt, sourceName: article.sourceName }));
+    const jobId = randomUUID();
+    if (!options.dryRun) await client.from("ai_jobs").insert({ id: jobId, job_type: "summarize_cluster", input_reference: story.id, provider: provider.name, model: process.env.OPENAI_MODEL ?? process.env.GEMINI_MODEL ?? process.env.CLOUDFLARE_AI_MODEL ?? null, status: "processing" });
+    try {
+      const output = await provider.summarizeCluster({ articles: input });
+      const allowed = new Set(input.map((article) => article.id));
+      if (!output.sourceIds.every((id) => allowed.has(id))) throw new Error("AI returned unknown source IDs");
+      const nextSummary = transparentSummary(story.articles.map((article) => articleFromStory(article, story.reliabilityScore ?? 70)), output.summary);
+      const next = storyClusterSchema.parse({ ...story, title: output.title, summary: nextSummary, summaryLong: buildLongSummary(nextSummary, story.summaryLong), language: "vi", agreedFacts: output.keyPoints.map((text) => ({ text, sourceArticleIds: output.sourceIds })), aiGenerated: true, reviewStatus: "auto" });
+      const selectedProvider = "lastProviderName" in provider && typeof provider.lastProviderName === "string" ? provider.lastProviderName : provider.name;
+      if (!options.dryRun) {
+        await client.from("story_clusters").update({ title: next.title, summary: next.summary, key_points: output.keyPoints, ai_generated: true, ai_provider: selectedProvider, review_status: "auto", payload: next }).eq("id", rowIdByStoryId.get(story.id) ?? story.id);
+        await client.from("ai_jobs").update({ status: "completed", provider: selectedProvider, result: output, completed_at: new Date().toISOString() }).eq("id", jobId);
+      }
+      updated += 1;
+    } catch (error) {
+      const safe = toSafeError(error);
+      errors.push(`${story.id}: ${safe.message}`);
+      if (!options.dryRun) await client.from("ai_jobs").update({ status: "failed", error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId);
+    }
   }
-  return { provider: provider.name, dryRun: Boolean(options.dryRun), updated, errors };
+  return { provider: provider.name, dryRun: Boolean(options.dryRun), queued: queue.length, updated, errors };
 }
 
 export async function storyProcessingReport() { const client = admin(); const [raw, clusters, links, aiJobs, jobs] = await Promise.all([client.from("raw_articles").select("processing_status"), client.from("story_clusters").select("id,status,ai_generated,ai_provider,last_updated_at"), client.from("story_cluster_articles").select("cluster_id,raw_article_id"), client.from("ai_jobs").select("id,status,provider,error_message,created_at,completed_at").order("created_at", { ascending: false }).limit(20), client.from("ingestion_jobs").select("id,status,fetched_count,inserted_count,updated_count,skipped_count,error_code,metadata,started_at,completed_at").eq("job_type", "stories:process").order("started_at", { ascending: false }).limit(10)]); const error = raw.error ?? clusters.error ?? links.error ?? aiJobs.error ?? jobs.error; if (error) throw new ProviderError("Không thể tạo stories report.", "supabase"); const rawCounts = Object.groupBy(raw.data ?? [], (item) => item.processing_status); return { generatedAt: new Date().toISOString(), rawArticles: Object.fromEntries(Object.entries(rawCounts).map(([key, values]) => [key, values?.length ?? 0])), clusters: clusters.data?.length ?? 0, clusteredArticleLinks: links.data?.length ?? 0, aiGeneratedClusters: clusters.data?.filter((item) => item.ai_generated).length ?? 0, recentAiJobs: aiJobs.data ?? [], recentJobs: jobs.data ?? [] }; }

@@ -1,9 +1,9 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { scheduledPipelineTask } from "../lib/cron/schedule";
+import { scheduledPipelineTask, scheduledStoryProcessingOptions } from "../lib/cron/schedule";
 import { syncRss } from "../lib/rss/sync";
-import { processStories } from "../lib/stories/processor";
+import { processStories, summarizePersistedStories } from "../lib/stories/processor";
 
 interface Env {
   ASSETS: Fetcher;
@@ -82,10 +82,15 @@ const worker = {
           const rssSummary = await syncRss();
           console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
         } else {
-          // Odd invocation: process a small newest-first batch with Workers AI.
+          // Odd invocation: finish one new story with AI. When the queue is
+          // empty, translate one older unprocessed story (international first).
           console.log("[Cron] Running story processing...");
-          const storySummary = await processStories({ useAi: true, aiLimit: 1, limit: 5 });
+          const storySummary = await processStories(scheduledStoryProcessingOptions());
           console.log("[Cron] Story processing result:", JSON.stringify(storySummary));
+          if (storySummary.inputArticles === 0) {
+            const aiBackfill = await summarizePersistedStories({ limit: 1 });
+            console.log("[Cron] AI backfill result:", JSON.stringify(aiBackfill));
+          }
         }
       } catch (error) {
         console.error("[Cron] Error running scheduled task:", error);

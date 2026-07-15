@@ -6,11 +6,14 @@ import { useRouter } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { EmptyState } from "@/components/ui/badges";
 import { fetchStoryDetail, loadingStoryReaderState, type StoryReaderState } from "@/lib/stories/client";
+import { getHighResolutionStoryImageUrl } from "@/lib/stories/images";
 import { isSafeExternalUrl } from "@/lib/stories/schema";
+import { cleanSummaryParagraphs } from "@/lib/stories/summary";
 
 export default function RichNewsDetail({ slug }: { slug: string; bookmarks: Set<string>; onBookmark: (id: string) => void }) {
   const router = useRouter();
   const [reloadToken, setReloadToken] = useState(0);
+  const [failedImageUrl, setFailedImageUrl] = useState<string>();
   const [readerResult, setReaderResult] = useState<{ slug: string; reloadToken: number; state: StoryReaderState }>({ slug: "", reloadToken: -1, state: loadingStoryReaderState });
   const readerState = readerResult.slug === slug && readerResult.reloadToken === reloadToken ? readerResult.state : loadingStoryReaderState;
 
@@ -48,9 +51,8 @@ export default function RichNewsDetail({ slug }: { slug: string; bookmarks: Set<
   }
 
   const { story } = readerState.data;
-  const summaryParagraphs = [...new Set([story.summary, ...story.summaryLong.split(/\n{2,}/)]
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean))];
+  const summaryParagraphs = cleanSummaryParagraphs(story.summary, story.summaryLong);
+  const imageUrl = getHighResolutionStoryImageUrl(story.imageUrl);
   const sourceLinks = [...new Map(story.articles
     .filter((article) => isSafeExternalUrl(article.originalUrl))
     .map((article) => [article.originalUrl, article])).values()];
@@ -59,6 +61,11 @@ export default function RichNewsDetail({ slug }: { slug: string; bookmarks: Set<
     <Link className="simple-news-back" href="/news">← Quay lại tin tức</Link>
     <article>
       <header><h1>{story.title}</h1></header>
+      {imageUrl && imageUrl !== failedImageUrl && <figure className="simple-news-image">
+        {/* Publisher images stay on their original CDN; known thumbnail URLs are upgraded before rendering. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={imageUrl} alt={`Ảnh minh họa cho tin “${story.title}”`} width="1200" height="675" loading="eager" fetchPriority="high" decoding="async" referrerPolicy="no-referrer" onError={() => setFailedImageUrl(imageUrl)} />
+      </figure>}
       <section className="simple-news-summary" aria-labelledby="full-summary-heading">
         <h2 id="full-summary-heading">Tóm tắt đầy đủ</h2>
         <div>{summaryParagraphs.map((paragraph, index) => <p key={`${index}-${paragraph.slice(0, 40)}`}>{paragraph}</p>)}</div>
