@@ -547,8 +547,13 @@ export class SportsCacheRepository {
       throw new ProviderError("Không thể đọc hồ sơ giải đấu.", "supabase");
     if (!data) return null;
     const competition = data as CompetitionRow;
-    const [teamsResult, matchesResult, standingsResult, coverageResult] =
-      await Promise.all([
+    const [
+      teamsResult,
+      fixturesResult,
+      resultsResult,
+      standingsResult,
+      coverageResult,
+    ] = await Promise.all([
         client
           .from("competition_teams")
           .select(
@@ -559,8 +564,20 @@ export class SportsCacheRepository {
           .from("matches")
           .select(this.matchSelect())
           .eq("competition_id", competition.id)
-          .order("start_time", { ascending: false })
+          .in("status", ["scheduled", "postponed", "cancelled"])
+          .gte(
+            "start_time",
+            new Date(Date.now() - 6 * 60 * 60_000).toISOString(),
+          )
+          .order("start_time", { ascending: true })
           .limit(250),
+        client
+          .from("matches")
+          .select(this.matchSelect())
+          .eq("competition_id", competition.id)
+          .eq("status", "finished")
+          .order("start_time", { ascending: false })
+          .limit(100),
         client
           .from("standings")
           .select(
@@ -576,7 +593,8 @@ export class SportsCacheRepository {
       ]);
     const readError =
       teamsResult.error ??
-      matchesResult.error ??
+      fixturesResult.error ??
+      resultsResult.error ??
       standingsResult.error ??
       coverageResult.error;
     if (readError)
@@ -587,7 +605,10 @@ export class SportsCacheRepository {
       const team = one(item.teams);
       return team ? [mapTeam(team)] : [];
     });
-    const matches = ((matchesResult.data ?? []) as unknown as MatchRow[]).map(
+    const fixtures = (
+      (fixturesResult.data ?? []) as unknown as MatchRow[]
+    ).map(mapMatch);
+    const results = ((resultsResult.data ?? []) as unknown as MatchRow[]).map(
       mapMatch,
     );
     const standings = (
@@ -596,22 +617,8 @@ export class SportsCacheRepository {
     return {
       competition: mapCompetition(competition),
       teams,
-      fixtures: matches
-        .filter((match) =>
-          ["scheduled", "postponed", "cancelled"].includes(match.status),
-        )
-        .sort(
-          (a, b) =>
-            Date.parse(a.startTimestamp ?? "") -
-            Date.parse(b.startTimestamp ?? ""),
-        ),
-      results: matches
-        .filter((match) => match.status === "finished")
-        .sort(
-          (a, b) =>
-            Date.parse(b.startTimestamp ?? "") -
-            Date.parse(a.startTimestamp ?? ""),
-        ),
+      fixtures,
+      results,
       standings,
       providerCoverage: (
         (coverageResult.data ?? []) as Array<{
@@ -624,7 +631,10 @@ export class SportsCacheRepository {
       })),
       updatedAt: maxTimestamp([
         competition.updated_at,
-        ...((matchesResult.data ?? []) as unknown as MatchRow[]).map(
+        ...((fixturesResult.data ?? []) as unknown as MatchRow[]).map(
+          (row) => row.updated_at,
+        ),
+        ...((resultsResult.data ?? []) as unknown as MatchRow[]).map(
           (row) => row.updated_at,
         ),
         ...((standingsResult.data ?? []) as unknown as StandingRow[]).map(
@@ -645,8 +655,12 @@ export class SportsCacheRepository {
       throw new ProviderError("Không thể đọc hồ sơ đội bóng.", "supabase");
     if (!data) return null;
     const team = data as TeamRow;
-    const [competitionsResult, matchesResult, standingsResult] =
-      await Promise.all([
+    const [
+      competitionsResult,
+      fixturesResult,
+      resultsResult,
+      standingsResult,
+    ] = await Promise.all([
         client
           .from("competition_teams")
           .select(
@@ -657,6 +671,18 @@ export class SportsCacheRepository {
           .from("matches")
           .select(this.matchSelect())
           .or(`home_team_id.eq.${team.id},away_team_id.eq.${team.id}`)
+          .in("status", ["scheduled", "postponed", "cancelled"])
+          .gte(
+            "start_time",
+            new Date(Date.now() - 6 * 60 * 60_000).toISOString(),
+          )
+          .order("start_time", { ascending: true })
+          .limit(100),
+        client
+          .from("matches")
+          .select(this.matchSelect())
+          .or(`home_team_id.eq.${team.id},away_team_id.eq.${team.id}`)
+          .eq("status", "finished")
           .order("start_time", { ascending: false })
           .limit(100),
         client
@@ -668,7 +694,10 @@ export class SportsCacheRepository {
           .order("updated_at", { ascending: false }),
       ]);
     const readError =
-      competitionsResult.error ?? matchesResult.error ?? standingsResult.error;
+      competitionsResult.error ??
+      fixturesResult.error ??
+      resultsResult.error ??
+      standingsResult.error;
     if (readError)
       throw new ProviderError("Không thể đọc dữ liệu đội bóng.", "supabase");
     const competitions = (
@@ -679,34 +708,26 @@ export class SportsCacheRepository {
       const competition = one(item.competitions);
       return competition ? [mapCompetition(competition)] : [];
     });
-    const matches = ((matchesResult.data ?? []) as unknown as MatchRow[]).map(
+    const fixtures = (
+      (fixturesResult.data ?? []) as unknown as MatchRow[]
+    ).map(mapMatch);
+    const results = ((resultsResult.data ?? []) as unknown as MatchRow[]).map(
       mapMatch,
     );
     return {
       team: mapTeam(team),
       competitions,
-      fixtures: matches
-        .filter((match) =>
-          ["scheduled", "postponed", "cancelled"].includes(match.status),
-        )
-        .sort(
-          (a, b) =>
-            Date.parse(a.startTimestamp ?? "") -
-            Date.parse(b.startTimestamp ?? ""),
-        ),
-      results: matches
-        .filter((match) => match.status === "finished")
-        .sort(
-          (a, b) =>
-            Date.parse(b.startTimestamp ?? "") -
-            Date.parse(a.startTimestamp ?? ""),
-        ),
+      fixtures,
+      results,
       standings: ((standingsResult.data ?? []) as unknown as StandingRow[]).map(
         (row) => mapStanding(row),
       ),
       updatedAt: maxTimestamp([
         team.updated_at,
-        ...((matchesResult.data ?? []) as unknown as MatchRow[]).map(
+        ...((fixturesResult.data ?? []) as unknown as MatchRow[]).map(
+          (row) => row.updated_at,
+        ),
+        ...((resultsResult.data ?? []) as unknown as MatchRow[]).map(
           (row) => row.updated_at,
         ),
       ]),
