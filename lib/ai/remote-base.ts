@@ -9,6 +9,17 @@ export const agreementsSchema = z.array(z.object({ text: z.string().min(1), sour
 export const disputesSchema = z.array(z.object({ topic: z.string().min(1), positions: z.array(z.object({ claim: z.string().min(1), sourceArticleIds: z.array(z.string()).min(1) })).min(2) }));
 export const answerSchema = z.object({ answer: z.string().min(1), sourceArticleIds: z.array(z.string()) });
 
+export function providerJsonSchema<T>(schema: z.ZodType<T>): Record<string, unknown> {
+  const jsonSchema = { ...(z.toJSONSchema(schema) as Record<string, unknown>) };
+  delete jsonSchema.$schema;
+  return jsonSchema;
+}
+
+export function parseStructuredText<T>(schema: z.ZodType<T>, value: string): T {
+  const cleaned = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  return schema.parse(JSON.parse(cleaned));
+}
+
 export abstract class RemoteAIProvider implements AIProvider {
   abstract readonly name: string;
   protected abstract structured<T>(schema: z.ZodType<T>, task: string, input: unknown): Promise<T>;

@@ -17,7 +17,7 @@ type RawRow = { id: string; source_id: string; external_id: string | null; origi
 type ArticleRecord = ClusterableArticle & { sourceName: string; sourceLogoUrl: string | null; reliability: number; isOfficial: boolean; originalUrl: string; canonicalUrl: string | null; author: string | null; imageUrl: string | null; fetchedAt: string; language: "vi" | "en"; contentHash: string; rawMetadata: Record<string, unknown> };
 type EntityRecord = { id: string; name: string; slug: string };
 type Draft = { id: string; clusterKey: string; articles: ArticleRecord[]; existing: boolean; touched: boolean };
-type RemoteAIExecution = { remaining: number; attempts: number; generated: number; errors: string[] };
+type RemoteAIExecution = { remaining: number; attempts: number; generated: number; errors: string[]; provider: string | null };
 export type StoryProcessingSummary = { jobId: string; dryRun: boolean; inputArticles: number; createdClusters: number; updatedClusters: number; mergedArticles: number; failedArticles: number; aiProvider: string; aiAttempts: number; aiGenerated: number; aiErrors: string[]; errors: string[] };
 
 function admin() { const client = createAdminClient(); if (!client) throw new ConfigurationError("Thiếu Supabase service role cho story processor.", "supabase"); return client; }
@@ -63,6 +63,7 @@ async function buildStory(draft: Draft, provider: AIProvider, teams: EntityRecor
       generatedSummary = candidate;
       generated = true;
       remoteAI.generated += 1;
+      remoteAI.provider = "lastProviderName" in provider && typeof provider.lastProviderName === "string" ? provider.lastProviderName : provider.name;
     } catch (error) {
       // AI must enhance the feed, never hold fresh source metadata hostage.
       const message = safeAIErrorMessage(error);
@@ -121,7 +122,7 @@ async function persistDrafts(drafts: Array<{ draft: Draft; story: StoryCluster; 
 }
 
 export async function processStories(options: { dryRun?: boolean; includeFailed?: boolean; recluster?: boolean; useAi?: boolean; aiLimit?: number; limit?: number } = {}): Promise<StoryProcessingSummary> {
-  const client = admin(); const jobId = randomUUID(); const provider = getAIProvider(); const remoteAI: RemoteAIExecution = { remaining: options.useAi ? Math.max(0, options.aiLimit ?? 1) : 0, attempts: 0, generated: 0, errors: [] }; const summary: StoryProcessingSummary = { jobId, dryRun: Boolean(options.dryRun), inputArticles: 0, createdClusters: 0, updatedClusters: 0, mergedArticles: 0, failedArticles: 0, aiProvider: provider.name, aiAttempts: 0, aiGenerated: 0, aiErrors: [], errors: [] };
+  const client = admin(); const jobId = randomUUID(); const provider = getAIProvider(); const remoteAI: RemoteAIExecution = { remaining: options.useAi ? Math.max(0, options.aiLimit ?? 1) : 0, attempts: 0, generated: 0, errors: [], provider: null }; const summary: StoryProcessingSummary = { jobId, dryRun: Boolean(options.dryRun), inputArticles: 0, createdClusters: 0, updatedClusters: 0, mergedArticles: 0, failedArticles: 0, aiProvider: provider.name, aiAttempts: 0, aiGenerated: 0, aiErrors: [], errors: [] };
   if (options.recluster && !options.dryRun) { await client.from("story_cluster_articles").delete().not("cluster_id", "is", null); await client.from("story_clusters").delete().not("id", "is", null); await client.from("raw_articles").update({ processing_status: "pending" }).neq("processing_status", "pending"); }
   let query = client.from("raw_articles").select("id,source_id,external_id,original_url,canonical_url,title,normalized_title,excerpt,author,image_url,published_at,fetched_at,content_hash,language,processing_status,raw_metadata,news_sources(name,logo_url,is_official,reliability_score)").order("published_at", { ascending: false }).limit(options.limit ?? 1000); query = options.recluster ? query : query.in("processing_status", ["pending", "failed"]);
   const { data, error } = await query; if (error) throw new ProviderError("Không thể đọc raw articles pending.", "supabase"); const incoming = ((data ?? []) as unknown as RawRow[]).map(toArticle); summary.inputArticles = incoming.length;
@@ -135,9 +136,9 @@ export async function processStories(options: { dryRun?: boolean; includeFailed?
   }
   const touched = drafts.filter((draft) => draft.touched); const entities = await loadEntities(); const built = [] as Array<{ draft: Draft; story: StoryCluster; teamIds: string[]; competitionId: string | null }>;
   for (const draft of touched) { try { built.push({ draft, ...(await buildStory(draft, provider, entities.teams, entities.competitions, remoteAI)) }); if (draft.existing) summary.updatedClusters += 1; } catch (error) { const message = error instanceof Error ? error.message.slice(0, 600) : toSafeError(error).message; summary.errors.push(`${draft.id}: ${message}`); summary.failedArticles += draft.articles.length; const failedIds = draft.articles.map((a) => a.id); try { await client.from("raw_articles").update({ processing_status: "failed" }).in("id", failedIds); } catch { /* ignore */ } } }
-  summary.aiAttempts = remoteAI.attempts; summary.aiGenerated = remoteAI.generated; summary.aiErrors = remoteAI.errors;
+  summary.aiAttempts = remoteAI.attempts; summary.aiGenerated = remoteAI.generated; summary.aiErrors = remoteAI.errors; summary.aiProvider = remoteAI.provider ?? provider.name;
   const jobMetadata = { useAi: Boolean(options.useAi), aiLimit: options.aiLimit ?? 1, aiAttempts: summary.aiAttempts, aiGenerated: summary.aiGenerated, aiErrors: summary.aiErrors, recluster: Boolean(options.recluster) };
-  if (!summary.dryRun) { await client.from("ingestion_jobs").insert({ id: jobId, job_type: "stories:process", provider: provider.name, status: "processing", fetched_count: incoming.length, metadata: jobMetadata }); try { if (built.length) await persistDrafts(built, summary); await client.from("ingestion_jobs").update({ status: summary.errors.length ? "failed" : "completed", fetched_count: incoming.length, inserted_count: summary.createdClusters, updated_count: summary.updatedClusters, skipped_count: summary.failedArticles, error_code: summary.errors.length ? "PARTIAL_FAILURE" : null, error_message: summary.errors.join("; ").slice(0, 1000) || null, metadata: jobMetadata, completed_at: new Date().toISOString() }).eq("id", jobId); } catch (error) { const safe = toSafeError(error); await client.from("ingestion_jobs").update({ status: "failed", error_code: safe.code, error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId); throw error; } }
+  if (!summary.dryRun) { await client.from("ingestion_jobs").insert({ id: jobId, job_type: "stories:process", provider: summary.aiProvider, status: "processing", fetched_count: incoming.length, metadata: jobMetadata }); try { if (built.length) await persistDrafts(built, summary); await client.from("ingestion_jobs").update({ status: summary.errors.length ? "failed" : "completed", fetched_count: incoming.length, inserted_count: summary.createdClusters, updated_count: summary.updatedClusters, skipped_count: summary.failedArticles, error_code: summary.errors.length ? "PARTIAL_FAILURE" : null, error_message: summary.errors.join("; ").slice(0, 1000) || null, metadata: jobMetadata, completed_at: new Date().toISOString() }).eq("id", jobId); } catch (error) { const safe = toSafeError(error); await client.from("ingestion_jobs").update({ status: "failed", error_code: safe.code, error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId); throw error; } }
   return summary;
 }
 

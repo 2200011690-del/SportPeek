@@ -7,6 +7,11 @@ import type { StoryRepositoryResult } from "./repository";
 
 export type PersistedStorySnapshot = { stories: StoryCluster[]; lastSyncAt: string | null; sources: string[]; aiStatus: NewsAIStatus };
 export type PersistedStoryLoader = () => Promise<PersistedStorySnapshot>;
+type PersistedAIProvider = Exclude<NewsAIStatus["provider"], "off">;
+
+function isPersistedAIProvider(provider: string | null | undefined): provider is PersistedAIProvider {
+  return provider === "cloudflare" || provider === "openai" || provider === "gemini" || provider === "groq";
+}
 
 export function derivePersistedAIStatus(
   stories: Array<Pick<StoryCluster, "aiGenerated">>,
@@ -14,8 +19,9 @@ export function derivePersistedAIStatus(
   configuredProvider = process.env.AI_PROVIDER,
 ): NewsAIStatus {
   const translatedCount = stories.filter((story) => story.aiGenerated).length;
-  const actual = recordedProviders.find((provider) => provider === "cloudflare" || provider === "openai");
-  const configured = configuredProvider === "cloudflare" || configuredProvider === "openai" ? configuredProvider : null;
+  const actual = recordedProviders.find(isPersistedAIProvider);
+  const chainProvider = process.env.AI_PROVIDER_CHAIN?.split(",").map((provider) => provider.trim().toLowerCase()).find(isPersistedAIProvider);
+  const configured = configuredProvider === "failover" ? chainProvider ?? null : isPersistedAIProvider(configuredProvider) ? configuredProvider : null;
   const provider = actual ?? configured ?? "off";
   return { provider, state: provider === "off" ? "off" : translatedCount > 0 ? "ok" : "error", translatedCount };
 }

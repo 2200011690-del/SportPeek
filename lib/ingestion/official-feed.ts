@@ -60,7 +60,7 @@ const DEFAULT_FEEDS: FeedConfig[] = [
   { name: "Sky Sports Football", url: "https://www.skysports.com/rss/12040", reliability: 90, language: "en" },
 ];
 
-export type NewsAIStatus = { provider: "cloudflare" | "openai" | "off"; state: "ok" | "off" | "error"; translatedCount: number };
+export type NewsAIStatus = { provider: "cloudflare" | "openai" | "gemini" | "groq" | "off"; state: "ok" | "off" | "error"; translatedCount: number };
 export type AggregatedNews = {
   data: NewsItem[];
   sources: string[];

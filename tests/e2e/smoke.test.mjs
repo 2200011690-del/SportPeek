@@ -27,7 +27,7 @@ test("news API reports the real AI state", { skip: !base && "Set E2E_BASE_URL to
   const response = await fetch(`${base}/api/news`);
   assert.equal(response.status, 200);
   const payload = await response.json();
-  assert.ok(["cloudflare", "openai", "off"].includes(payload.aiStatus?.provider));
+  assert.ok(["cloudflare", "openai", "gemini", "groq", "off"].includes(payload.aiStatus?.provider));
   assert.ok(["ok", "off", "error"].includes(payload.aiStatus?.state));
   assert.equal(payload.aiTranslation, payload.aiStatus.translatedCount > 0);
   if (payload.aiTranslation) assert.ok(payload.data.some((item) => item.translatedByAI));
