@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchStoryDetail, mapStoryEnvelopeToState } from "../../lib/stories/client";
+import { fetchStoryDetail, mapStoryEnvelopeToState, requestStoryAISummary } from "../../lib/stories/client";
 import { createStoryRepository } from "../../lib/stories/repository";
 import { isSafeExternalUrl, rawArticleSchema, storyDetailEnvelopeSchema } from "../../lib/stories/schema";
 import { createStorySlug, storySlugSchema } from "../../lib/stories/slug";
@@ -89,4 +89,16 @@ test("reader timeout is finite and retries at most once", async () => {
   assert.equal(state.status, "error");
   assert.match(state.message, /Quá thời gian/);
   assert.equal(calls, 2);
+});
+
+test("reader accepts an on-demand AI summary returned by the story endpoint", async () => {
+  const repository = createStoryRepository(async () => makeAggregatedNews(), { provider: "aggregated-rss" });
+  const detail = await repository.getStoryBySlug("story-alpha-001");
+  assert.ok(detail.data);
+  const story = detail.data.story;
+  const updated = await requestStoryAISummary(story.slug, {
+    fetcher: async () => new Response(JSON.stringify({ status: "success", data: { story: { ...story, aiGenerated: true } } }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  assert.equal(updated?.id, story.id);
+  assert.equal(updated?.aiGenerated, true);
 });

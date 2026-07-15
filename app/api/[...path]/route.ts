@@ -5,7 +5,7 @@ import { sportsService } from "@/lib/application/sports-service";
 import { storyService } from "@/lib/application/story-service";
 import { toSafeError } from "@/lib/core/errors";
 import { syncRss } from "@/lib/rss/sync";
-import { processStories } from "@/lib/stories/processor";
+import { processStories, summarizePersistedStoryById } from "@/lib/stories/processor";
 import { readNewsSourceCatalog } from "@/lib/rss/repository";
 import { getHealthSnapshot } from "@/lib/health";
 import { sportsCacheRepository } from "@/lib/sports-data/repository";
@@ -172,6 +172,24 @@ export async function GET(request: NextRequest, { params }: Context) {
 export async function POST(request: NextRequest, { params }: Context) {
   const { path } = await params; const route = path.join("/"); const body: unknown = await request.json().catch(() => null);
   const bodyRecord = body && typeof body === "object" ? body as Record<string, unknown> : null;
+  if (path[0] === "stories" && path[1] && path[2] === "summarize") {
+    const parsedSlug = storySlugSchema.safeParse(path[1]);
+    if (!parsedSlug.success) return NextResponse.json({ status: "not_found", data: null, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }, { status: 404 });
+    const clientRate = rateLimit(`story-ai-client:${clientKey(request)}`, 6, 600_000);
+    const storyRate = rateLimit(`story-ai-story:${parsedSlug.data}`, 2, 60_000);
+    if (!clientRate.allowed || !storyRate.allowed) return NextResponse.json({ status: "rate_limited", data: null, error: { code: "RATE_LIMITED", message: "AI đang xử lý bài này. Vui lòng chờ một lát." } }, { status: 429 });
+    try {
+      const existing = await storyService.getBySlug(parsedSlug.data);
+      if (!existing.data) return NextResponse.json({ status: "not_found", data: null, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }, { status: 404 });
+      const story = await summarizePersistedStoryById(existing.data.story.id);
+      return story
+        ? NextResponse.json({ status: "success", data: { story } }, { headers: { "cache-control": "no-store" } })
+        : NextResponse.json({ status: "not_found", data: null, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }, { status: 404 });
+    } catch (error) {
+      const safe = toSafeError(error);
+      return NextResponse.json({ status: "error", data: null, error: { code: safe.code, message: safe.message } }, { status: safe.status });
+    }
+  }
   if (route === "telegram/webhook") {
     if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_WEBHOOK_SECRET) return NextResponse.json({ status: "configuration_required" }, { status: 503 });
     if (request.headers.get("x-telegram-bot-api-secret-token") !== process.env.TELEGRAM_WEBHOOK_SECRET) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });

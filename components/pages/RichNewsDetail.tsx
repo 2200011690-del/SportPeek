@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { EmptyState } from "@/components/ui/badges";
-import { fetchStoryDetail, loadingStoryReaderState, type StoryReaderState } from "@/lib/stories/client";
+import { fetchStoryDetail, loadingStoryReaderState, requestStoryAISummary, type StoryReaderState } from "@/lib/stories/client";
 import { getHighResolutionStoryImageUrl } from "@/lib/stories/images";
 import { isSafeExternalUrl } from "@/lib/stories/schema";
 import { storyDisplaySummaryParagraphs } from "@/lib/stories/summary";
@@ -14,6 +14,8 @@ export default function RichNewsDetail({ slug }: { slug: string; bookmarks: Set<
   const router = useRouter();
   const [reloadToken, setReloadToken] = useState(0);
   const [failedImageUrl, setFailedImageUrl] = useState<string>();
+  const [aiSummaryStoryId, setAiSummaryStoryId] = useState<string | null>(null);
+  const requestedStoryIds = useRef(new Set<string>());
   const [readerResult, setReaderResult] = useState<{ slug: string; reloadToken: number; state: StoryReaderState }>({ slug: "", reloadToken: -1, state: loadingStoryReaderState });
   const readerState = readerResult.slug === slug && readerResult.reloadToken === reloadToken ? readerResult.state : loadingStoryReaderState;
 
@@ -41,6 +43,21 @@ export default function RichNewsDetail({ slug }: { slug: string; bookmarks: Set<
     return () => { window.clearInterval(timer); persist(); };
   }, [activeStoryId]);
 
+  const activeStory = readerState.data?.story;
+  useEffect(() => {
+    if (!activeStory || activeStory.aiGenerated || requestedStoryIds.current.has(activeStory.id)) return;
+    requestedStoryIds.current.add(activeStory.id);
+    setAiSummaryStoryId(activeStory.id);
+    void requestStoryAISummary(activeStory.slug).then((updatedStory) => {
+      if (!updatedStory) return;
+      setReaderResult((current) => {
+        if (current.state.status !== "success" && current.state.status !== "stale") return current;
+        if (current.state.data.story.id !== updatedStory.id) return current;
+        return { ...current, state: { ...current.state, data: { ...current.state.data, story: updatedStory } } };
+      });
+    }).finally(() => setAiSummaryStoryId((current) => current === activeStory.id ? null : current));
+  }, [activeStory]);
+
   if (readerState.status === "idle" || readerState.status === "loading") {
     return <div className="article-page simple-news-detail story-reader-skeleton" aria-busy="true" aria-label="Đang tải bài viết"><div className="story-skeleton-line wide" /><div className="story-skeleton-line title" /><div className="story-skeleton-line title short" /><div className="story-skeleton-summary" /></div>;
   }
@@ -67,7 +84,7 @@ export default function RichNewsDetail({ slug }: { slug: string; bookmarks: Set<
         <img src={imageUrl} alt={`Ảnh minh họa cho tin “${story.title}”`} width="1200" height="675" loading="eager" fetchPriority="high" decoding="async" referrerPolicy="no-referrer" onError={() => setFailedImageUrl(imageUrl)} />
       </figure>}
       <section className="simple-news-summary" aria-labelledby="full-summary-heading">
-        <h2 id="full-summary-heading">Tóm tắt đầy đủ</h2>
+        <div className="simple-news-summary-heading"><h2 id="full-summary-heading">Tóm tắt đầy đủ</h2>{aiSummaryStoryId === story.id && <span className="simple-news-ai-status" role="status">AI đang viết bản tổng hợp…</span>}</div>
         <div>{summaryParagraphs.map((paragraph, index) => <p key={`${index}-${paragraph.slice(0, 40)}`}>{paragraph}</p>)}</div>
       </section>
       <section className="simple-news-sources" aria-labelledby="source-links-heading">

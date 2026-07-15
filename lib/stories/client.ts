@@ -1,5 +1,7 @@
 import {
+  storyClusterSchema,
   storyDetailEnvelopeSchema,
+  type StoryCluster,
   type StoryDetailEnvelope,
   type StoryDetailPayload,
   type StoryResponseMeta,
@@ -47,6 +49,26 @@ type FetchStoryOptions = {
   timeoutMs?: number;
   retries?: number;
 };
+
+export async function requestStoryAISummary(slug: string, options: Pick<FetchStoryOptions, "fetcher"> = {}): Promise<StoryCluster | null> {
+  const fetcher = options.fetcher ?? fetch;
+  try {
+    const response = await fetcher(`/api/stories/${encodeURIComponent(slug)}/summarize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      cache: "no-store",
+    });
+    const body: unknown = await response.json().catch(() => null);
+    if (!response.ok || !body || typeof body !== "object") return null;
+    const data = "data" in body && body.data && typeof body.data === "object" ? body.data : null;
+    const candidate = data && "story" in data ? data.story : data;
+    const parsed = storyClusterSchema.safeParse(candidate);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function fetchStoryDetail(slug: string, options: FetchStoryOptions = {}): Promise<StoryReaderState> {
   const fetcher = options.fetcher ?? fetch;

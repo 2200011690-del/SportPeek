@@ -3,6 +3,7 @@ import test from "node:test";
 import { getHighResolutionStoryImageUrl } from "../../lib/stories/images";
 import { cleanSummaryParagraphs, prioritizeAISummaryCandidates, storyDisplaySummaryParagraphs } from "../../lib/stories/summary";
 import { CLUSTER_SUMMARY_TASK } from "../../lib/ai/remote-base";
+import { HeuristicAIProvider } from "../../lib/ai/heuristic";
 
 test("story detail upgrades known publisher thumbnails without changing unrelated images", () => {
   assert.equal(
@@ -34,6 +35,26 @@ test("AI stories render one editorial summary instead of appending source excerp
   assert.match(CLUSTER_SUMMARY_TASK, /gộp các dữ kiện chung/);
   assert.match(CLUSTER_SUMMARY_TASK, /không lặp cùng một ý/);
   assert.match(CLUSTER_SUMMARY_TASK, /không nối các trích đoạn/);
+});
+
+test("story detail removes the generic RSS disclaimer and shows actual story information", () => {
+  assert.deepEqual(storyDisplaySummaryParagraphs({
+    aiGenerated: false,
+    title: "U23 Việt Nam giành chiến thắng ở trận ra quân",
+    summary: "SportPeek ghi nhận thông tin này từ VOV Thể thao, Tuổi Trẻ Thể thao. Bản tổng hợp chỉ dựa trên tiêu đề và mô tả ngắn do các nguồn phát hành qua RSS. Có 2 nhà xuất bản cùng đề cập sự kiện.",
+    summaryLong: "",
+    articles: [],
+  }), ["U23 Việt Nam giành chiến thắng ở trận ra quân"]);
+});
+
+test("heuristic summary uses source titles when RSS descriptions are empty", async () => {
+  const provider = new HeuristicAIProvider();
+  const result = await provider.summarizeCluster({ articles: [
+    { id: "a", title: "U23 Việt Nam thắng trận mở màn", excerpt: "", sourceName: "Nguồn A", publishedAt: "2026-07-15T01:00:00.000Z" },
+    { id: "b", title: "Chiến thắng của U23 Việt Nam trong ngày ra quân", excerpt: "", sourceName: "Nguồn B", publishedAt: "2026-07-15T01:05:00.000Z" },
+  ] });
+  assert.match(result.summary, /U23 Việt Nam/);
+  assert.doesNotMatch(result.summary, /chưa được xử lý|metadata nguồn/i);
 });
 
 test("AI backfill prioritizes unprocessed international stories", () => {
