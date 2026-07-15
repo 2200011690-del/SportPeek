@@ -171,6 +171,7 @@ export async function GET(request: NextRequest, { params }: Context) {
 
 export async function POST(request: NextRequest, { params }: Context) {
   const { path } = await params; const route = path.join("/"); const body: unknown = await request.json().catch(() => null);
+  const bodyRecord = body && typeof body === "object" ? body as Record<string, unknown> : null;
   if (route === "telegram/webhook") {
     if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_WEBHOOK_SECRET) return NextResponse.json({ status: "configuration_required" }, { status: 503 });
     if (request.headers.get("x-telegram-bot-api-secret-token") !== process.env.TELEGRAM_WEBHOOK_SECRET) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
@@ -213,8 +214,8 @@ export async function POST(request: NextRequest, { params }: Context) {
     if (!protectedBySecret(request)) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
     const rate = rateLimit(`cron:${clientKey(request)}`, 10, 300_000);
     if (!rate.allowed) return NextResponse.json({ error: "Đã vượt giới hạn" }, { status: 429 });
-    const mode = body && typeof body === "object" && "mode" in body ? String((body as any).mode) : "both";
-    const recluster = body && typeof body === "object" && "recluster" in body ? Boolean((body as any).recluster) : false;
+    const mode = bodyRecord && "mode" in bodyRecord ? String(bodyRecord.mode) : "both";
+    const recluster = bodyRecord && "recluster" in bodyRecord ? Boolean(bodyRecord.recluster) : false;
     const useAi = process.env.AI_PROVIDER !== "disabled" && process.env.AI_PROVIDER !== "off";
     try {
       if (mode === "rss") {
@@ -224,7 +225,7 @@ export async function POST(request: NextRequest, { params }: Context) {
       if (mode === "stories") {
         // useAi defaults to false to avoid hitting Cloudflare's 50-subrequest limit;
         // pass { mode: 'stories', useAi: true } explicitly to enable AI processing
-        const explicitUseAi = body && typeof body === "object" && "useAi" in body ? Boolean((body as any).useAi) : false;
+        const explicitUseAi = bodyRecord && "useAi" in bodyRecord ? Boolean(bodyRecord.useAi) : false;
         const storyResult = await processStories({ useAi: explicitUseAi, recluster, limit: 5 });
         return NextResponse.json({ stories: storyResult });
       }

@@ -4,7 +4,7 @@ import React, { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { Command, Flame, Search, Trophy, Users, ChevronDown, X } from "lucide-react";
 import { useRuntimeData } from "@/components/SportPeekApp";
-import { TeamMark, EmptyState } from "@/components/ui/badges";
+import { EmptyState } from "@/components/ui/badges";
 import { filterNewsItems, normalizeSearchText } from "@/lib/ui-logic";
 
 type FilterBarProps = {

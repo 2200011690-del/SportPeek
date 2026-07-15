@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Bookmark, Check, Languages, Newspaper, Rss, ShieldCheck, Sparkles, Star } from "lucide-react";
+import { ArrowRight, Bookmark, Check, Languages, ShieldCheck, Sparkles } from "lucide-react";
 import { useRuntimeData } from "@/components/SportPeekApp";
 import { HotnessBadge, ReliabilityBadge, NewsVisual, SectionHeading, DataLoadingState, EmptyState, Pagination, TeamMark } from "@/components/ui/badges";
 import { FilterBar } from "@/components/ui/Search";

@@ -18,6 +18,20 @@ test("feed card and detail endpoint resolve the same story and source articles",
   assert.ok(detailEnvelope.data?.story.articles.every((article) => article.originalUrl.startsWith("https://")));
 });
 
+test("feed adapter guarantees readable paragraphs and source excerpts for legacy persisted stories", async () => {
+  const repository = createStoryRepository(async () => makeAggregatedNews(), { provider: "aggregated-rss" });
+  const feedResult = await repository.getStoryFeed();
+  const legacyStory = feedResult.data?.[0];
+  assert.ok(legacyStory);
+  const card = storyToNewsItem({
+    ...legacyStory,
+    summaryLong: legacyStory.summary,
+    articles: legacyStory.articles.map((article) => ({ ...article, excerpt: null })),
+  });
+  assert.ok((card.readingBody?.length ?? 0) >= 2);
+  assert.ok(card.sourceDetails?.every((source) => Boolean(source.excerpt)));
+});
+
 test("invalid story routes return not_found rather than an empty success", async () => {
   const repository = createStoryRepository(async () => makeAggregatedNews(), { provider: "aggregated-rss" });
   const result = await repository.getStoryBySlug("story-does-not-exist");

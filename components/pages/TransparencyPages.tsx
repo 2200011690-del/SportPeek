@@ -1,8 +1,7 @@
 "use client";
 
 import React from "react";
-import Link from "next/link";
-import { ArrowRight, Check, ShieldCheck } from "lucide-react";
+import { Check } from "lucide-react";
 import { useRuntimeData } from "@/components/SportPeekApp";
 import { DataLoadingState } from "@/components/ui/badges";
 

@@ -16,6 +16,15 @@ function relativePublishedAt(value: string): string {
 export function storyToNewsItem(story: StoryCluster, index = 0): NewsItem {
   const lead = story.articles[0];
   const paragraphs = story.summaryLong.split(/\n{2,}/).map((value) => value.trim()).filter(Boolean);
+  const readingBody = [...new Set([
+    ...paragraphs,
+    ...story.articles.map((article) => article.excerpt?.trim()).filter((value): value is string => Boolean(value)),
+    story.summary.trim(),
+  ].filter(Boolean))];
+  if (readingBody.length < 2) {
+    const sourceNames = [...new Set(story.articles.map((article) => article.sourceName))];
+    readingBody.push(`Thông tin hiện được đối chiếu từ ${sourceNames.join(", ")}; liên kết bài gốc được giữ lại để kiểm tra ngữ cảnh.`);
+  }
   return {
     id: story.id,
     title: story.title,
@@ -35,7 +44,7 @@ export function storyToNewsItem(story: StoryCluster, index = 0): NewsItem {
       url: article.originalUrl,
       reliability: story.reliabilityScore ?? 0,
       language: article.language,
-      excerpt: article.excerpt ?? undefined,
+      excerpt: article.excerpt?.trim() || story.summary,
       articleId: article.id,
       title: article.title,
       publishedAt: article.publishedAt,
@@ -49,7 +58,7 @@ export function storyToNewsItem(story: StoryCluster, index = 0): NewsItem {
     imageUrl: story.imageUrl ?? undefined,
     imageAlt: story.imageUrl ? `Ảnh đại diện cho tin “${story.title}” từ ${lead.sourceName}` : undefined,
     imageSource: story.articles.find((article) => article.imageUrl)?.sourceName,
-    readingBody: paragraphs.length ? paragraphs : [story.summary],
+    readingBody,
     originalUrl: lead.originalUrl,
     originalLanguage: story.language,
     translatedByAI: story.aiGenerated,

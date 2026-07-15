@@ -3,12 +3,12 @@
 import React, { useMemo } from "react";
 import Link from "next/link";
 import {
-  Bell, Bookmark, CircleUserRound, Command, Globe2, Home, ListFilter, Moon, Menu, Newspaper,
-  Radio, Rss, Settings, ShieldCheck, Sun, Trophy, Users, Video, X, Zap
+  Bell, Bookmark, CircleUserRound, Command, Globe2, ListFilter, Moon, Menu, Newspaper,
+  Rss, Settings, ShieldCheck, Sun, Video, X, Zap
 } from "lucide-react";
 import { useRuntimeData, navItems, SourceFilter } from "@/components/SportPeekApp";
 import { TeamMark } from "@/components/ui/badges";
-import type { HealthState, ServiceHealth } from "@/lib/health";
+import type { HealthState } from "@/lib/health";
 
 const getInitials = (name: string) => (name?.trim() || "TBD").split(" ").map((word) => word[0]).slice(-2).join("").toUpperCase();
 

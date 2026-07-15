@@ -4,7 +4,6 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bookmark, Check, ChevronRight, Clock3, ExternalLink, Flame, Share2, ShieldCheck, Sparkles } from "lucide-react";
-import { useRuntimeData } from "@/components/SportPeekApp";
 import { HotnessBadge, ReliabilityBadge, NewsVisual, SectionHeading, EmptyState } from "@/components/ui/badges";
 import { NewsListItem } from "@/components/pages/NewsPage";
 import { fetchStoryDetail, loadingStoryReaderState, type StoryReaderState } from "@/lib/stories/client";
@@ -79,7 +78,7 @@ export default function RichNewsDetail({ slug, bookmarks, onBookmark }: { slug: 
   const { story, relatedStories } = readerState.data;
   const item = storyToNewsItem(story);
   const bookmarked = bookmarks.has(story.id);
-  const readingBody = story.summaryLong.split(/\n{2,}/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const readingBody = item.readingBody ?? [story.summary];
   const wordCount = story.summaryLong.split(/\s+/).filter(Boolean).length;
   const readingMinutes = Math.max(2, Math.ceil(wordCount / 210));
   const officialArticles = story.articles.filter((article) => article.isOfficialSource);

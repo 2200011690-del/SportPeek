@@ -2,9 +2,9 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Bookmark, Clock3, Flame, Goal, Newspaper, Radio, Rss, ShieldCheck } from "lucide-react";
+import { ArrowRight, Bookmark, Clock3, Newspaper, Radio, Rss, ShieldCheck } from "lucide-react";
 import { useRuntimeData, SourceFilter } from "@/components/SportPeekApp";
-import { TeamMark, HotnessBadge, ReliabilityBadge, SectionHeading, DataLoadingState, NewsVisual } from "@/components/ui/badges";
+import { TeamMark, HotnessBadge, SectionHeading, DataLoadingState, NewsVisual } from "@/components/ui/badges";
 import type { NewsItem, Match } from "@/lib/types";
 
 function matchesSourceFilter(item: NewsItem, filter: SourceFilter): boolean {
@@ -18,7 +18,6 @@ function matchesSourceFilter(item: NewsItem, filter: SourceFilter): boolean {
 function HomeHeroNews({ item, demo, bookmarked, onBookmark }: { item: NewsItem; demo: boolean; bookmarked: boolean; onBookmark: (id: string) => void }) {
   const [failedImageUrl, setFailedImageUrl] = useState<string>();
   const hasImage = Boolean(item.imageUrl && item.imageUrl !== failedImageUrl);
-  const initials = (item.team?.trim() || "TBD").split(" ").map((word) => word[0]).slice(-2).join("").toUpperCase();
   return <article className={`home-hero-news ${hasImage ? "has-real-image" : "image-fallback"}`}>
     {hasImage && <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -65,8 +64,8 @@ export default function HomePage({ bookmarks, onBookmark, sourceFilter }: { book
   const todayItems = newsItems.filter((item) => dateKey(item.publishedTimestamp) === todayKey).slice(0, 5);
   const liveMatches = matchItems.filter((match) => match.status === "live");
   const today = new Intl.DateTimeFormat("vi-VN", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date());
-  return <div className="home-grid"><main className="main-feed home-main-feed"><div className="home-feed-heading"><div><span>{today}</span><h2>Dòng tin thể thao</h2></div><Link href="/news">Xem toàn bộ<ArrowRight size={15} /></Link></div>
+  return <div className="home-grid"><div className="main-feed home-main-feed"><div className="home-feed-heading"><div><span>{today}</span><h2>Dòng tin thể thao</h2></div><Link href="/news">Xem toàn bộ<ArrowRight size={15} /></Link></div>
     {loading ? <DataLoadingState /> : hero ? <HomeHeroNews item={hero} demo={!newsReal} bookmarked={bookmarks.has(hero.id)} onBookmark={onBookmark} /> : <div className="home-filter-empty"><Rss size={26} /><strong>Chưa có tin từ nhóm nguồn này</strong><p>Chọn một nhóm nguồn khác để tiếp tục theo dõi.</p></div>}
     {feedItems.length > 0 && <section className="home-continuous-feed" aria-label="Tin mới nhất"><div className="home-feed-label"><span>Tin mới nhất</span><em>{filteredNews.length} tin</em></div>{feedItems.map((item) => <HomeNewsRow item={item} demo={!newsReal} key={item.id} />)}<Link href="/news" className="home-feed-more">Mở bảng tin đầy đủ<ArrowRight size={16} /></Link></section>}
-  </main><aside className="right-rail home-right-rail"><section className="rail-card hot-news-rail"><SectionHeading eyebrow="ĐANG ĐƯỢC QUAN TÂM" title="Tin nóng" action="Tất cả" /><DenseNewsList items={overallHot} numbered /></section><section className="rail-card today-news-rail"><SectionHeading eyebrow="CẬP NHẬT TRONG NGÀY" title="Tin hôm nay" /><DenseNewsList items={(todayItems.length ? todayItems : newsItems).slice(0, 5)} /></section><section className="rail-card compact-live-rail"><SectionHeading eyebrow={sportsReal ? "FOOTBALL-DATA.ORG" : "DỮ LIỆU MINH HỌA"} title="Đang trực tiếp" action="Mở live" href="/live" />{liveMatches.length ? liveMatches.slice(0, 2).map((match) => <MatchCard key={match.id} match={match} compact />) : <div className="no-live"><Radio size={18} /><span><strong>Chưa có trận đang diễn ra</strong><small>Dữ liệu sẽ tự cập nhật khi trận bắt đầu.</small></span></div>}</section></aside></div>;
+  </div><aside className="right-rail home-right-rail"><section className="rail-card hot-news-rail"><SectionHeading eyebrow="ĐANG ĐƯỢC QUAN TÂM" title="Tin nóng" action="Tất cả" /><DenseNewsList items={overallHot} numbered /></section><section className="rail-card today-news-rail"><SectionHeading eyebrow="CẬP NHẬT TRONG NGÀY" title="Tin hôm nay" /><DenseNewsList items={(todayItems.length ? todayItems : newsItems).slice(0, 5)} /></section><section className="rail-card compact-live-rail"><SectionHeading eyebrow={sportsReal ? "FOOTBALL-DATA.ORG" : "DỮ LIỆU MINH HỌA"} title="Đang trực tiếp" action="Mở live" href="/live" />{liveMatches.length ? liveMatches.slice(0, 2).map((match) => <MatchCard key={match.id} match={match} compact />) : <div className="no-live"><Radio size={18} /><span><strong>Chưa có trận đang diễn ra</strong><small>Dữ liệu sẽ tự cập nhật khi trận bắt đầu.</small></span></div>}</section></aside></div>;
 }

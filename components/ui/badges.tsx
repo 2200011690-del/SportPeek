@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ChevronLeft, ChevronRight, Flame, Newspaper, Search, ShieldCheck } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Flame, Search, ShieldCheck } from "lucide-react";
 import { useRuntimeData } from "@/components/SportPeekApp";
 import { hotnessLabel } from "@/lib/scoring";
 import type { NewsItem, Standing } from "@/lib/types";
