@@ -23,7 +23,7 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
     client.from("ingestion_jobs").select("status,completed_at,error_code").eq("job_type", "stories:process").order("started_at", { ascending: false }).limit(1).maybeSingle(),
     client.from("story_clusters").select("id,last_updated_at", { count: "exact" }).order("last_updated_at", { ascending: false }).limit(1).maybeSingle(),
     client.from("story_clusters").select("ai_provider,last_updated_at", { count: "exact" }).eq("ai_generated", true).order("last_updated_at", { ascending: false }).limit(1).maybeSingle(),
-    client.from("provider_sync_state").select("provider,last_success_at,last_error_code").order("last_success_at", { ascending: false }).limit(20),
+    client.from("provider_sync_state").select("provider,last_attempt_at,last_success_at,last_error_code").order("last_success_at", { ascending: false }).limit(20),
     client.from("matches").select("id", { count: "exact", head: true }),
     client.from("standings").select("id", { count: "exact", head: true }),
   ]);
@@ -31,7 +31,7 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
   const storyUpdated = storyJob.data?.completed_at ?? null; const newestStoryAt = clusters.data?.last_updated_at ?? null;
   let storyState = overallHealthState([ageState(storyUpdated, 15 * 60_000), ageState(newestStoryAt, 24 * 60 * 60_000)]);
   if (storyJob.error || clusters.error) storyState = "unavailable"; else if (storyJob.data?.status === "failed") storyState = "degraded";
-  const sportsRows = sportsSync.data ?? []; const sportsUpdated = sportsRows.map((item) => item.last_success_at).filter(Boolean).sort().at(-1) ?? null; let sportsState = ageState(sportsUpdated, 24 * 60 * 60_000); if (sportsSync.error || matches.error || standings.error) sportsState = "unavailable"; else if (sportsRows.some((item) => item.last_error_code)) sportsState = "degraded";
+  const sportsRows = sportsSync.data ?? []; const sportsUpdated = sportsRows.map((item) => item.last_success_at).filter(Boolean).sort().at(-1) ?? null; let sportsState = ageState(sportsUpdated, 24 * 60 * 60_000); const recentSportsFailure = sportsRows.some((item) => item.last_error_code && item.last_attempt_at && Date.now() - Date.parse(item.last_attempt_at) <= 2 * 60 * 60_000); if (sportsSync.error || matches.error || standings.error) sportsState = "unavailable"; else if (recentSportsFailure) sportsState = "degraded";
   const ai = getAIProvider(); const aiCount = aiClusters.count ?? 0;
   const aiState: HealthState = aiClusters.error ? "unavailable" : ai.name === "mock" ? "development_mock" : ai.name === "heuristic" || ai.name === "disabled" ? "configuration_required" : aiCount > 0 ? "operational" : "degraded";
   const telegramConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_WEBHOOK_SECRET);
