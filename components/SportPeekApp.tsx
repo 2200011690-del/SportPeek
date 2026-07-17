@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Home, Newspaper, Radio, CalendarDays, Goal, Trophy, Activity, Sparkles } from "lucide-react";
 import type { Competition, Match, NewsItem, NewsSourceCatalogItem, Standing, Team, Player } from "@/lib/types";
 import type { HealthSnapshot, ServiceHealth } from "@/lib/health";
+import type { StoryDetailPayload } from "@/lib/stories/schema";
 
 // Types and Context
 export type SourceFilter = "all" | "vi" | "international" | "official" | "youtube" | "rss";
@@ -57,7 +58,7 @@ import { AppSidebar, Header, MobileNavigation, SystemStatusBanner, AppFooter } f
 import { SearchCommand } from "@/components/ui/Search";
 import { EmptyState } from "@/components/ui/badges";
 
-export default function SportPeekApp({ route, signupAllowed = false }: { route: string; signupAllowed?: boolean }) {
+export default function SportPeekApp({ route, signupAllowed = false, initialStory = null }: { route: string; signupAllowed?: boolean; initialStory?: StoryDetailPayload | null }) {
   const [theme, setTheme] = useState("dark");
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -153,7 +154,7 @@ export default function SportPeekApp({ route, signupAllowed = false }: { route: 
   if (route === "/") page = <HomePage bookmarks={bookmarks} onBookmark={toggleBookmark} sourceFilter={homeSourceFilter} />;
   else if (route === "/for-you") page = <ForYouPage followed={followed} onFollow={toggleFollow} bookmarks={bookmarks} onBookmark={toggleBookmark} />;
   else if (route === "/news") page = <NewsPage bookmarks={bookmarks} onBookmark={toggleBookmark} />;
-  else if (segments[0] === "news" && segments[1]) page = <RichNewsDetail slug={segments[1]} bookmarks={bookmarks} onBookmark={toggleBookmark} />;
+  else if (segments[0] === "news" && segments[1]) page = <RichNewsDetail slug={segments[1]} bookmarks={bookmarks} onBookmark={toggleBookmark} initialData={initialStory} />;
   else if (route === "/live") page = <LivePage mode="live" />;
   else if (route === "/fixtures") page = <LivePage mode="fixtures" />;
   else if (route === "/results") page = <LivePage mode="results" />;

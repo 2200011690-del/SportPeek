@@ -1,4 +1,4 @@
-const CACHE_NAME = "sportpeek-v1";
+const CACHE_NAME = "sportpeek-v2";
 const ASSETS = [
   "/",
   "/manifest.json",
@@ -38,14 +38,32 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Always ask the network for navigations first. A cache-first document can
+  // pin an old application shell (and its old JavaScript bundle) across
+  // deployments, making fresh news and fixes appear missing to returning
+  // visitors. Keep the latest successful home document only as an offline
+  // fallback.
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            event.waitUntil(
+              caches.open(CACHE_NAME).then((cache) => cache.put("/", copy))
+            );
+          }
+          return response;
+        })
+        .catch(() => caches.match("/"))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) return cachedResponse;
-      return fetch(event.request).catch(() => {
-        if (event.request.mode === "navigate") {
-          return caches.match("/");
-        }
-      });
+      return fetch(event.request);
     })
   );
 });

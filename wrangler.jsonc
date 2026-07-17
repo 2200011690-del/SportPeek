@@ -26,7 +26,7 @@
     "AI_PROVIDER_CHAIN": "gemini,groq,cloudflare",
     "GEMINI_MODEL": "gemini-3.1-flash-lite",
     "GROQ_MODEL": "openai/gpt-oss-20b",
-    "CLOUDFLARE_AI_MODEL": "@cf/meta/llama-3.2-1b-instruct",
+    "CLOUDFLARE_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
     "SPORTS_DATA_PROVIDER": "football-data",
     "FOOTBALL_DATA_BASE_URL": "https://api.football-data.org/v4",
     "FOOTBALL_DATA_COMPETITIONS": "PL,CL,PD,SA,BL1,FL1,DED,PPL,BSA,ELC,WC,CLI",

@@ -1,4 +1,5 @@
 import type { NewsItem } from "@/lib/types";
+import { getHighResolutionStoryImageUrl } from "./images";
 import type { StoryCluster } from "./schema";
 
 function relativePublishedAt(value: string): string {
@@ -15,6 +16,9 @@ function relativePublishedAt(value: string): string {
 /** Compatibility adapter for the existing feed cards; StoryCluster remains the domain model. */
 export function storyToNewsItem(story: StoryCluster, index = 0): NewsItem {
   const lead = story.articles[0];
+  const firstPublishedAt = story.firstPublishedAt ?? story.publishedAt;
+  const materialUpdatedAt = story.lastMaterialUpdateAt ?? story.updatedAt;
+  const hasMaterialUpdate = Date.parse(materialUpdatedAt) - Date.parse(firstPublishedAt) >= 5 * 60_000;
   const paragraphs = story.summaryLong.split(/\n{2,}/).map((value) => value.trim()).filter(Boolean);
   const readingBody = [...new Set([
     ...paragraphs,
@@ -34,8 +38,10 @@ export function storyToNewsItem(story: StoryCluster, index = 0): NewsItem {
     category: story.category,
     competition: story.competition ?? story.category,
     team: story.teams[0] ?? story.competition ?? story.category,
-    publishedAt: relativePublishedAt(story.publishedAt),
-    publishedTimestamp: story.publishedAt,
+    publishedAt: relativePublishedAt(firstPublishedAt),
+    publishedTimestamp: firstPublishedAt,
+    updatedAt: hasMaterialUpdate ? relativePublishedAt(materialUpdatedAt) : undefined,
+    updatedTimestamp: hasMaterialUpdate ? materialUpdatedAt : undefined,
     hotness: story.hotnessScore ?? 0,
     reliability: story.reliabilityScore ?? 0,
     sources: story.sourceNames,
@@ -50,12 +56,12 @@ export function storyToNewsItem(story: StoryCluster, index = 0): NewsItem {
       publishedAt: article.publishedAt,
       fetchedAt: article.fetchedAt,
       isOfficialSource: article.isOfficialSource,
-      imageUrl: article.imageUrl ?? undefined,
+      imageUrl: getHighResolutionStoryImageUrl(article.imageUrl) ?? undefined,
       sourceLogoUrl: article.sourceLogoUrl ?? undefined,
       canonicalUrl: article.canonicalUrl ?? undefined,
       author: article.author ?? undefined,
     })),
-    imageUrl: story.imageUrl ?? undefined,
+    imageUrl: getHighResolutionStoryImageUrl(story.imageUrl) ?? undefined,
     imageAlt: story.imageUrl ? `Ảnh đại diện cho tin “${story.title}” từ ${lead.sourceName}` : undefined,
     imageSource: story.articles.find((article) => article.imageUrl)?.sourceName,
     readingBody,

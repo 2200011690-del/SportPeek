@@ -68,9 +68,15 @@ export function scheduledPipelineTask(
   return new Date(timestampMs).getUTCMinutes() % 2 === 0 ? "rss" : "stories";
 }
 
-/** One story per run ensures every newly completed story gets one remote-AI attempt. */
-export function scheduledStoryProcessingOptions() {
-  return { useAi: true, aiLimit: 1, limit: 1 } as const;
+/**
+ * Process source metadata in economical batches while keeping remote AI to one
+ * call. Alternating newest and oldest batches keeps breaking news fast without
+ * allowing an older backlog to starve forever.
+ */
+export function scheduledStoryProcessingOptions(timestampMs = Date.now()) {
+  if (!Number.isFinite(timestampMs)) throw new TypeError("Scheduled timestamp must be finite");
+  const minute = new Date(timestampMs).getUTCMinutes();
+  return { useAi: true, aiLimit: 1, limit: 20, oldestFirst: minute % 4 === 3 } as const;
 }
 
 /**

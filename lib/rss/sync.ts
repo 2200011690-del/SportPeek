@@ -13,10 +13,11 @@ export function rssContentHash(sourceId: string, article: Pick<ParsedRssArticle,
 
 export async function ensureRssSources(): Promise<RssSource[]> {
   const client = admin();
-  for (const source of configuredRssSources()) {
-    const baseUrl = new URL(source.feedUrl).origin;
-    const { error } = await client.from("news_sources").upsert({ name: source.name, base_url: baseUrl, rss_url: source.feedUrl, language: source.language, country: source.country, is_official: Boolean(source.official), reliability_score: source.reliability, is_active: true, fetch_interval_minutes: source.fetchIntervalMinutes ?? 15 }, { onConflict: "name" });
-    if (error) throw new ProviderError(`Không thể lưu RSS source ${source.name}.`, "supabase");
+  const configured = configuredRssSources();
+  const rows = configured.map((source) => ({ name: source.name, base_url: new URL(source.feedUrl).origin, rss_url: source.feedUrl, language: source.language, country: source.country, is_official: Boolean(source.official), reliability_score: source.reliability, is_active: true, fetch_interval_minutes: source.fetchIntervalMinutes ?? 15 }));
+  if (rows.length) {
+    const { error } = await client.from("news_sources").upsert(rows, { onConflict: "name" });
+    if (error) throw new ProviderError("Không thể lưu danh mục RSS sources.", "supabase");
   }
   const { data, error } = await client.from("news_sources").select("id,name,base_url,rss_url,language,country,is_official,reliability_score,is_active,fetch_interval_minutes,last_fetched_at,last_error,etag,last_modified").not("rss_url", "is", null).order("name");
   if (error) throw new ProviderError("Không thể đọc RSS sources.", "supabase");
@@ -58,11 +59,15 @@ async function syncSource(source: RssSource): Promise<{ status: "success" | "not
   return { status: "success", fetched: articles.length, inserted, skipped };
 }
 
-export async function syncRss(options: { source?: string; force?: boolean; dryRun?: boolean } = {}): Promise<RssSyncSummary> {
-  const all = await ensureRssSources(); const selected = all.filter((source) => source.active && (!options.source || source.id === options.source || source.name.toLowerCase() === options.source.toLowerCase()) && due(source, Boolean(options.force)));
+export async function syncRss(options: { source?: string; force?: boolean; dryRun?: boolean; maxSources?: number } = {}): Promise<RssSyncSummary> {
+  const all = await ensureRssSources(); const dueSources = all.filter((source) => source.active && (!options.source || source.id === options.source || source.name.toLowerCase() === options.source.toLowerCase()) && due(source, Boolean(options.force))); const maxSources = options.maxSources === undefined ? dueSources.length : Math.max(1, Math.min(12, Math.floor(options.maxSources))); const selected = dueSources.slice(0, maxSources);
   const jobId = randomUUID(); const summary: RssSyncSummary = { jobId, sources: selected.length, succeeded: 0, failed: 0, notModified: 0, fetched: 0, inserted: 0, skipped: 0, errors: [] };
   if (options.dryRun) return summary;
-  const client = admin(); await client.from("ingestion_jobs").insert({ id: jobId, job_type: "rss:sync", provider: "rss", status: "processing", metadata: { source: options.source ?? null, force: Boolean(options.force) } });
+  const client = admin();
+  const staleJobs = await client.from("ingestion_jobs").update({ status: "failed", error_code: "LEASE_EXPIRED", error_message: "RSS sync exceeded its execution lease.", completed_at: new Date().toISOString() }).eq("job_type", "rss:sync").eq("status", "processing").lt("started_at", new Date(Date.now() - 10 * 60_000).toISOString());
+  if (staleJobs.error) throw new ProviderError("Không thể giải phóng RSS job quá hạn.", "supabase");
+  const started = await client.from("ingestion_jobs").insert({ id: jobId, job_type: "rss:sync", provider: "rss", status: "processing", metadata: { source: options.source ?? null, force: Boolean(options.force), maxSources } });
+  if (started.error) throw new ProviderError("Không thể tạo RSS sync job.", "supabase");
   for (const source of selected) {
     try { const result = await syncSource(source); summary.succeeded += 1; summary.notModified += result.status === "not_modified" ? 1 : 0; summary.fetched += result.fetched; summary.inserted += result.inserted; summary.skipped += result.skipped; }
     catch (error) { const safe = toSafeError(error); summary.failed += 1; summary.errors.push({ source: source.name, message: safe.message }); await client.from("news_sources").update({ last_fetched_at: new Date().toISOString(), last_error: safe.message.slice(0, 500) }).eq("id", source.id); }

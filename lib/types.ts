@@ -59,6 +59,8 @@ export interface NewsItem {
   team: string;
   publishedAt: string;
   publishedTimestamp?: string;
+  updatedAt?: string;
+  updatedTimestamp?: string;
   hotness: number;
   reliability: number;
   sources: string[];

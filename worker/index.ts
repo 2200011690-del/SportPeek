@@ -123,14 +123,14 @@ const worker = {
         if (task === "rss") {
           // Even invocation: sync RSS feeds
           console.log("[Cron] Running RSS sync...");
-          const rssSummary = await syncRss();
+          const rssSummary = await syncRss({ maxSources: 4 });
           console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
         } else {
           // Odd invocation: finish one new story with AI, then translate one
           // older unprocessed story (international first) on every run.
           console.log("[Cron] Running story processing...");
           const storySummary = await processStories(
-            scheduledStoryProcessingOptions(),
+            scheduledStoryProcessingOptions(scheduledAt),
           );
           console.log(
             "[Cron] Story processing result:",
@@ -181,6 +181,7 @@ const worker = {
         }
       } catch (error) {
         console.error("[Cron] Error running scheduled task:", error);
+        throw error;
       }
     };
     if (ctx) ctx.waitUntil(run());

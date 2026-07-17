@@ -1,6 +1,7 @@
 import { AppError, ProviderError } from "@/lib/core/errors";
 import { isAIQuotaExceeded, safeAIErrorMessage } from "./quota";
 import type { AIProvider, ClusterArticleInput } from "./types";
+import { sanitizeClusterSummary } from "./grounding";
 
 const cooldowns = new Map<string, number>();
 
@@ -39,7 +40,7 @@ export class FailoverAIProvider implements AIProvider {
   }
 
   classifyArticle(input: { title: string; excerpt: string }) { return this.run("classify", (provider) => provider.classifyArticle(input)); }
-  summarizeCluster(input: { articles: ClusterArticleInput[] }) { return this.run("summarize", (provider) => provider.summarizeCluster(input)); }
+  summarizeCluster(input: { articles: ClusterArticleInput[] }) { return this.run("summarize", async (provider) => sanitizeClusterSummary(await provider.summarizeCluster(input), input.articles)); }
   extractEntities(input: { title: string; excerpt: string }) { return this.run("entities", (provider) => provider.extractEntities(input)); }
   evaluateClusterMatch(input: { article: ClusterArticleInput; candidate: ClusterArticleInput[] }) { return this.run("cluster-match", (provider) => provider.evaluateClusterMatch(input)); }
   generateTimeline(input: { articles: ClusterArticleInput[] }) { return this.run("timeline", (provider) => provider.generateTimeline(input)); }

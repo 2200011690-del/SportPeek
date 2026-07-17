@@ -70,6 +70,16 @@ export const storyClusterSchema = z.object({
   reliabilityScore: z.number().min(0).max(100).nullable(),
   publishedAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  /**
+   * Persistence-backed freshness timestamps. They are optional so payloads
+   * written before the 2026 freshness migration remain readable.
+   */
+  firstPublishedAt: z.string().datetime().optional(),
+  lastMaterialUpdateAt: z.string().datetime().optional(),
+  lastSourceSeenAt: z.string().datetime().optional(),
+  lifecycleStatus: z.enum(["developing", "confirmed", "updated", "closed", "corrected", "disputed"]).optional(),
+  summaryVersion: z.number().int().positive().optional(),
+  summaryGeneratedAt: z.string().datetime({ offset: true }).nullable().optional(),
   imageUrl: nullableExternalUrlSchema,
   agreedFacts: z.array(storyFactSchema),
   disputedPoints: z.array(disputedPointSchema),

@@ -4,7 +4,19 @@ import type { NewsEnrichment } from "./openai";
 import { agreementsSchema, answerSchema, CLUSTER_SUMMARY_TASK, disputesSchema, matchEvaluationSchema, timelineSchema } from "./remote-base";
 import type { ClusterArticleInput } from "./types";
 
-export const DEFAULT_CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.2-1b-instruct";
+export const DEFAULT_CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+
+const NATIVE_JSON_SCHEMA_MODELS = new Set([
+  "@cf/meta/llama-3.1-8b-instruct-fast",
+  "@cf/meta/llama-3.1-70b-instruct",
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "@cf/meta/llama-3-8b-instruct",
+  "@cf/meta/llama-3.1-8b-instruct",
+  "@cf/meta/llama-3.2-11b-vision-instruct",
+  "@hf/nousresearch/hermes-2-pro-mistral-7b",
+  "@hf/thebloke/deepseek-coder-6.7b-instruct-awq",
+  "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+]);
 
 type WorkersAIInput = {
   messages: Array<{ role: "system" | "user"; content: string }>;
@@ -39,7 +51,7 @@ function modelName(): string {
 }
 
 function supportsNativeJsonSchema(model: string): boolean {
-  return !model.includes("llama-3.2-1b-instruct");
+  return NATIVE_JSON_SCHEMA_MODELS.has(model);
 }
 
 export function setWorkersAIBinding(binding: WorkersAIBinding | undefined): void {
@@ -187,7 +199,7 @@ export class CloudflareAIProvider implements AIProvider {
         keyPoints: { type: "array", maxItems: 3, items: { type: "string" } },
       },
     };
-    const result = await runStructured(schema, jsonSchema, CLUSTER_SUMMARY_TASK, input, 700);
+    const result = await runStructured(schema, jsonSchema, CLUSTER_SUMMARY_TASK, input, 1200);
     return { ...result, sourceIds: input.articles.map((article) => article.id) };
   }
 

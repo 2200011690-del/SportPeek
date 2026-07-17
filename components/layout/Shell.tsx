@@ -55,12 +55,22 @@ export function MobileNavigation({ route }: { route: string }) {
 
 export function SystemStatusBanner() {
   const { health, loading } = useRuntimeData();
-  return <div className={`demo-bar status-banner ${loading ? "loading" : health.state}`}><span className="status-banner-label"><ShieldCheck size={14} />Trạng thái dữ liệu</span>{([health.services.rss, health.services.stories, health.services.sports, health.services.ai]).map((service) => <span className={`service-status ${loading ? "loading" : service.state}`} title={service.message} key={`${service.provider}-${service.label}`}><i />{service.label}</span>)}</div>;
+  if (loading || health.state === "operational") return null;
+  const message = health.state === "stale"
+    ? "Một số nguồn đang chậm; SportPeek vẫn hiển thị bản đã xác minh gần nhất."
+    : "Một số nguồn đang được kết nối lại; nội dung sẵn có vẫn đọc bình thường.";
+  return <div className={`demo-bar status-banner ${health.state}`} role="status"><span className="status-banner-label"><ShieldCheck size={14} />Dữ liệu đang cập nhật</span><span className="service-status"><i />{message}</span></div>;
 }
 
 export function AppFooter({ compact = false }: { compact?: boolean }) {
   const { health, loading } = useRuntimeData();
-  const statusText = [health.services.rss.label, health.services.stories.label, health.services.sports.label, health.services.ai.label].join(" · ");
+  const statusText = loading
+    ? "Đang đồng bộ dữ liệu"
+    : health.state === "operational"
+      ? "Dữ liệu đang hoạt động"
+      : health.state === "stale"
+        ? "Đang hiển thị dữ liệu gần nhất"
+        : "Một số nguồn đang cập nhật";
   const statusClass: HealthState | "loading" = loading ? "loading" : health.state;
   if (compact) return <footer className="app-footer compact-footer"><div><span>© 2026 SportPeek</span><Link href="/sources">Nguồn & phương pháp</Link><Link href="/privacy">Quyền riêng tư</Link></div><span className={`footer-data-status ${statusClass}`}><i />{statusText}</span></footer>;
   return <footer className="app-footer"><div><div className="brand"><span className="brand-symbol"><span /></span><span>SPORT<b>PEEK</b></span></div><p>Tin thể thao quan trọng, được tổng hợp thông minh.</p></div><div><strong>Sản phẩm</strong><Link href="/news">Tin tức</Link><Link href="/live">Trực tiếp</Link><Link href="/standings">Bảng xếp hạng</Link></div><div><strong>Minh bạch</strong><Link href="/sources">Nguồn tin</Link><Link href="/copyright">Bản quyền</Link><Link href="/privacy">Quyền riêng tư</Link></div><div><strong>Trạng thái dữ liệu</strong><span className={`footer-data-status ${statusClass}`}><i />{statusText}</span><small>© 2026 SportPeek Beta</small></div></footer>;

@@ -20,7 +20,29 @@ import { newsSearchText, normalizeSearchText } from "@/lib/ui-logic";
 
 type Context = { params: Promise<{ path: string[] }> };
 const clientKey = (request: NextRequest) => request.headers.get("x-forwarded-for")?.split(",")[0] ?? "local";
-const protectedBySecret = (request: NextRequest) => process.env.CRON_SECRET && request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+
+export type CronAuthorizationState = "authorized" | "unauthorized" | "configuration_required";
+
+export function cronAuthorizationState(
+  authorization: string | null,
+  secret = process.env.CRON_SECRET,
+): CronAuthorizationState {
+  const configuredSecret = secret?.trim();
+  if (!configuredSecret) return "configuration_required";
+  return authorization === `Bearer ${configuredSecret}` ? "authorized" : "unauthorized";
+}
+
+function cronAuthorizationError(request: NextRequest): NextResponse | null {
+  const state = cronAuthorizationState(request.headers.get("authorization"));
+  if (state === "authorized") return null;
+  if (state === "configuration_required") {
+    return NextResponse.json(
+      { error: "Tác vụ nội bộ chưa được cấu hình." },
+      { status: 503 },
+    );
+  }
+  return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
+}
 
 const repositoryHttpStatus = (status: StoryRepositoryResult<unknown>["status"]) =>
   status === "not_found" ? 404 : status === "configuration_required" || status === "error" ? 503 : 200;
@@ -193,8 +215,14 @@ export async function GET(request: NextRequest, { params }: Context) {
 }
 
 export async function POST(request: NextRequest, { params }: Context) {
-  const { path } = await params; const route = path.join("/"); const body: unknown = await request.json().catch(() => null);
-  const bodyRecord = body && typeof body === "object" ? body as Record<string, unknown> : null;
+  const { path } = await params; const route = path.join("/");
+  const requiresCronAuthorization =
+    (path[0] === "stories" && Boolean(path[1]) && path[2] === "summarize") ||
+    ["cron/ingest", "admin/ingest", "ai/process"].includes(route);
+  if (requiresCronAuthorization) {
+    const authorizationError = cronAuthorizationError(request);
+    if (authorizationError) return authorizationError;
+  }
   if (path[0] === "stories" && path[1] && path[2] === "summarize") {
     const parsedSlug = storySlugSchema.safeParse(path[1]);
     if (!parsedSlug.success) return NextResponse.json({ status: "not_found", data: null, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }, { status: 404 });
@@ -213,6 +241,8 @@ export async function POST(request: NextRequest, { params }: Context) {
       return NextResponse.json({ status: "error", data: null, error: { code: safe.code, message: safe.message } }, { status: safe.status });
     }
   }
+  const body: unknown = await request.json().catch(() => null);
+  const bodyRecord = body && typeof body === "object" ? body as Record<string, unknown> : null;
   if (route === "telegram/webhook") {
     if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_WEBHOOK_SECRET) return NextResponse.json({ status: "configuration_required" }, { status: 503 });
     if (request.headers.get("x-telegram-bot-api-secret-token") !== process.env.TELEGRAM_WEBHOOK_SECRET) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
@@ -252,7 +282,6 @@ export async function POST(request: NextRequest, { params }: Context) {
     catch (error) { const safe = toSafeError(error); return NextResponse.json({ error: safe }, { status: safe.status }); }
   }
   if (["cron/ingest", "admin/ingest"].includes(route)) {
-    if (!protectedBySecret(request)) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
     const rate = rateLimit(`cron:${clientKey(request)}`, 10, 300_000);
     if (!rate.allowed) return NextResponse.json({ error: "Đã vượt giới hạn" }, { status: 429 });
     const mode = bodyRecord && "mode" in bodyRecord ? String(bodyRecord.mode) : "both";
@@ -278,7 +307,6 @@ export async function POST(request: NextRequest, { params }: Context) {
     catch (error) { const safe = toSafeError(error); return NextResponse.json({ status: "configuration_required", error: { code: safe.code, message: safe.message } }, { status: safe.status }); }
   }
   if (route === "ai/process") {
-    if (!protectedBySecret(request)) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
     const parsed = (body && typeof body === "object" ? body : {}) as { title?: string; excerpt?: string };
     try { return NextResponse.json(await aiService.classify({ title: parsed.title ?? "", excerpt: parsed.excerpt ?? "" })); }
     catch (error) { const safe = toSafeError(error); return NextResponse.json({ error: { code: safe.code, message: safe.message } }, { status: safe.status }); }

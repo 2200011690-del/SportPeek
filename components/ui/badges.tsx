@@ -200,7 +200,6 @@ export function NewsVisual({
   compact?: boolean;
   priority?: boolean;
 }) {
-  const { newsReal } = useRuntimeData();
   const [failedImageUrl, setFailedImageUrl] = useState<string>();
   const hasImage = Boolean(item.imageUrl && item.imageUrl !== failedImageUrl);
   return (
@@ -228,11 +227,9 @@ export function NewsVisual({
         </>
       )}
       <span className="visual-label">
-        {!newsReal
-          ? "DỮ LIỆU MINH HỌA"
-          : hasImage
-            ? `ẢNH · ${item.imageSource ?? item.sources[0]}`
-            : "NGUỒN CHƯA CÓ ẢNH"}
+        {hasImage
+          ? `ẢNH · ${item.imageSource ?? item.sources[0] ?? "Nguồn bài viết"}`
+          : item.category}
       </span>
     </div>
   );
