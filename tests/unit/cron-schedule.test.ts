@@ -5,10 +5,11 @@ import {
   scheduledStoryProcessingOptions,
 } from "../../lib/cron/schedule";
 
-test("one-minute cron alternates RSS and story processing", () => {
-  assert.equal(scheduledPipelineTask(Date.UTC(2026, 6, 15, 1, 20)), "rss");
-  assert.equal(scheduledPipelineTask(Date.UTC(2026, 6, 15, 1, 21)), "stories");
-  assert.equal(scheduledPipelineTask(Date.UTC(2026, 6, 15, 1, 22)), "rss");
+test("one-minute cron rotates RSS, story processing, and AI backfill", () => {
+  assert.equal(scheduledPipelineTask(Date.UTC(2026, 6, 15, 1, 21)), "rss");
+  assert.equal(scheduledPipelineTask(Date.UTC(2026, 6, 15, 1, 22)), "stories");
+  assert.equal(scheduledPipelineTask(Date.UTC(2026, 6, 15, 1, 23)), "ai");
+  assert.equal(scheduledPipelineTask(Date.UTC(2026, 6, 15, 1, 24)), "rss");
 });
 
 test("scheduled pipeline rejects an invalid timestamp", () => {
@@ -16,10 +17,13 @@ test("scheduled pipeline rejects an invalid timestamp", () => {
 });
 
 test("scheduled story batches preserve AI quota and alternate freshness with backlog fairness", () => {
-  const newest = scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, 21));
-  const oldest = scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, 23));
-  assert.equal(newest.limit, 20);
+  const newest = scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, 22));
+  const oldest = scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, 31));
+  assert.equal(newest.limit, 8);
+  assert.equal(newest.candidateLimit, 96);
+  assert.equal(newest.leaseSeconds, 240);
   assert.equal(newest.aiLimit, 1);
+  assert.equal(newest.matchAiLimit, 0);
   assert.equal(newest.oldestFirst, false);
   assert.equal(oldest.oldestFirst, true);
   assert.equal(newest.useAi, true);

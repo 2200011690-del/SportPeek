@@ -208,7 +208,7 @@ export function createStoryRepository(loader: StoryNewsLoader = getAggregatedNew
     }
     return {
       status: result.status === "stale" ? "stale" : "success",
-      data: { story, relatedStories: relatedStories(result.data, story) },
+      data: { story, relatedStories: relatedStories(result.data, story), articleContents: [] },
       meta: { ...result.meta, canonicalSlug: story.slug },
     };
   };

@@ -27,7 +27,7 @@ export class GroqAIProvider extends RemoteAIProvider {
             schema: providerJsonSchema(schema),
           },
         },
-        max_completion_tokens: 1600,
+        max_completion_tokens: 2600,
         reasoning_effort: "low",
         temperature: 0.1,
       }),

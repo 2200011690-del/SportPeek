@@ -14,8 +14,43 @@ function text(value: Value): string {
 }
 
 function markup(value: Value): string { return typeof value === "string" || typeof value === "number" ? String(value) : value && !Array.isArray(value) && typeof value === "object" ? String(value["#text"] ?? "") : ""; }
+function rssContentText(value: string): string {
+  return decode(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<(?:br\s*\/?|\/p|\/div|\/li|\/h[1-6]|\/blockquote)>/gi, "\n\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\t\f\v ]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 function record(value: Value): Record<string, unknown> { return value && !Array.isArray(value) && typeof value === "object" ? value as Record<string, unknown> : {}; }
 function list(value: Value): Value[] { return Array.isArray(value) ? value : value ? [value] : []; }
+
+const CONTEXT_FREE_RSS_TITLES = new Set([
+  "here s the latest",
+  "here is the latest",
+  "the latest",
+  "latest",
+  "latest news",
+  "latest updates",
+  "live updates",
+  "breaking news",
+  "news update",
+  "news updates",
+  "developing news",
+  "developing story",
+  "moi nhat",
+  "tin moi nhat",
+  "cap nhat",
+  "cap nhat moi nhat",
+  "dien bien moi nhat",
+  "tin nong",
+  "tin moi",
+  "ban tin moi",
+]);
 
 function linkOf(value: Value, fallback: string): string {
   if (typeof value === "string") return value;
@@ -47,14 +82,21 @@ export function parseRssXml(xml: string, source: { feedUrl: string; language: "v
   const rss = record(document.rss as Value); const channel = record(rss.channel as Value); const atom = record(document.feed as Value);
   const entries = list((channel.item ?? atom.entry) as Value).slice(0, 50);
   return entries.flatMap((value): ParsedRssArticle[] => {
-    const item = record(value); const title = text(item.title as Value); const rawUrl = linkOf(item.link as Value, source.feedUrl); const originalUrl = safeHttpUrl(rawUrl, source.feedUrl); const canonicalUrl = originalUrl ? canonicalizeArticleUrl(originalUrl) : null;
+    const item = record(value); const title = text(item.title as Value); const normalizedTitle = normalizeSearchText(title); const rawUrl = linkOf(item.link as Value, source.feedUrl); const originalUrl = safeHttpUrl(rawUrl, source.feedUrl); const canonicalUrl = originalUrl ? canonicalizeArticleUrl(originalUrl) : null;
     if (!title || !originalUrl || !canonicalUrl) return [];
     const published = normalizePublishedDate(String(item.pubDate ?? item.published ?? item.updated ?? ""), now, source.language === "vi"); if (!published) return [];
-    const descriptionMarkup = markup((item["content:encoded"] ?? item.content ?? item.description ?? item.summary) as Value); const excerpt = text(descriptionMarkup as Value).slice(0, 1000);
+    const encodedMarkup = markup((item["content:encoded"] ?? item.content) as Value);
+    const descriptionMarkup = markup((item.description ?? item.summary) as Value);
+    const encodedContent = rssContentText(encodedMarkup).slice(0, 100_000);
+    const descriptionContent = rssContentText(descriptionMarkup);
+    const contentWordCount = encodedContent ? encodedContent.split(/\s+/).filter(Boolean).length : 0;
+    const fullContent = contentWordCount >= 120 ? encodedContent : null;
+    const excerpt = (encodedContent || descriptionContent).slice(0, 1000);
+    if (!excerpt && CONTEXT_FREE_RSS_TITLES.has(normalizedTitle)) return [];
     const guid = text((item.guid ?? item.id) as Value) || canonicalUrl;
     const author = text((item.author ?? item["dc:creator"] ?? item.creator) as Value).slice(0, 200) || null;
     const categories = list(item.category as Value).map(text).filter(Boolean).slice(0, 10);
-    const parsed = parsedRssArticleSchema.safeParse({ externalId: guid, originalUrl, canonicalUrl, title, normalizedTitle: normalizeSearchText(title), excerpt, author, imageUrl: mediaImage(item, originalUrl), publishedAt: published.toISOString(), language: source.language, rawMetadata: { categories } });
+    const parsed = parsedRssArticleSchema.safeParse({ externalId: guid, originalUrl, canonicalUrl, title, normalizedTitle, excerpt, author, imageUrl: mediaImage(item, originalUrl), publishedAt: published.toISOString(), language: source.language, rawMetadata: { categories }, fullContent, contentStatus: fullContent ? "available" : "source_only", contentSource: fullContent ? "rss" : null, contentWordCount: fullContent ? contentWordCount : 0 });
     return parsed.success ? [parsed.data] : [];
   });
 }

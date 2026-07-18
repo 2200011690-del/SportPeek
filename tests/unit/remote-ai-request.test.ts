@@ -31,7 +31,7 @@ test("Gemini requests schema-constrained JSON with enough output capacity", asyn
     const config = body?.generationConfig as Record<string, unknown>;
     assert.equal(config.responseMimeType, "application/json");
     assert.ok(config.responseJsonSchema);
-    assert.equal(config.maxOutputTokens, 1600);
+    assert.equal(config.maxOutputTokens, 2600);
     assert.equal(config.temperature, 0.1);
   } finally {
     globalThis.fetch = previousFetch;
@@ -79,7 +79,7 @@ test("Groq uses strict JSON Schema and current completion-token field", async ()
     assert.equal(responseFormat.json_schema?.name, "newspeek_structured_output");
     assert.ok(responseFormat.json_schema?.schema);
     assert.equal(body?.max_tokens, undefined);
-    assert.equal(body?.max_completion_tokens, 1600);
+    assert.equal(body?.max_completion_tokens, 2600);
     assert.equal(body?.reasoning_effort, "low");
     assert.equal(body?.temperature, 0.1);
   } finally {

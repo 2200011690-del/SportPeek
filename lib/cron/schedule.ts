@@ -1,25 +1,40 @@
-export type ScheduledPipelineTask = "rss" | "stories";
+export type ScheduledPipelineTask = "rss" | "stories" | "ai";
 
 /**
  * The Worker is triggered once per minute. Keeping the phase selection pure
  * makes the production schedule deterministic and straightforward to test.
+ *
+ * The AI backlog has its own phase so summary generation keeps moving even
+ * when raw RSS articles never fully drain.
  */
-export function scheduledPipelineTask(timestampMs: number): ScheduledPipelineTask {
+export function scheduledPipelineTask(
+  timestampMs: number,
+): ScheduledPipelineTask {
   if (!Number.isFinite(timestampMs)) {
     throw new TypeError("Scheduled timestamp must be finite");
   }
-  return new Date(timestampMs).getUTCMinutes() % 2 === 0 ? "rss" : "stories";
+  const phase = new Date(timestampMs).getUTCMinutes() % 3;
+  if (phase === 0) return "rss";
+  if (phase === 1) return "stories";
+  return "ai";
 }
 
 /**
- * Process source metadata in economical batches while keeping remote AI to one
- * call. Alternating newest and oldest batches keeps breaking news fast without
- * allowing an older backlog to starve forever.
+ * Keep batches below the Worker CPU ceiling. Three of every four story runs
+ * prioritize breaking news; the fourth drains the oldest active-source backlog.
  */
 export function scheduledStoryProcessingOptions(timestampMs = Date.now()) {
   if (!Number.isFinite(timestampMs)) {
     throw new TypeError("Scheduled timestamp must be finite");
   }
   const minute = new Date(timestampMs).getUTCMinutes();
-  return { useAi: true, aiLimit: 1, limit: 20, oldestFirst: minute % 4 === 3 } as const;
+  return {
+    useAi: true,
+    aiLimit: 1,
+    matchAiLimit: 0,
+    limit: 8,
+    candidateLimit: 96,
+    leaseSeconds: 240,
+    oldestFirst: minute % 8 === 7,
+  } as const;
 }

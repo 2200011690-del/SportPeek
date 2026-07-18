@@ -3,16 +3,17 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Clock3, ExternalLink, Newspaper } from "lucide-react";
+import { BookOpen, Clock3, ExternalLink, LoaderCircle, Newspaper, Sparkles } from "lucide-react";
 import { EmptyState } from "@/components/ui/badges";
 import {
   fetchStoryDetail,
   loadingStoryReaderState,
+  requestStoryAISummary,
   type StoryReaderState,
 } from "@/lib/stories/client";
 import { getHighResolutionStoryImageUrl } from "@/lib/stories/images";
 import { isSafeExternalUrl } from "@/lib/stories/schema";
-import type { StoryDetailPayload } from "@/lib/stories/schema";
+import type { StoryArticleContent, StoryCluster, StoryDetailPayload } from "@/lib/stories/schema";
 import { storyDisplaySummaryParagraphs } from "@/lib/stories/summary";
 
 const storyStatusLabels = {
@@ -70,6 +71,25 @@ function readableSummaryParagraphs(values: string[]): string[] {
   }).filter(Boolean);
 }
 
+function articleTabStatus(article: StoryArticleContent): string {
+  if (article.status === "available") return `${article.wordCount} từ`;
+  if (article.status === "processing" || article.status === "pending") return "Đang lấy nội dung";
+  if (article.status === "failed") return "Đọc tại nguồn";
+  return "Đọc tại nguồn";
+}
+
+function contentOriginLabel(source: StoryArticleContent["source"]): string {
+  return source === "publisher"
+    ? "Toàn văn được lấy từ trang nguồn công khai"
+    : "Toàn văn do nguồn phát hành trong feed";
+}
+
+function sourceOnlyTitle(status: StoryArticleContent["status"] | undefined): string {
+  if (status === "pending" || status === "processing") return "Đang lấy nội dung đầy đủ.";
+  if (status === "failed") return "Chưa lấy được nội dung đầy đủ.";
+  return "Nguồn này chưa có toàn văn trong SportPeek.";
+}
+
 export default function RichNewsDetail({
   slug,
   initialData,
@@ -82,6 +102,19 @@ export default function RichNewsDetail({
   const router = useRouter();
   const [reloadToken, setReloadToken] = useState(0);
   const [failedImageUrl, setFailedImageUrl] = useState<string>();
+  const [readingPreference, setReadingPreference] = useState<{
+    slug: string;
+    mode: "full" | "summary";
+  }>({ slug, mode: "full" });
+  const [articleSelection, setArticleSelection] = useState({ slug, articleId: "" });
+  const [aiResult, setAiResult] = useState<{ slug: string; story: StoryCluster | null }>({
+    slug,
+    story: null,
+  });
+  const [aiRequest, setAiRequest] = useState<{
+    slug: string;
+    state: "idle" | "loading" | "error";
+  }>({ slug, state: "idle" });
   const [readerResult, setReaderResult] = useState<{
     slug: string;
     reloadToken: number;
@@ -108,8 +141,16 @@ export default function RichNewsDetail({
     readerResult.slug === slug && readerResult.reloadToken === reloadToken
       ? readerResult.state
       : loadingStoryReaderState;
+  const readingMode = readingPreference.slug === slug ? readingPreference.mode : "full";
+  const aiStory = aiResult.slug === slug ? aiResult.story : null;
+  const aiRequestState = aiRequest.slug === slug ? aiRequest.state : "idle";
 
   useEffect(() => {
+    if (
+      reloadToken === 0 &&
+      initialData?.story.slug === slug &&
+      initialData.articleContents.length === initialData.story.articles.length
+    ) return;
     let active = true;
     void fetchStoryDetail(slug).then((next) => {
       if (active) setReaderResult({ slug, reloadToken, state: next });
@@ -117,7 +158,7 @@ export default function RichNewsDetail({
     return () => {
       active = false;
     };
-  }, [slug, reloadToken]);
+  }, [initialData, slug, reloadToken]);
 
   useEffect(() => {
     const canonicalSlug = readerState.meta?.canonicalSlug;
@@ -195,8 +236,25 @@ export default function RichNewsDetail({
   }
 
   const { story } = readerState.data;
+  const summaryStory = aiStory?.id === story.id ? aiStory : story;
   const summaryParagraphs = readableSummaryParagraphs(
-    storyDisplaySummaryParagraphs(story),
+    storyDisplaySummaryParagraphs(summaryStory),
+  );
+  const articleContents = readerState.data.articleContents;
+  const preferredArticleId = (
+    articleContents.find((article) => article.status === "available") ?? articleContents[0]
+  )?.articleId ?? "";
+  const selectedArticleId =
+    articleSelection.slug === slug &&
+    articleContents.some((article) => article.articleId === articleSelection.articleId)
+      ? articleSelection.articleId
+      : preferredArticleId;
+  const selectedContent =
+    articleContents.find((article) => article.articleId === selectedArticleId) ??
+    articleContents.find((article) => article.status === "available") ??
+    articleContents[0];
+  const selectedArticle = story.articles.find(
+    (article) => article.id === selectedContent?.articleId,
   );
   const imageUrl = getHighResolutionStoryImageUrl(story.imageUrl);
   const imageArticle =
@@ -214,6 +272,19 @@ export default function RichNewsDetail({
   const updatedAt = story.lastMaterialUpdateAt ?? story.updatedAt;
   const hasMaterialUpdate =
     Date.parse(updatedAt) - Date.parse(publishedAt) >= 5 * 60_000;
+
+  const openAISummary = async () => {
+    setReadingPreference({ slug, mode: "summary" });
+    if (summaryStory.aiGenerated || aiRequestState === "loading") return;
+    setAiRequest({ slug, state: "loading" });
+    const generated = await requestStoryAISummary(story.slug);
+    if (generated) {
+      setAiResult({ slug, story: generated });
+      setAiRequest({ slug, state: "idle" });
+    } else {
+      setAiRequest({ slug, state: "error" });
+    }
+  };
 
   return (
     <main className="article-page simple-news-detail">
@@ -277,20 +348,135 @@ export default function RichNewsDetail({
             )}
           </figure>
         )}
-        <section
-          className="simple-news-summary"
-          aria-labelledby="full-summary-heading"
-        >
-          <div className="simple-news-summary-heading">
-            <h2 id="full-summary-heading">Tóm tắt đầy đủ</h2>
-            <span>{publisherCount} nguồn để đối chiếu</span>
-          </div>
-          <div>
-            {summaryParagraphs.map((paragraph, index) => (
-              <p key={`${index}-${paragraph.slice(0, 40)}`}>{paragraph}</p>
-            ))}
-          </div>
-        </section>
+        <nav className="article-reading-modes" aria-label="Chọn cách đọc bài viết">
+          <button
+            type="button"
+            className={readingMode === "full" ? "active" : ""}
+            aria-pressed={readingMode === "full"}
+            onClick={() => setReadingPreference({ slug, mode: "full" })}
+          >
+            <BookOpen size={19} aria-hidden="true" />
+            <span>
+              <strong>Đọc đầy đủ</strong>
+              <small>Nội dung nguồn cung cấp</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            className={readingMode === "summary" ? "active" : ""}
+            aria-pressed={readingMode === "summary"}
+            disabled={aiRequestState === "loading"}
+            onClick={() => void openAISummary()}
+          >
+            {aiRequestState === "loading" ? (
+              <LoaderCircle className="spin" size={19} aria-hidden="true" />
+            ) : (
+              <Sparkles size={19} aria-hidden="true" />
+            )}
+            <span>
+              <strong>Tóm tắt bằng AI</strong>
+              <small>{summaryStory.aiGenerated ? "Đã sẵn sàng" : "Tạo khi bạn yêu cầu"}</small>
+            </span>
+          </button>
+        </nav>
+
+        {readingMode === "full" ? (
+          <section
+            className="simple-news-summary article-full-reader"
+            aria-labelledby="full-article-heading"
+          >
+            <div className="simple-news-summary-heading">
+              <h2 id="full-article-heading">Nội dung đầy đủ</h2>
+              <span>{articleContents.filter((article) => article.status === "available").length}/{articleContents.length || story.articles.length} bài có toàn văn</span>
+            </div>
+            {articleContents.length > 1 && (
+              <div className="article-source-tabs" role="list" aria-label="Chọn bài nguồn">
+                {articleContents.map((article) => (
+                  <button
+                    type="button"
+                    role="listitem"
+                    key={article.articleId}
+                    className={selectedContent?.articleId === article.articleId ? "active" : ""}
+                    onClick={() => setArticleSelection({ slug, articleId: article.articleId })}
+                  >
+                    {article.sourceName}
+                    <small>{articleTabStatus(article)}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedContent?.status === "available" && selectedContent.paragraphs.length ? (
+              <div className="article-full-content">
+                <div className="article-content-attribution">
+                  {contentOriginLabel(selectedContent.source)} bởi{" "}
+                  <strong>{selectedContent.sourceName}</strong>.
+                </div>
+                {selectedContent.paragraphs.map((paragraph, index) => (
+                  <p key={`${index}-${paragraph.slice(0, 40)}`}>{paragraph}</p>
+                ))}
+                <a
+                  className="article-inline-source"
+                  href={selectedContent.originalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Xem bài gốc tại {selectedContent.sourceName}
+                  <ExternalLink size={16} aria-hidden="true" />
+                </a>
+              </div>
+            ) : (
+              <div className="article-source-only">
+                <strong>{sourceOnlyTitle(selectedContent?.status)}</strong>
+                <p>
+                  {selectedArticle?.excerpt || "Bạn vẫn có thể mở bài gốc để đọc đầy đủ bối cảnh từ nhà xuất bản."}
+                </p>
+                {selectedContent?.originalUrl || selectedArticle?.originalUrl ? (
+                  <a
+                    className="primary-button"
+                    href={selectedContent?.originalUrl ?? selectedArticle?.originalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Đọc đầy đủ tại nguồn
+                    <ExternalLink size={16} aria-hidden="true" />
+                  </a>
+                ) : null}
+                <small>SportPeek ưu tiên hiển thị nội dung công khai và luôn giữ link bài gốc để đối chiếu.</small>
+              </div>
+            )}
+          </section>
+        ) : (
+          <section
+            className="simple-news-summary article-ai-summary"
+            aria-labelledby="ai-summary-heading"
+          >
+            <div className="simple-news-summary-heading">
+              <h2 id="ai-summary-heading">Tóm tắt bằng AI</h2>
+              <span>{publisherCount} nguồn để đối chiếu</span>
+            </div>
+            {aiRequestState === "loading" ? (
+              <div className="article-ai-loading" role="status">
+                <LoaderCircle className="spin" size={22} aria-hidden="true" />
+                AI đang gộp thông tin chung và loại bỏ đoạn trùng lặp…
+              </div>
+            ) : summaryStory.aiGenerated ? (
+              <div>
+                {summaryParagraphs.map((paragraph, index) => (
+                  <p key={`${index}-${paragraph.slice(0, 40)}`}>{paragraph}</p>
+                ))}
+              </div>
+            ) : (
+              <div className="article-source-only">
+                <strong>{aiRequestState === "error" ? "Chưa thể tạo bản tóm tắt lúc này." : "Bản tóm tắt AI chỉ được tạo khi bạn yêu cầu."}</strong>
+                <p>AI sẽ gộp các dữ kiện chung từ nhiều nguồn thành một nội dung liền mạch và giữ riêng các điểm chưa thống nhất.</p>
+                <button type="button" className="primary-button" onClick={() => void openAISummary()}>
+                  <Sparkles size={17} aria-hidden="true" />
+                  {aiRequestState === "error" ? "Thử tóm tắt lại" : "Tóm tắt bài này"}
+                </button>
+              </div>
+            )}
+          </section>
+        )}
         <section
           className="simple-news-sources"
           aria-labelledby="source-links-heading"

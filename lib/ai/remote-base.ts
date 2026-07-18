@@ -12,14 +12,14 @@ export const classifiedSchema = z.object({
   articleType: z.string(),
   language: z.string(),
 });
-export const summarySchema = z.object({ title: z.string().min(1).max(500), summary: z.string().min(80).max(2000), keyPoints: z.array(z.string().min(1)).min(1).max(5), sourceIds: z.array(z.string()).min(1) });
+export const summarySchema = z.object({ title: z.string().min(1).max(500), summary: z.string().min(80).max(4000), keyPoints: z.array(z.string().min(1)).min(1).max(5), sourceIds: z.array(z.string()).min(1) });
 export const matchEvaluationSchema = z.object({ sameEvent: z.boolean(), confidence: z.number().min(0).max(1), reason: z.string() });
 export const timelineSchema = z.array(z.object({ occurredAt: z.string().datetime({ offset: true }), content: z.string().min(1), updateType: z.string(), supportingArticleIds: z.array(z.string()).min(1) }));
 export const agreementsSchema = z.array(z.object({ text: z.string().min(1), sourceArticleIds: z.array(z.string()).min(1) }));
 export const disputesSchema = z.array(z.object({ topic: z.string().min(1), positions: z.array(z.object({ claim: z.string().min(1), sourceArticleIds: z.array(z.string()).min(1) })).min(2) }));
 export const answerSchema = z.object({ answer: z.string().min(1), sourceArticleIds: z.array(z.string()) });
 
-export const CLUSTER_SUMMARY_TASK = "Viết một bản tổng hợp biên tập tự nhiên bằng tiếng Việt. Với một nguồn metadata ngắn, chỉ viết 80–140 từ; với nhiều nguồn có đủ dữ kiện, viết 160–280 từ thành các đoạn ngắn. Trước khi viết, tách các dữ kiện thành claim, gộp các dữ kiện chung và claim trùng nhau rồi chỉ nói mỗi dữ kiện một lần; không lặp cùng một ý bằng cách diễn đạt khác. Không liệt kê lần lượt từng nguồn, không nối các trích đoạn, không viết lời giải thích kỹ thuật về AI/RSS/metadata. Chỉ thêm chi tiết riêng khi nó bổ sung bối cảnh; nếu các nguồn mâu thuẫn, nêu rõ khác biệt thay vì tự chọn một phía. Không thêm tỷ số, thống kê, phát biểu, phí chuyển nhượng, chấn thương hoặc kết luận ngoài đầu vào. keyPoints phải là các claim khác nhau. sourceIds chỉ chứa ID đầu vào thực sự được dùng.";
+export const CLUSTER_SUMMARY_TASK = "Viết một bản tổng hợp biên tập tự nhiên bằng tiếng Việt. Với một nguồn metadata ngắn, chỉ viết 80-140 từ; với nhiều nguồn hoặc có toàn văn, viết 220-450 từ thành các đoạn ngắn, đủ bối cảnh để người đọc hiểu sự việc mà không cần đọc từng nguồn. Trước khi viết, tách các dữ kiện thành claim, gộp các dữ kiện chung và claim trùng nhau rồi chỉ nói mỗi dữ kiện một lần; không lặp cùng một ý bằng cách diễn đạt khác. Không liệt kê lần lượt từng nguồn, không nối các trích đoạn, không viết lời giải thích kỹ thuật về AI/RSS/metadata. Chỉ thêm chi tiết riêng khi nó bổ sung bối cảnh; nếu các nguồn mâu thuẫn, nêu rõ khác biệt thay vì tự chọn một phía. Không thêm tỷ số, thống kê, phát biểu, phí chuyển nhượng, chấn thương hoặc kết luận ngoài đầu vào. keyPoints phải là các claim khác nhau. sourceIds chỉ chứa ID đầu vào thực sự được dùng.";
 
 export function providerJsonSchema<T>(schema: z.ZodType<T>): Record<string, unknown> {
   const jsonSchema = { ...(z.toJSONSchema(schema) as Record<string, unknown>) };

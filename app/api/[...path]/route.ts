@@ -16,9 +16,13 @@ import { storySlugSchema } from "@/lib/stories/slug";
 import { bookmarkSchema, followSchema, profileSchema, readingHistorySchema, searchSchema } from "@/lib/validation";
 import { newsSearchText, normalizeSearchText } from "@/lib/ui-logic";
 import { NEWS_CATEGORIES } from "@/lib/news/categories";
+import { loadStoryArticleContents } from "@/lib/articles/content";
 
 type Context = { params: Promise<{ path: string[] }> };
-const clientKey = (request: NextRequest) => request.headers.get("x-forwarded-for")?.split(",")[0] ?? "local";
+const clientKey = (request: NextRequest) =>
+  request.headers.get("cf-connecting-ip")?.trim()
+  || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+  || "local";
 
 export type CronAuthorizationState = "authorized" | "unauthorized" | "configuration_required";
 
@@ -29,6 +33,10 @@ export function cronAuthorizationState(
   const configuredSecret = secret?.trim();
   if (!configuredSecret) return "configuration_required";
   return authorization === `Bearer ${configuredSecret}` ? "authorized" : "unauthorized";
+}
+
+export function routeRequiresCronAuthorization(path: string[]): boolean {
+  return ["cron/ingest", "admin/ingest", "ai/process"].includes(path.join("/"));
 }
 
 function cronAuthorizationError(request: NextRequest): NextResponse | null {
@@ -93,15 +101,28 @@ export async function GET(request: NextRequest, { params }: Context) {
       }), { status: 404 });
     }
     const result = await storyService.getBySlug(parsedSlug.data);
-    return NextResponse.json(detailEnvelope(result), {
-      status: repositoryHttpStatus(result.status),
+    const detailedResult = result.data
+      ? {
+          ...result,
+          data: {
+            ...result.data,
+            articleContents: await loadStoryArticleContents(result.data.story).catch(() => []),
+          },
+        }
+      : result;
+    return NextResponse.json(detailEnvelope(detailedResult), {
+      status: repositoryHttpStatus(detailedResult.status),
       headers: { "cache-control": "public, s-maxage=90, stale-while-revalidate=300" },
     });
   }
   if (route === "news/archive") {
     const page = Math.max(1, Number.parseInt(request.nextUrl.searchParams.get("page") ?? "1", 10) || 1);
     const pageSize = Math.min(48, Math.max(1, Number.parseInt(request.nextUrl.searchParams.get("pageSize") ?? "12", 10) || 12));
-    const result = await storyService.getArchive(page, pageSize);
+    const query = request.nextUrl.searchParams.get("q")?.trim().slice(0, 120) || undefined;
+    const category = request.nextUrl.searchParams.get("category")?.trim().slice(0, 160) || undefined;
+    const source = request.nextUrl.searchParams.get("source")?.trim().slice(0, 160) || undefined;
+    const minHotness = Math.min(100, Math.max(0, Number.parseInt(request.nextUrl.searchParams.get("minHotness") ?? "0", 10) || 0));
+    const result = await storyService.getArchive(page, pageSize, { query, category, source, minHotness });
     const archive = result.data;
     return NextResponse.json({
       status: result.status,
@@ -173,9 +194,7 @@ export async function GET(request: NextRequest, { params }: Context) {
 
 export async function POST(request: NextRequest, { params }: Context) {
   const { path } = await params; const route = path.join("/");
-  const requiresCronAuthorization =
-    (path[0] === "stories" && Boolean(path[1]) && path[2] === "summarize") ||
-    ["cron/ingest", "admin/ingest", "ai/process"].includes(route);
+  const requiresCronAuthorization = routeRequiresCronAuthorization(path);
   if (requiresCronAuthorization) {
     const authorizationError = cronAuthorizationError(request);
     if (authorizationError) return authorizationError;

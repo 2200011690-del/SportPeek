@@ -116,6 +116,29 @@ export const storyApiErrorSchema = z.object({
   message: z.string().min(1),
 }).nullable().optional();
 
+export const articleContentStatusSchema = z.enum([
+  "pending",
+  "processing",
+  "available",
+  "source_only",
+  "failed",
+]);
+
+export const storyArticleContentSchema = z.object({
+  articleId: z.string().min(1).max(160),
+  sourceName: z.string().min(1).max(160),
+  title: z.string().min(1).max(500),
+  originalUrl: externalUrlSchema,
+  language: z.enum(["vi", "en"]),
+  status: articleContentStatusSchema,
+  source: z.enum(["rss", "publisher"]).nullable(),
+  content: z.string().max(100_000).nullable(),
+  paragraphs: z.array(z.string().min(1).max(12_000)).max(240),
+  wordCount: z.number().int().nonnegative(),
+  fetchedAt: z.string().datetime({ offset: true }).nullable(),
+  error: z.string().max(500).nullable(),
+});
+
 export const storyFeedEnvelopeSchema = z.object({
   status: storyApiStatusSchema,
   data: z.array(storyClusterSchema),
@@ -126,6 +149,7 @@ export const storyFeedEnvelopeSchema = z.object({
 export const storyDetailPayloadSchema = z.object({
   story: storyClusterSchema,
   relatedStories: z.array(storyClusterSchema),
+  articleContents: z.array(storyArticleContentSchema).default([]),
 });
 
 export const storyDetailEnvelopeSchema = z.object({
@@ -145,6 +169,7 @@ export type StoryResponseMeta = z.infer<typeof storyResponseMetaSchema>;
 export type StoryFeedEnvelope = z.infer<typeof storyFeedEnvelopeSchema>;
 export type StoryDetailPayload = z.infer<typeof storyDetailPayloadSchema>;
 export type StoryDetailEnvelope = z.infer<typeof storyDetailEnvelopeSchema>;
+export type StoryArticleContent = z.infer<typeof storyArticleContentSchema>;
 
 export function isSafeExternalUrl(value: string | null | undefined): value is string {
   return externalUrlSchema.safeParse(value).success;

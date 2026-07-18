@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ConfigurationError, ProviderError, toSafeError } from "@/lib/core/errors";
+import { logger } from "@/lib/core/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { providerFetch } from "@/lib/core/provider-fetch";
 import { parseRssXml, readResponseText } from "./parser";
@@ -29,23 +30,157 @@ export async function ensureRssSources(): Promise<RssSource[]> {
 
 function due(source: RssSource, force: boolean) { return force || !source.lastFetchedAt || Date.now() - Date.parse(source.lastFetchedAt) >= source.fetchIntervalMinutes * 60_000; }
 
-async function persistArticles(source: RssSource, articles: ParsedRssArticle[]): Promise<{ inserted: number; skipped: number }> {
-  const client = admin(); const { data: existing, error: lookupError } = await client.from("raw_articles").select("external_id,original_url,canonical_url,content_hash,normalized_title,published_at").eq("source_id", source.id).order("published_at", { ascending: false }).limit(2000);
-  if (lookupError) throw new ProviderError("Không thể kiểm tra RSS duplicate.", "supabase");
-  const rows = existing ?? []; const externalIds = new Set(rows.map((row) => row.external_id).filter(Boolean)); const originals = new Set(rows.map((row) => row.original_url)); const canonicals = new Set(rows.map((row) => row.canonical_url).filter(Boolean)); const hashes = new Set(rows.map((row) => row.content_hash));
-  const titleTimes = new Map<string, number[]>(); for (const row of rows) { if (!row.normalized_title) continue; const list = titleTimes.get(row.normalized_title) ?? []; list.push(Date.parse(row.published_at)); titleTimes.set(row.normalized_title, list); }
-  const accepted: Array<ParsedRssArticle & { contentHash: string }> = [];
-  for (const article of articles) {
-    const contentHash = rssContentHash(source.id, article); const published = Date.parse(article.publishedAt); const titleDuplicate = (titleTimes.get(article.normalizedTitle) ?? []).some((timestamp) => Math.abs(timestamp - published) <= 6 * 60 * 60_000);
-    if (externalIds.has(article.externalId) || originals.has(article.originalUrl) || canonicals.has(article.canonicalUrl) || hashes.has(contentHash) || titleDuplicate) continue;
-    accepted.push({ ...article, contentHash }); externalIds.add(article.externalId); originals.add(article.originalUrl); canonicals.add(article.canonicalUrl); hashes.add(contentHash); const times = titleTimes.get(article.normalizedTitle) ?? []; times.push(published); titleTimes.set(article.normalizedTitle, times);
+type ExistingRawArticle = { external_id: string | null; original_url: string; canonical_url: string | null; content_hash: string; normalized_title: string | null; published_at: string };
+type ExistingUrlIdentity = Pick<ExistingRawArticle, "original_url" | "canonical_url">;
+type PersistableRssArticle = ParsedRssArticle & { contentHash: string };
+type SupabaseErrorLike = { code?: unknown; message?: unknown; hint?: unknown };
+type RssWriteResult = { data: Array<{ id?: unknown }> | null; error: unknown | null };
+
+function safeDatabaseText(value: unknown, fallback: string): string {
+  if (typeof value !== "string" || !value.trim()) return fallback;
+  return value
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted-token]")
+    .replace(/\b(authorization|api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 400);
+}
+
+function describeSupabaseError(error: unknown): { code: string; message: string; hint: string | null } {
+  const record = error && typeof error === "object" ? error as SupabaseErrorLike : {};
+  return {
+    code: safeDatabaseText(record.code, "SUPABASE_ERROR").slice(0, 64),
+    message: safeDatabaseText(record.message, "Supabase request failed"),
+    hint: typeof record.hint === "string" && record.hint.trim() ? safeDatabaseText(record.hint, "") : null,
+  };
+}
+
+function providerErrorFromSupabase(action: string, event: string, error: unknown, context: Record<string, unknown>): ProviderError {
+  const detail = describeSupabaseError(error);
+  logger.error(event, { provider: "supabase", code: detail.code, databaseMessage: detail.message, hint: detail.hint, ...context });
+  return new ProviderError(`${action} (Supabase ${detail.code}: ${detail.message}).`, "supabase");
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && String((error as SupabaseErrorLike).code ?? "") === "23505");
+}
+
+/**
+ * Keep source-scoped identifiers and title heuristics local to a publisher,
+ * while treating URL identity as global because raw_articles.original_url is
+ * globally unique. The first stored row remains the attribution owner.
+ */
+export function selectPersistableRssArticles(
+  sourceId: string,
+  articles: ParsedRssArticle[],
+  existingForSource: ExistingRawArticle[],
+  existingUrlIdentities: ExistingUrlIdentity[],
+): PersistableRssArticle[] {
+  const externalIds = new Set(existingForSource.map((row) => row.external_id).filter((value): value is string => Boolean(value)));
+  const hashes = new Set(existingForSource.map((row) => row.content_hash));
+  const knownUrls = new Set(
+    [...existingForSource, ...existingUrlIdentities]
+      .flatMap((row) => [row.original_url, row.canonical_url])
+      .filter((value): value is string => Boolean(value)),
+  );
+  const titleTimes = new Map<string, number[]>();
+  for (const row of existingForSource) {
+    if (!row.normalized_title) continue;
+    const list = titleTimes.get(row.normalized_title) ?? [];
+    list.push(Date.parse(row.published_at));
+    titleTimes.set(row.normalized_title, list);
   }
+
+  const accepted: PersistableRssArticle[] = [];
+  for (const article of articles) {
+    const contentHash = rssContentHash(sourceId, article);
+    const published = Date.parse(article.publishedAt);
+    const titleDuplicate = (titleTimes.get(article.normalizedTitle) ?? [])
+      .some((timestamp) => Number.isFinite(timestamp) && Math.abs(timestamp - published) <= 6 * 60 * 60_000);
+    if (
+      externalIds.has(article.externalId)
+      || knownUrls.has(article.originalUrl)
+      || knownUrls.has(article.canonicalUrl)
+      || hashes.has(contentHash)
+      || titleDuplicate
+    ) continue;
+
+    accepted.push({ ...article, contentHash });
+    externalIds.add(article.externalId);
+    knownUrls.add(article.originalUrl);
+    knownUrls.add(article.canonicalUrl);
+    hashes.add(contentHash);
+    const times = titleTimes.get(article.normalizedTitle) ?? [];
+    times.push(published);
+    titleTimes.set(article.normalizedTitle, times);
+  }
+  return accepted;
+}
+
+/** Try the fast batch write first, then isolate only unique-conflict rows. */
+export async function persistRowsWithConflictIsolation<T>(
+  rows: T[],
+  write: (batch: T[]) => Promise<RssWriteResult>,
+  onConflict?: (error: unknown) => void,
+): Promise<{ inserted: number; skipped: number }> {
+  if (!rows.length) return { inserted: 0, skipped: 0 };
+  const result = await write(rows);
+  if (!result.error) {
+    const inserted = Math.min(rows.length, result.data?.length ?? 0);
+    return { inserted, skipped: rows.length - inserted };
+  }
+  if (!isUniqueViolation(result.error)) throw result.error;
+  if (rows.length === 1) {
+    onConflict?.(result.error);
+    return { inserted: 0, skipped: 1 };
+  }
+
+  const middle = Math.ceil(rows.length / 2);
+  const [left, right] = await Promise.all([
+    persistRowsWithConflictIsolation(rows.slice(0, middle), write, onConflict),
+    persistRowsWithConflictIsolation(rows.slice(middle), write, onConflict),
+  ]);
+  return { inserted: left.inserted + right.inserted, skipped: left.skipped + right.skipped };
+}
+
+async function persistArticles(source: RssSource, articles: ParsedRssArticle[]): Promise<{ inserted: number; skipped: number }> {
+  if (!articles.length) return { inserted: 0, skipped: 0 };
+  const client = admin();
+  const { data: existing, error: lookupError } = await client.from("raw_articles").select("external_id,original_url,canonical_url,content_hash,normalized_title,published_at").eq("source_id", source.id).order("published_at", { ascending: false }).limit(2000);
+  if (lookupError) throw providerErrorFromSupabase("Không thể kiểm tra RSS duplicate", "rss.duplicate_lookup_failed", lookupError, { sourceId: source.id, sourceName: source.name, scope: "source" });
+
+  const candidateUrls = [...new Set(articles.flatMap((article) => [article.originalUrl, article.canonicalUrl]))];
+  const [byOriginal, byCanonical] = await Promise.all([
+    client.from("raw_articles").select("original_url,canonical_url").in("original_url", candidateUrls),
+    client.from("raw_articles").select("original_url,canonical_url").in("canonical_url", candidateUrls),
+  ]);
+  if (byOriginal.error) throw providerErrorFromSupabase("Không thể kiểm tra RSS URL trùng", "rss.global_url_lookup_failed", byOriginal.error, { sourceId: source.id, sourceName: source.name, column: "original_url" });
+  if (byCanonical.error) throw providerErrorFromSupabase("Không thể kiểm tra RSS URL trùng", "rss.global_url_lookup_failed", byCanonical.error, { sourceId: source.id, sourceName: source.name, column: "canonical_url" });
+
+  const accepted = selectPersistableRssArticles(source.id, articles, (existing ?? []) as ExistingRawArticle[], [...(byOriginal.data ?? []), ...(byCanonical.data ?? [])] as ExistingUrlIdentity[]);
   let inserted = 0;
+  const fetchedAt = new Date().toISOString();
   for (let index = 0; index < accepted.length; index += 50) {
-    const batch = accepted.slice(index, index + 50).map((article) => ({ source_id: source.id, external_id: article.externalId, original_url: article.originalUrl, canonical_url: article.canonicalUrl, title: article.title, normalized_title: article.normalizedTitle, excerpt: article.excerpt, author: article.author, image_url: article.imageUrl, published_at: article.publishedAt, fetched_at: new Date().toISOString(), content_hash: article.contentHash, language: article.language, processing_status: "pending", raw_metadata: article.rawMetadata }));
-    const { data, error } = await client.from("raw_articles").upsert(batch, { onConflict: "content_hash", ignoreDuplicates: true }).select("id");
-    if (error) throw new ProviderError("Không thể lưu batch raw article.", "supabase");
-    inserted += data?.length ?? 0;
+    const batch = accepted.slice(index, index + 50).map((article) => {
+      const fullContent = article.fullContent?.trim() || null;
+      const measuredWords = fullContent ? fullContent.split(/\s+/).filter(Boolean).length : 0;
+      const contentWordCount = fullContent ? Math.max(article.contentWordCount ?? 0, measuredWords) : 0;
+      const contentAvailable = Boolean(fullContent && contentWordCount >= 120);
+      return { source_id: source.id, external_id: article.externalId, original_url: article.originalUrl, canonical_url: article.canonicalUrl, title: article.title, normalized_title: article.normalizedTitle, excerpt: article.excerpt, author: article.author, image_url: article.imageUrl, published_at: article.publishedAt, fetched_at: fetchedAt, content_hash: article.contentHash, language: article.language, processing_status: "pending", raw_metadata: article.rawMetadata, full_content: contentAvailable ? fullContent : null, content_status: contentAvailable ? "available" : "pending", content_source: contentAvailable ? article.contentSource ?? "rss" : null, content_fetched_at: contentAvailable ? fetchedAt : null, content_word_count: contentAvailable ? contentWordCount : 0, content_error: null, content_lease_expires_at: null };
+    });
+    try {
+      const result = await persistRowsWithConflictIsolation(
+        batch,
+        async (rows) => client.from("raw_articles").upsert(rows, { onConflict: "original_url", ignoreDuplicates: true }).select("id"),
+        (error) => {
+          const detail = describeSupabaseError(error);
+          logger.warn("rss.article_conflict_skipped", { provider: "supabase", code: detail.code, databaseMessage: detail.message, sourceId: source.id, sourceName: source.name });
+        },
+      );
+      inserted += result.inserted;
+    } catch (error) {
+      throw providerErrorFromSupabase("Không thể lưu batch raw article", "rss.raw_article_persist_failed", error, { sourceId: source.id, sourceName: source.name, batchSize: batch.length });
+    }
   }
   return { inserted, skipped: articles.length - inserted };
 }

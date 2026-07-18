@@ -6,6 +6,7 @@ import { storyService } from "@/lib/application/story-service";
 import { isInternalMode, isPublicSignupAllowed } from "@/lib/config";
 import { newsCategory } from "@/lib/news/categories";
 import { buildNewsArticleJsonLd, buildStoryMetadata, serializeJsonLd } from "@/lib/stories/seo";
+import { loadStoryArticleContents } from "@/lib/articles/content";
 
 type PageProps = { params: Promise<{ slug: string[] }> };
 
@@ -69,9 +70,12 @@ export default async function CatchAllPage({ params }: PageProps) {
   const storyData = slug.length === 2 && slug[0] === "news" ? await loadStoryPageData(slug[1]) : null;
   const story = storyData?.story ?? null;
   if (story && story.slug !== slug[1]) redirect(`/news/${story.slug}`);
+  const initialStory = storyData && story
+    ? { ...storyData, articleContents: await loadStoryArticleContents(story).catch(() => []) }
+    : storyData;
   const jsonLd = story ? serializeJsonLd(buildNewsArticleJsonLd(story)) : null;
   return <>
     {jsonLd ? <script id="newspeek-newsarticle" type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} /> : null}
-    <SportPeekApp route={`/${slug.join("/")}`} signupAllowed={isPublicSignupAllowed()} initialStory={storyData} />
+    <SportPeekApp route={`/${slug.join("/")}`} signupAllowed={isPublicSignupAllowed()} initialStory={initialStory} />
   </>;
 }

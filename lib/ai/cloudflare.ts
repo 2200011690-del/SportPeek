@@ -183,7 +183,7 @@ export class CloudflareAIProvider implements AIProvider {
         keyPoints: { type: "array", maxItems: 3, items: { type: "string" } },
       },
     };
-    const result = await runStructured(schema, jsonSchema, CLUSTER_SUMMARY_TASK, input, 1200);
+    const result = await runStructured(schema, jsonSchema, CLUSTER_SUMMARY_TASK, input, 2200);
     return { ...result, sourceIds: input.articles.map((article) => article.id) };
   }
 

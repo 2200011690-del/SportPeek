@@ -38,12 +38,12 @@ test("Cloudflare AI enriches international news with validated Vietnamese output
   }
 });
 
-test("Cloudflare AI cluster summaries use the bounded 1200-token JSON request", async () => {
+test("Cloudflare AI cluster summaries use the bounded long-form JSON request", async () => {
   setWorkersAIBinding({
     async run(model, input) {
       assert.equal(model, DEFAULT_CLOUDFLARE_AI_MODEL);
       assert.equal(input.response_format?.type, "json_schema");
-      assert.equal(input.max_tokens, 1200);
+      assert.equal(input.max_tokens, 2200);
       return {
         response: {
           title: "Arsenal giành chiến thắng",

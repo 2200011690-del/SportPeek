@@ -175,7 +175,8 @@ export function NewsPage({
   const filtersActive = Boolean(
     categorySlug || query.trim() || category || source || minHotness > 0,
   );
-  const usesArchive = feedView === "latest" && !filtersActive;
+  const usesArchive = feedView === "latest";
+  const archiveCategory = category || routeCategory?.label || "";
   const updateFilter =
     <T,>(setter: (value: T) => void) =>
     (value: T) => {
@@ -192,39 +193,48 @@ export function NewsPage({
   useEffect(() => {
     if (!usesArchive) return;
     let active = true;
-    void fetch(`/api/news/archive?page=${page}&pageSize=12`, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(12_000),
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json() as Promise<{
-          data: NewsItem[];
-          pagination: {
-            page: number;
-            pageSize: number;
-            total: number;
-            totalPages: number;
-          };
-        }>;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ page: String(page), pageSize: "12" });
+      if (query.trim()) params.set("q", query.trim());
+      if (archiveCategory) params.set("category", archiveCategory);
+      if (source) params.set("source", source);
+      if (minHotness > 0) params.set("minHotness", String(minHotness));
+      setArchiveLoading(true);
+      void fetch(`/api/news/archive?${params.toString()}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(12_000),
       })
-      .then((response) => {
-        if (active) {
-          setArchiveItems(response.data);
-          setArchivePagination(response.pagination);
-          setArchiveError(false);
-        }
-      })
-      .catch(() => {
-        if (active) setArchiveError(true);
-      })
-      .finally(() => {
-        if (active) setArchiveLoading(false);
-      });
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json() as Promise<{
+            data: NewsItem[];
+            pagination: {
+              page: number;
+              pageSize: number;
+              total: number;
+              totalPages: number;
+            };
+          }>;
+        })
+        .then((response) => {
+          if (active) {
+            setArchiveItems(response.data);
+            setArchivePagination(response.pagination);
+            setArchiveError(false);
+          }
+        })
+        .catch(() => {
+          if (active) setArchiveError(true);
+        })
+        .finally(() => {
+          if (active) setArchiveLoading(false);
+        });
+    }, query.trim() ? 250 : 0);
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
-  }, [page, usesArchive]);
+  }, [archiveCategory, minHotness, page, query, source, usesArchive]);
   const displayedItems = usesArchive ? archiveItems : localPagination.items;
   const displayedPage = usesArchive
     ? archivePagination.page

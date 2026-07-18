@@ -37,6 +37,17 @@ test("AI stories render one editorial summary instead of appending source excerp
   assert.match(CLUSTER_SUMMARY_TASK, /không nối các trích đoạn/);
 });
 
+test("AI story detail prefers clean long-form editorial summaries", () => {
+  assert.deepEqual(storyDisplaySummaryParagraphs({
+    aiGenerated: true,
+    summary: "Bản ngắn cho danh sách tin.",
+    summaryLong: "Bản dài giải thích đầy đủ bối cảnh chính của sự kiện.\n\nĐoạn tiếp theo bổ sung diễn biến quan trọng và loại bỏ các dữ kiện trùng lặp giữa nhiều nguồn.",
+  }), [
+    "Bản dài giải thích đầy đủ bối cảnh chính của sự kiện.",
+    "Đoạn tiếp theo bổ sung diễn biến quan trọng và loại bỏ các dữ kiện trùng lặp giữa nhiều nguồn.",
+  ]);
+});
+
 test("story detail removes the generic RSS disclaimer and shows actual story information", () => {
   assert.deepEqual(storyDisplaySummaryParagraphs({
     aiGenerated: false,

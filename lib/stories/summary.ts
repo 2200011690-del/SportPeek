@@ -32,6 +32,14 @@ export function buildLongSummary(...values: Array<string | null | undefined>): s
 type DisplayStory = Pick<StoryCluster, "aiGenerated" | "summary" | "summaryLong">
   & Partial<Pick<StoryCluster, "title" | "articles">>;
 
+function looksLikeSourceAppendix(value: string): boolean {
+  const paragraphs = value.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  if (paragraphs.length < 2) return false;
+  return paragraphs.slice(1).some((paragraph) =>
+    /^(?:nguon|nguồn|source)\s+[a-z0-9]|\b(?:ke lai|kể lại|tiep tuc ke|tiếp tục kể)\b/i.test(paragraph),
+  );
+}
+
 function metadataSummary(story: DisplayStory): string {
   const candidates = (story.articles ?? []).flatMap((article) => {
     const value = article.excerpt?.trim() || article.title.trim();
@@ -48,9 +56,14 @@ function metadataSummary(story: DisplayStory): string {
 }
 
 export function storyDisplaySummaryParagraphs(story: DisplayStory): string[] {
-  const paragraphs = story.aiGenerated
-    ? cleanSummaryParagraphs(story.summary)
-    : cleanSummaryParagraphs(story.summary, story.summaryLong);
+  if (story.aiGenerated) {
+    const long = story.summaryLong && !looksLikeSourceAppendix(story.summaryLong)
+      ? cleanSummaryParagraphs(story.summaryLong)
+      : [];
+    if (long.join(" ").length > story.summary.trim().length + 80) return long;
+    return cleanSummaryParagraphs(story.summary);
+  }
+  const paragraphs = cleanSummaryParagraphs(story.summary, story.summaryLong);
   return paragraphs.length ? paragraphs : cleanSummaryParagraphs(metadataSummary(story));
 }
 

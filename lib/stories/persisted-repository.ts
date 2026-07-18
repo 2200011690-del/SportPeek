@@ -10,11 +10,12 @@ import type { StoryRepositoryResult } from "./repository-types";
 export type PersistedStorySnapshot = { stories: StoryCluster[]; lastSyncAt: string | null; sources: string[]; aiStatus: NewsAIStatus };
 export type PersistedStoryLoader = () => Promise<PersistedStorySnapshot>;
 export type StoryArchivePage = { stories: StoryCluster[]; page: number; pageSize: number; total: number; totalPages: number };
+export type StoryArchiveFilters = { query?: string; category?: string; source?: string; minHotness?: number };
 export type StorySitemapEntry = { slug: string; publishedAt: string; lastMaterialUpdateAt: string };
 type PersistedStoryAccess = {
   findBySlug?: (slug: string) => Promise<StoryCluster | null>;
   findById?: (id: string) => Promise<StoryCluster | null>;
-  readArchive?: (page: number, pageSize: number) => Promise<StoryArchivePage>;
+  readArchive?: (page: number, pageSize: number, filters?: StoryArchiveFilters) => Promise<StoryArchivePage>;
 };
 type PersistedAIProvider = Exclude<NewsAIStatus["provider"], "off">;
 type PersistedStoryRow = {
@@ -185,22 +186,39 @@ async function findPersistedStory(column: "slug" | "id", value: string): Promise
 export const loadPersistedStoryBySlug = (slug: string) => findPersistedStory("slug", slug);
 export const loadPersistedStoryById = (id: string) => findPersistedStory("id", id);
 
-export async function loadPersistedStoryArchive(page: number, pageSize: number): Promise<StoryArchivePage> {
+export async function loadPersistedStoryArchive(page: number, pageSize: number, filters: StoryArchiveFilters = {}): Promise<StoryArchivePage> {
   const safePage = Math.max(1, Math.floor(page));
   const safePageSize = Math.min(48, Math.max(1, Math.floor(pageSize)));
   const from = (safePage - 1) * safePageSize;
   const client = persistedClient();
-  const fresh = await client.from("story_clusters")
-    .select(FRESH_STORY_COLUMNS, { count: "exact" })
+  const queryTerm = filters.query?.trim().slice(0, 120).replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim();
+  const category = filters.category?.trim().slice(0, 160);
+  const source = filters.source?.trim().slice(0, 160);
+  const minHotness = Math.min(100, Math.max(0, Math.floor(filters.minHotness ?? 0)));
+  let freshQuery = client.from("story_clusters").select(FRESH_STORY_COLUMNS, { count: "exact" });
+  if (queryTerm) freshQuery = freshQuery.or(`title.ilike.%${queryTerm}%,summary.ilike.%${queryTerm}%`);
+  if (category) freshQuery = freshQuery.eq("payload->>category", category);
+  if (source) freshQuery = freshQuery.contains("payload->sourceNames", [source]);
+  if (minHotness > 0) freshQuery = freshQuery.gte("hotness_score", minHotness);
+  const fresh = await freshQuery
     .order("last_material_update_at", { ascending: false })
     .order("first_published_at", { ascending: false })
     .range(from, from + safePageSize - 1);
-  const result = fresh.error && isFreshnessSchemaMissing(fresh.error)
-    ? await client.from("story_clusters")
-      .select(LEGACY_STORY_COLUMNS, { count: "exact" })
+  let result = fresh as unknown as {
+    data: unknown[] | null;
+    error: { code?: string; message?: string; details?: string } | null;
+    count: number | null;
+  };
+  if (fresh.error && isFreshnessSchemaMissing(fresh.error)) {
+    let legacyQuery = client.from("story_clusters").select(LEGACY_STORY_COLUMNS, { count: "exact" });
+    if (queryTerm) legacyQuery = legacyQuery.or(`title.ilike.%${queryTerm}%,summary.ilike.%${queryTerm}%`);
+    if (category) legacyQuery = legacyQuery.eq("payload->>category", category);
+    if (source) legacyQuery = legacyQuery.contains("payload->sourceNames", [source]);
+    if (minHotness > 0) legacyQuery = legacyQuery.gte("hotness_score", minHotness);
+    result = await legacyQuery
       .order("first_published_at", { ascending: false })
-      .range(from, from + safePageSize - 1)
-    : fresh;
+      .range(from, from + safePageSize - 1) as unknown as typeof result;
+  }
   if (result.error) throw new ProviderError("Không thể đọc kho tin cũ.", "supabase");
   const stories = (result.data ?? []).flatMap((rawRow): StoryCluster[] => {
     const story = storyFromRow(rawRow as unknown as PersistedStoryRow);
@@ -238,8 +256,16 @@ export async function loadPersistedStorySitemapEntries(limit = 1_000): Promise<S
 export function createPersistedStoryRepository(loader: PersistedStoryLoader = loadPersistedStories, access: PersistedStoryAccess = {}) {
   const findBySlug = access.findBySlug ?? (async (slug: string) => (await loader()).stories.find((story) => story.slug === slug || story.legacySlugs.includes(slug)) ?? null);
   const findById = access.findById ?? (async (id: string) => (await loader()).stories.find((story) => story.id === id) ?? null);
-  const readArchive = access.readArchive ?? (async (page: number, pageSize: number) => {
-    const stories = sortStoriesByMaterialFreshness((await loader()).stories.map(restoreOriginalStoryLanguage));
+  const readArchive = access.readArchive ?? (async (page: number, pageSize: number, filters: StoryArchiveFilters = {}) => {
+    const query = filters.query?.trim().toLocaleLowerCase("vi") ?? "";
+    const category = filters.category?.trim().toLocaleLowerCase("vi") ?? "";
+    const source = filters.source?.trim().toLocaleLowerCase("vi") ?? "";
+    const stories = sortStoriesByMaterialFreshness((await loader()).stories.map(restoreOriginalStoryLanguage)).filter((story) =>
+      (!query || `${story.title} ${story.summary} ${story.summaryLong}`.toLocaleLowerCase("vi").includes(query))
+      && (!category || story.category.toLocaleLowerCase("vi") === category)
+      && (!source || story.sourceNames.some((name) => name.toLocaleLowerCase("vi") === source))
+      && (story.hotnessScore ?? 0) >= (filters.minHotness ?? 0),
+    );
     const safePage = Math.max(1, Math.floor(page)); const safePageSize = Math.max(1, Math.floor(pageSize)); const from = (safePage - 1) * safePageSize;
     return { stories: stories.slice(from, from + safePageSize), page: safePage, pageSize: safePageSize, total: stories.length, totalPages: Math.max(1, Math.ceil(stories.length / safePageSize)) };
   });
@@ -256,13 +282,13 @@ export function createPersistedStoryRepository(loader: PersistedStoryLoader = lo
   };
   const getStoryFeed = () => load();
   const getLatestStories = async (limit = 60) => { const result = await load(); return { ...result, data: result.data?.slice(0, Math.max(0, limit)) ?? result.data }; };
-  const getStoryBySlug = async (slug: string): Promise<StoryRepositoryResult<StoryDetailPayload>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const recent = result.data.find((item) => item.slug === slug || item.legacySlugs.includes(slug)); const story = recent ?? await findBySlug(slug); return story ? { status: result.status === "stale" ? "stale" : "success", data: { story, relatedStories: relatedStories(result.data, story) }, meta: { ...result.meta, canonicalSlug: story.slug } } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
+  const getStoryBySlug = async (slug: string): Promise<StoryRepositoryResult<StoryDetailPayload>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const recent = result.data.find((item) => item.slug === slug || item.legacySlugs.includes(slug)); const story = recent ?? await findBySlug(slug); return story ? { status: result.status === "stale" ? "stale" : "success", data: { story, relatedStories: relatedStories(result.data, story), articleContents: [] }, meta: { ...result.meta, canonicalSlug: story.slug } } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
   const getStoryById = async (id: string): Promise<StoryRepositoryResult<StoryCluster>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const recent = result.data.find((item) => item.id === id); const story = recent ?? await findById(id); return story ? { ...result, data: story } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
   const getStorySources = async (id: string): Promise<StoryRepositoryResult<RawArticle[]>> => { const result = await getStoryById(id); return { ...result, data: result.data?.articles ?? null }; };
   const getRelatedStories = async (id: string, limit = 4): Promise<StoryRepositoryResult<StoryCluster[]>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const story = result.data.find((item) => item.id === id); return story ? { ...result, data: relatedStories(result.data, story, limit) } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
-  const getStoryArchive = async (page = 1, pageSize = 12): Promise<StoryRepositoryResult<StoryArchivePage>> => {
+  const getStoryArchive = async (page = 1, pageSize = 12, filters: StoryArchiveFilters = {}): Promise<StoryRepositoryResult<StoryArchivePage>> => {
     try {
-      const archive = await readArchive(page, pageSize);
+      const archive = await readArchive(page, pageSize, filters);
       return { status: archive.stories.length ? "success" : "empty", data: archive, meta: { source: "supabase", cached: true, stale: false, lastUpdatedAt: archive.stories[0]?.updatedAt ?? null } };
     } catch (error) {
       if (error instanceof ConfigurationError) return { status: "configuration_required", data: null, meta: { source: "supabase", cached: false, stale: false, lastUpdatedAt: null }, error: { code: error.code, message: error.message } };

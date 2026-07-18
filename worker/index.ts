@@ -106,8 +106,9 @@ const worker = {
     }
     globalThis.__SPORTPEEK_WORKERS_AI__ = runtimeEnv.AI;
 
-    // The trigger runs every minute. Alternate the two isolated phases to stay
-    // within Cloudflare Workers' subrequest limit without starving either one.
+    // The trigger runs every minute. Rotate isolated phases to stay within
+    // Cloudflare Workers' subrequest limit without starving RSS, clustering, or
+    // the AI summary backlog.
     const scheduledAt = controller.scheduledTime ?? Date.now();
     const task = scheduledPipelineTask(scheduledAt);
     const run = async () => {
@@ -117,9 +118,8 @@ const worker = {
           console.log("[Cron] Running RSS sync...");
           const rssSummary = await syncRss({ maxSources: 6 });
           console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
-        } else {
-          // Odd invocation: finish one new story with AI, then translate one
-          // older unprocessed story (international first) on every run.
+        } else if (task === "stories") {
+          // Odd invocation: process one small, atomically-leased story batch.
           console.log("[Cron] Running story processing...");
           const storySummary = await processStories(
             scheduledStoryProcessingOptions(scheduledAt),
@@ -128,8 +128,15 @@ const worker = {
             "[Cron] Story processing result:",
             JSON.stringify(storySummary),
           );
+        } else {
+          // Dedicated backfill phase: keep pending stories receiving remote AI
+          // summaries even when fresh RSS never fully drains.
+          console.log("[Cron] Running AI summary backfill...");
           const aiBackfill = await summarizePersistedStories({ limit: 1 });
-          console.log("[Cron] AI backfill result:", JSON.stringify(aiBackfill));
+          console.log(
+            "[Cron] AI backfill result:",
+            JSON.stringify(aiBackfill),
+          );
         }
       } catch (error) {
         console.error("[Cron] Error running scheduled task:", error);

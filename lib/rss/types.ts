@@ -11,5 +11,9 @@ export type RssSource = z.infer<typeof rssSourceSchema>;
 export const parsedRssArticleSchema = z.object({
   externalId: z.string().min(1).max(1000), originalUrl: z.string().url(), canonicalUrl: z.string().url(), title: z.string().min(1).max(500), normalizedTitle: z.string().min(1),
   excerpt: z.string().max(1000), author: z.string().max(200).nullable(), imageUrl: z.string().url().nullable(), publishedAt: z.string().datetime(), language: z.enum(["vi", "en"]), rawMetadata: z.record(z.string(), z.unknown()),
+  fullContent: z.string().max(100_000).nullable().default(null),
+  contentStatus: z.enum(["source_only", "available"]).default("source_only"),
+  contentSource: z.enum(["rss"]).nullable().default(null),
+  contentWordCount: z.number().int().nonnegative().default(0),
 });
 export type ParsedRssArticle = z.infer<typeof parsedRssArticleSchema>;

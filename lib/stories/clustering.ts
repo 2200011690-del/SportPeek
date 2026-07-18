@@ -1,6 +1,17 @@
 import { duplicateSimilarity, normalizeTitle } from "@/lib/ingestion/utils";
 
 export type StoryEventType =
+  | "announcement"
+  | "award"
+  | "breaking"
+  | "conflict"
+  | "decision"
+  | "developing"
+  | "disaster"
+  | "economy"
+  | "election"
+  | "investigation"
+  | "legal"
   | "transfer"
   | "injury"
   | "recovery"
@@ -39,46 +50,366 @@ export const CLUSTER_THRESHOLDS = Object.freeze({
 });
 
 const STOP_WORDS = new Set([
-  "after", "against", "before", "breaking", "could", "from", "latest", "news", "report", "reportedly", "says", "said", "that", "this", "with",
-  "bong", "cau", "chuyen", "choi", "cung", "dang", "danh", "duoc", "giua", "hom", "khien", "moi", "nhan", "nhung", "phat", "quan", "sau", "theo", "thang", "thua", "tien", "tran", "truoc", "tuyen", "viec",
+  "after",
+  "against",
+  "and",
+  "are",
+  "amid",
+  "before",
+  "been",
+  "being",
+  "breaking",
+  "but",
+  "could",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "her",
+  "here",
+  "him",
+  "his",
+  "how",
+  "into",
+  "its",
+  "latest",
+  "live",
+  "more",
+  "new",
+  "news",
+  "not",
+  "now",
+  "official",
+  "officials",
+  "over",
+  "president",
+  "report",
+  "reported",
+  "reportedly",
+  "says",
+  "said",
+  "she",
+  "that",
+  "the",
+  "their",
+  "them",
+  "there",
+  "these",
+  "they",
+  "those",
+  "this",
+  "update",
+  "updates",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "who",
+  "why",
+  "will",
+  "with",
+  "you",
+  "your",
+  "ba",
+  "bong",
+  "cac",
+  "cau",
+  "chuyen",
+  "cho",
+  "choi",
+  "cua",
+  "cung",
+  "dang",
+  "danh",
+  "den",
+  "duoc",
+  "giua",
+  "hom",
+  "khien",
+  "la",
+  "moi",
+  "mot",
+  "nay",
+  "nhan",
+  "nhung",
+  "noi",
+  "ong",
+  "phat",
+  "quan",
+  "sau",
+  "se",
+  "tai",
+  "theo",
+  "thang",
+  "thua",
+  "tien",
+  "tran",
+  "tren",
+  "trong",
+  "truoc",
+  "tu",
+  "tuyen",
+  "va",
+  "ve",
+  "viec",
+  "voi",
 ]);
 
 const EVENT_WORDS = new Set([
-  "bid", "beat", "champion", "contract", "draw", "final", "full", "injury", "lineup", "match", "preview", "result", "return", "sign", "signing", "transfer", "win",
-  "chien", "chung", "dich", "dinh", "doi", "dong", "gap", "gia", "hop", "ket", "hoi", "phuc", "qua", "thang", "thuong", "tro", "vo",
+  "ai",
+  "announce",
+  "approve",
+  "arrest",
+  "attack",
+  "award",
+  "bid",
+  "beat",
+  "breaking",
+  "champion",
+  "conflict",
+  "contract",
+  "decision",
+  "developing",
+  "draw",
+  "election",
+  "final",
+  "full",
+  "injury",
+  "investigation",
+  "launch",
+  "legal",
+  "lineup",
+  "match",
+  "preview",
+  "result",
+  "return",
+  "sign",
+  "signing",
+  "transfer",
+  "vote",
+  "win",
+  "chien",
+  "chung",
+  "dich",
+  "dinh",
+  "doi",
+  "dong",
+  "gap",
+  "gia",
+  "hop",
+  "ket",
+  "hoi",
+  "phuc",
+  "qua",
+  "thang",
+  "thuong",
+  "tro",
+  "vo",
 ]);
 
-const AGENCY_PATTERN = /\b(reuters|associated press|\bap\b|agence france presse|\bafp\b|ttxvn|thong tan xa viet nam|vietnam news agency|\bvna\b)\b/i;
+const SIGNIFICANT_SHORT_TOKENS = new Set(["ai", "eu", "g7", "g20", "uk", "un"]);
+const GENERIC_EVENT_PHASES = new Set<StoryEventType>([
+  "news",
+  "breaking",
+  "developing",
+]);
+const GEO_TOKENS = new Set([
+  "china",
+  "eu",
+  "gaza",
+  "hanoi",
+  "hochiminh",
+  "india",
+  "iran",
+  "iraq",
+  "israel",
+  "japan",
+  "northkorea",
+  "palestine",
+  "russia",
+  "southkorea",
+  "taiwan",
+  "uk",
+  "ukraine",
+  "usa",
+  "vietnam",
+]);
+
+const CANONICAL_PHRASES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\b(?:donald j trump|donald trump)\b/g, "trump"],
+  [/\b(?:joseph r biden|joe biden)\b/g, "biden"],
+  [
+    /\b(?:united states of america|united states|u s a|u s|hoa ky|nuoc my)\b/g,
+    "usa",
+  ],
+  [/\b(?:viet nam|vietnamese)\b/g, "vietnam"],
+  [/\b(?:people s republic of china|trung quoc|chinese)\b/g, "china"],
+  [/\b(?:nhat ban|japanese)\b/g, "japan"],
+  [/\b(?:south korea|han quoc)\b/g, "southkorea"],
+  [/\b(?:north korea|trieu tien)\b/g, "northkorea"],
+  [/\b(?:united kingdom|great britain|vuong quoc anh)\b/g, "uk"],
+  [/\b(?:european union|lien minh chau au)\b/g, "eu"],
+  [/\b(?:united nations|lien hop quoc)\b/g, "un"],
+  [/\b(?:world health organization|to chuc y te the gioi)\b/g, "who"],
+  [/\b(?:federal reserve|cuc du tru lien bang)\b/g, "fed"],
+  [/\b(?:ho chi minh city|thanh pho ho chi minh|tp hcm)\b/g, "hochiminh"],
+  [/\b(?:ha noi|hanoi)\b/g, "hanoi"],
+  [/\b(?:artificial intelligence|tri tue nhan tao)\b/g, "ai"],
+  [
+    /\b(?:announc(?:e|es|ed|ement|ements|ing)|unveil(?:s|ed|ing)?|cong bo|thong bao)\b/g,
+    "announce",
+  ],
+  [/\b(?:launch(?:es|ed|ing)?|ra mat)\b/g, "launch"],
+  [/\b(?:approv(?:e|es|ed|al)|thong qua|phe duyet)\b/g, "approve"],
+  [/\b(?:tariffs?|thue quan|muc thue|thue)\b/g, "tariff"],
+  [/\b(?:goods|hang hoa)\b/g, "goods"],
+  [/\b(?:earthquakes?|dong dat)\b/g, "earthquake"],
+  [/\b(?:tsunamis?|song than)\b/g, "tsunami"],
+  [/\b(?:floods?|flooding|lu lut)\b/g, "flood"],
+  [/\b(?:wildfires?|chay rung)\b/g, "wildfire"],
+  [/\b(?:cease[ -]?fire|ngung ban)\b/g, "ceasefire"],
+  [/\b(?:attacks?|attacked|attacking|tan cong)\b/g, "attack"],
+  [/\b(?:elections?|bau cu)\b/g, "election"],
+  [/\b(?:vot(?:e|es|ed|ing)|bo phieu)\b/g, "vote"],
+  [/\b(?:investigat(?:e|es|ed|ing|ion)|probes?|dieu tra)\b/g, "investigation"],
+  [/\b(?:lawsuits?|khoi kien)\b/g, "lawsuit"],
+  [/\b(?:courts?|toa an)\b/g, "court"],
+  [/\b(?:arrest(?:s|ed|ing)?|bat giu)\b/g, "arrest"],
+  [/\b(?:interest rates?|lai suat)\b/g, "interestrate"],
+  [/\b(?:inflation|lam phat)\b/g, "inflation"],
+  [/\b(?:layoffs?|job cuts?|sa thai)\b/g, "layoff"],
+  [/\b(?:issues? (?:a )?warning|ban canh bao|canh bao)\b/g, "warning"],
+];
+const CANONICAL_CACHE_LIMIT = 2_048;
+const canonicalTextCache = new Map<string, string>();
+
+const AGENCY_PATTERN =
+  /\b(reuters|associated press|\bap\b|agence france presse|\bafp\b|ttxvn|thong tan xa viet nam|vietnam news agency|\bvna\b)\b/i;
 
 function normalized(value: string): string {
-  return normalizeTitle(value);
+  // `normalizeTitle` strips non-ASCII letters but does not decompose đ/Đ.
+  // Preserve Vietnamese words such as "động đất" and "đội hình" first.
+  return normalizeTitle(value.replace(/[đĐ]/g, "d"));
+}
+
+function canonicalized(value: string): string {
+  const cached = canonicalTextCache.get(value);
+  if (cached !== undefined) return cached;
+  let text = normalized(value);
+  for (const [pattern, replacement] of CANONICAL_PHRASES)
+    text = text.replace(pattern, replacement);
+  text = text.replace(/\s+/g, " ").trim();
+  if (canonicalTextCache.size >= CANONICAL_CACHE_LIMIT) {
+    const oldest = canonicalTextCache.keys().next().value;
+    if (oldest !== undefined) canonicalTextCache.delete(oldest);
+  }
+  canonicalTextCache.set(value, text);
+  return text;
 }
 
 function normalizedEventText(value: string): string {
   // `normalizeTitle` intentionally removes Vietnamese accents. Mask the month
   // word first so `tháng` cannot collapse to `thang` and be mistaken for the
   // result verb `thắng`.
-  return normalized(value.normalize("NFC").replace(/\btháng\b/giu, " "));
+  return canonicalized(value.normalize("NFC").replace(/\btháng\b/giu, " "));
 }
 
 export function storyEventType(value: string): StoryEventType {
   const text = normalizedEventText(value);
-  if (/\b(dinh chinh|correction|corrects?|clarification)\b/.test(text)) return "correction";
-  if (/\b(tro lai|hoi phuc|tai xuat|return(?:s|ed)?|fit again|back in training)\b/.test(text)) return "recovery";
-  if (/\b(chan thuong|injur(?:y|ed)|vang mat|ruled out|miss(?:es|ing)? the match)\b/.test(text)) return "injury";
-  if (/\b(chuyen nhuong|transfer|ky hop dong|sign(?:s|ed|ing)?|gia nhap|bid for|deal for|medical)\b/.test(text)) return "transfer";
-  if (/\b(ket qua|danh bai|chien thang|thang|thua|hoa|draw|wins?|won|beats?|full time|vo dich|champion)\b/.test(text)) return "result";
-  if (/\b(doi hinh|lineup|line up|starting xi|xuat phat)\b/.test(text)) return "lineup";
+  if (/\b(dinh chinh|correction|corrects?|clarification)\b/.test(text))
+    return "correction";
+  if (
+    /\b(earthquake|tsunami|flood|wildfire|bao lon|sieu bao|storm|hurricane|typhoon|tornado|landslide|sat lo|volcan(?:o|ic)|phun trao|tham hoa|disaster)\b/.test(
+      text,
+    )
+  )
+    return "disaster";
+  if (
+    /\b(attack|ceasefire|war|chien tranh|chien su|xung dot|giao tranh|missiles?|ten lua|airstrikes?|khong kich|invasion|xam luoc)\b/.test(
+      text,
+    )
+  )
+    return "conflict";
+  if (
+    /\b(election|vote|elected|presidential race|wins? (?:the )?presidency|dac cu)\b/.test(
+      text,
+    )
+  )
+    return "election";
+  if (
+    /\b(court|lawsuit|arrest|charged?|convict(?:s|ed|ion)?|sentenc(?:e|es|ed|ing)|trial|indict(?:s|ed|ment)?|phien toa|truy to|ket an|linh an)\b/.test(
+      text,
+    )
+  )
+    return "legal";
+  if (/\b(investigation|thanh tra|kiem tra|xem xet sai pham)\b/.test(text))
+    return "investigation";
+  if (
+    /\b(approve|ban hanh|sac lenh|nghi dinh|dao luat|du luat|chinh sach moi|policy decision|new policy|regulation)\b/.test(
+      text,
+    )
+  )
+    return "decision";
+  if (
+    /\b(interestrate|inflation|gdp|central bank|ngan hang trung uong|unemployment|that nghiep|jobs report|bao cao viec lam|economic data|so lieu kinh te)\b/.test(
+      text,
+    )
+  )
+    return "economy";
+  if (
+    /\b(award|awards|prize|oscar|grammy|nobel|gianh giai|trao giai)\b/.test(
+      text,
+    )
+  )
+    return "award";
+  if (
+    /\b(tro lai|hoi phuc|tai xuat|return(?:s|ed)?|fit again|back in training)\b/.test(
+      text,
+    )
+  )
+    return "recovery";
+  if (
+    /\b(chan thuong|injur(?:y|ed)|vang mat|ruled out|miss(?:es|ing)? the match)\b/.test(
+      text,
+    )
+  )
+    return "injury";
+  if (
+    /\b(chuyen nhuong|transfer|ky hop dong|sign(?:s|ed|ing)?|gia nhap|bid for|deal for|medical)\b/.test(
+      text,
+    )
+  )
+    return "transfer";
+  if (
+    /\b(ket qua|danh bai|chien thang|thang|thua|hoa|draw|wins?|won|beats?|full time|vo dich|champion)\b/.test(
+      text,
+    )
+  )
+    return "result";
+  if (/\b(doi hinh|lineup|line up|starting xi|xuat phat)\b/.test(text))
+    return "lineup";
   if (/\b(truoc tran|preview|nhan dinh|du doan)\b/.test(text)) return "preview";
-  if (/\b(phat bieu|noi gi|says?|said|quote|tuyen bo)\b/.test(text)) return "quote";
+  if (/\b(announce|launch)\b/.test(text)) return "announcement";
+  if (/\b(phat bieu|noi gi|says?|said|quote|tuyen bo)\b/.test(text))
+    return "quote";
+  if (/\b(dang cap nhat|developing story|developing)\b/.test(text))
+    return "developing";
+  if (/\b(tin nong|khan cap|breaking)\b/.test(text)) return "breaking";
   return "news";
 }
 
 function tokens(value: string, includeEventWords = false): Set<string> {
   return new Set(
-    normalized(value)
+    canonicalized(value)
       .split(" ")
-      .filter((token) => token.length >= 3)
+      .filter(
+        (token) =>
+          token.length >= 3 ||
+          SIGNIFICANT_SHORT_TOKENS.has(token) ||
+          (includeEventWords && /^\d+$/.test(token)),
+      )
       .filter((token) => !STOP_WORDS.has(token))
       .filter((token) => includeEventWords || !EVENT_WORDS.has(token)),
   );
@@ -94,11 +425,17 @@ function commonTokenCount(left: Set<string>, right: Set<string>): number {
   return [...left].filter((token) => right.has(token)).length;
 }
 
-function eventTypesCompatible(left: StoryEventType, right: StoryEventType): boolean {
+function eventTypesCompatible(
+  left: StoryEventType,
+  right: StoryEventType,
+): boolean {
   if (left === right) return true;
-  // A generic headline may be reviewed against a typed event, but a typed
-  // event is never allowed to bridge two incompatible phases of a story.
-  return left === "news" || right === "news";
+  if (GENERIC_EVENT_PHASES.has(left) || GENERIC_EVENT_PHASES.has(right))
+    return true;
+  const pair = [left, right].sort().join(":");
+  // Publishers often describe the same official act as an announcement,
+  // decision or quotation. Other typed events stay isolated by default.
+  return pair === "announcement:decision" || pair === "announcement:quote";
 }
 
 function validTime(value: string): number | null {
@@ -108,41 +445,84 @@ function validTime(value: string): number | null {
 
 function timeWindowHours(type: StoryEventType): number {
   switch (type) {
-    case "transfer": return 14 * 24;
-    case "correction": return 7 * 24;
+    case "transfer":
+      return 14 * 24;
+    case "correction":
+      return 7 * 24;
+    case "investigation":
+    case "legal":
+      return 5 * 24;
     case "injury":
-    case "recovery": return 4 * 24;
+    case "recovery":
+      return 4 * 24;
+    case "announcement":
+    case "award":
+    case "decision":
+    case "disaster":
+    case "election":
+      return 72;
+    case "conflict":
+      return 36;
+    case "economy":
+      return 30;
     case "preview":
     case "lineup":
-    case "result": return 36;
-    case "quote": return 48;
-    default: return 72;
+    case "result":
+      return 36;
+    case "quote":
+      return 36;
+    case "breaking":
+      return 24;
+    default:
+      return 48;
   }
 }
 
 function scoreFacts(value: string): string[] {
-  const text = value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  return [...text.matchAll(/\b(\d{1,2})\s*(?:-|:)\s*(\d{1,2})\b/g)].map((match) => `${Number(match[1])}-${Number(match[2])}`);
+  const text = value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return [...text.matchAll(/\b(\d{1,2})\s*(?:-|:)\s*(\d{1,2})\b/g)].map(
+    (match) => `${Number(match[1])}-${Number(match[2])}`,
+  );
 }
 
 function entityTokenSequence(value: string): string[] {
-  return normalized(value)
+  return canonicalized(value)
     .split(" ")
-    .filter((token) => token.length >= 3)
+    .filter((token) => token.length >= 3 || SIGNIFICANT_SHORT_TOKENS.has(token))
     .filter((token) => !STOP_WORDS.has(token) && !EVENT_WORDS.has(token));
 }
 
-function participantsAreReversed(left: ClusterableArticle, right: ClusterableArticle): boolean {
+function geographyTokens(value: string): Set<string> {
+  return new Set(
+    canonicalized(value)
+      .split(" ")
+      .filter((token) => GEO_TOKENS.has(token)),
+  );
+}
+
+function participantsAreReversed(
+  left: ClusterableArticle,
+  right: ClusterableArticle,
+): boolean {
   const leftSequence = [...new Set(entityTokenSequence(left.title))];
   const rightSequence = [...new Set(entityTokenSequence(right.title))];
-  const rightPositions = new Map(rightSequence.map((token, index) => [token, index]));
+  const rightPositions = new Map(
+    rightSequence.map((token, index) => [token, index]),
+  );
   const shared = leftSequence.filter((token) => rightPositions.has(token));
   if (shared.length < 2) return false;
 
   let sameOrderPairs = 0;
   let reversedOrderPairs = 0;
   for (let index = 0; index < shared.length; index += 1) {
-    for (let otherIndex = index + 1; otherIndex < shared.length; otherIndex += 1) {
+    for (
+      let otherIndex = index + 1;
+      otherIndex < shared.length;
+      otherIndex += 1
+    ) {
       const firstPosition = rightPositions.get(shared[index]);
       const secondPosition = rightPositions.get(shared[otherIndex]);
       if (firstPosition === undefined || secondPosition === undefined) continue;
@@ -158,67 +538,162 @@ function reverseScore(score: string): string {
   return `${away}-${home}`;
 }
 
-function hasConflictingScore(left: ClusterableArticle, right: ClusterableArticle, type: StoryEventType): boolean {
+function hasConflictingScore(
+  left: ClusterableArticle,
+  right: ClusterableArticle,
+  type: StoryEventType,
+): boolean {
   if (type !== "result") return false;
   const leftScores = scoreFacts(`${left.title} ${left.excerpt}`);
   const rightScores = scoreFacts(`${right.title} ${right.excerpt}`);
   if (!leftScores.length || !rightScores.length) return false;
   if (leftScores.some((score) => rightScores.includes(score))) return false;
-  const mirroredScore = leftScores.some((score) => rightScores.includes(reverseScore(score)));
+  const mirroredScore = leftScores.some((score) =>
+    rightScores.includes(reverseScore(score)),
+  );
   if (mirroredScore && participantsAreReversed(left, right)) return false;
   return true;
 }
 
-function sameCanonicalUrl(left: ClusterableArticle, right: ClusterableArticle): boolean {
+function sameCanonicalUrl(
+  left: ClusterableArticle,
+  right: ClusterableArticle,
+): boolean {
   const a = left.canonicalUrl ?? left.originalUrl;
   const b = right.canonicalUrl ?? right.originalUrl;
   if (!a || !b) return false;
   try {
-    const first = new URL(a); const second = new URL(b);
-    first.hash = ""; second.hash = "";
+    const first = new URL(a);
+    const second = new URL(b);
+    first.hash = "";
+    second.hash = "";
     return first.toString() === second.toString();
   } catch {
     return false;
   }
 }
 
-function evidenceForPair(article: ClusterableArticle, other: ClusterableArticle) {
+function evidenceForPair(
+  article: ClusterableArticle,
+  other: ClusterableArticle,
+) {
   const articleType = storyEventType(`${article.title} ${article.excerpt}`);
   const otherType = storyEventType(`${other.title} ${other.excerpt}`);
   const articleTime = validTime(article.publishedAt);
   const otherTime = validTime(other.publishedAt);
-  if (articleTime === null || otherTime === null) return { score: 0, compatible: false, reason: "invalid_published_time" };
+  if (articleTime === null || otherTime === null)
+    return { score: 0, compatible: false, reason: "invalid_published_time" };
 
   const hours = Math.abs(articleTime - otherTime) / 3_600_000;
-  const maxHours = Math.max(timeWindowHours(articleType), timeWindowHours(otherType));
-  if (hours > maxHours) return { score: 0, compatible: false, reason: "outside_event_time_window" };
+  const maxHours = Math.max(
+    timeWindowHours(articleType),
+    timeWindowHours(otherType),
+  );
+  if (hours > maxHours)
+    return { score: 0, compatible: false, reason: "outside_event_time_window" };
 
-  if (!eventTypesCompatible(articleType, otherType)) return { score: 0, compatible: false, reason: "event_phase_conflict" };
-  if (hasConflictingScore(article, other, articleType === "result" ? articleType : otherType)) return { score: 0, compatible: false, reason: "score_fact_conflict" };
+  if (!eventTypesCompatible(articleType, otherType))
+    return { score: 0, compatible: false, reason: "event_phase_conflict" };
+  if (
+    hasConflictingScore(
+      article,
+      other,
+      articleType === "result" ? articleType : otherType,
+    )
+  )
+    return { score: 0, compatible: false, reason: "score_fact_conflict" };
 
-  if (sameCanonicalUrl(article, other)) return { score: 1, compatible: true, reason: "same_canonical_url" };
+  if (sameCanonicalUrl(article, other))
+    return { score: 1, compatible: true, reason: "same_canonical_url" };
 
-  const titleSimilarity = duplicateSimilarity(article.title, other.title);
+  const semanticTitleSimilarity = overlapCoefficient(
+    tokens(article.title, true),
+    tokens(other.title, true),
+  );
+  const titleSimilarity = Math.max(
+    duplicateSimilarity(article.title, other.title),
+    duplicateSimilarity(
+      canonicalized(article.title),
+      canonicalized(other.title),
+    ),
+    semanticTitleSimilarity,
+  );
   const leftEntities = tokens(article.title);
   const rightEntities = tokens(other.title);
   const sharedEntities = commonTokenCount(leftEntities, rightEntities);
   const entityOverlap = overlapCoefficient(leftEntities, rightEntities);
-  const bodyOverlap = overlapCoefficient(tokens(`${article.title} ${article.excerpt}`, true), tokens(`${other.title} ${other.excerpt}`, true));
+  const bodyOverlap = overlapCoefficient(
+    tokens(`${article.title} ${article.excerpt}`, true),
+    tokens(`${other.title} ${other.excerpt}`, true),
+  );
   const sameTypedEvent = articleType === otherType;
 
-  // One shared name is not sufficient for result and transfer stories: it can
-  // otherwise merge two matches involving Liverpool or two bids for one player.
-  const entityFloor = articleType === "result" || articleType === "transfer" || otherType === "result" || otherType === "transfer" ? 2 : 1;
-  const exactishTitle = titleSimilarity >= CLUSTER_THRESHOLDS.nearDuplicate;
-  if (!exactishTitle && sharedEntities < entityFloor) return { score: 0, compatible: false, reason: "insufficient_shared_entities" };
+  // Headlines such as "Here's the latest" carry no event identity. Identical
+  // boilerplate must not outweigh unrelated article descriptions; require the
+  // excerpts themselves to share multiple meaningful terms before review/merge.
+  const lowInformationTitle =
+    leftEntities.size < 2 || rightEntities.size < 2;
+  if (lowInformationTitle) {
+    const leftContext = tokens(article.excerpt, true);
+    const rightContext = tokens(other.excerpt, true);
+    const sharedContext = commonTokenCount(leftContext, rightContext);
+    const contextOverlap = overlapCoefficient(leftContext, rightContext);
+    if (sharedContext < 2 || contextOverlap < 0.3)
+      return {
+        score: 0,
+        compatible: false,
+        reason: "generic_title_without_shared_context",
+      };
+  }
 
-  // Generic `news` can match a typed event only when the titles are already
-  // strong near-duplicates; this prevents it acting as a transitive bridge.
-  if (!sameTypedEvent && titleSimilarity < 0.72) return { score: 0, compatible: false, reason: "generic_event_bridge_blocked" };
+  // One shared name is never sufficient: it can otherwise merge separate
+  // stories about the same politician, company, team or country.
+  const entityFloor = 2;
+  const exactishTitle = titleSimilarity >= CLUSTER_THRESHOLDS.nearDuplicate;
+  if (!exactishTitle && sharedEntities < entityFloor)
+    return {
+      score: 0,
+      compatible: false,
+      reason: "insufficient_shared_entities",
+    };
+
+  // A generic phase can follow a typed event, while two compatible typed labels
+  // need a little less title identity (for example "announces" vs "approves").
+  if (!sameTypedEvent) {
+    const bridgeThreshold =
+      GENERIC_EVENT_PHASES.has(articleType) ||
+      GENERIC_EVENT_PHASES.has(otherType)
+        ? 0.64
+        : 0.58;
+    if (titleSimilarity < bridgeThreshold)
+      return {
+        score: 0,
+        compatible: false,
+        reason: "event_type_bridge_blocked",
+      };
+  }
+
+  const leftGeography = geographyTokens(`${article.title} ${article.excerpt}`);
+  const rightGeography = geographyTokens(`${other.title} ${other.excerpt}`);
+  const sharedGeography = commonTokenCount(leftGeography, rightGeography);
+  if (leftGeography.size && rightGeography.size && sharedGeography === 0)
+    return { score: 0, compatible: false, reason: "geography_conflict" };
+  const divergentGeography =
+    sharedGeography > 0 &&
+    [...leftGeography].some((token) => !rightGeography.has(token)) &&
+    [...rightGeography].some((token) => !leftGeography.has(token));
 
   const timeSignal = Math.max(0, 1 - hours / maxHours);
-  let score = titleSimilarity * 0.48 + entityOverlap * 0.25 + bodyOverlap * 0.17 + timeSignal * 0.07 + (sameTypedEvent ? 0.03 : 0);
-  if (article.sourceId === other.sourceId && titleSimilarity < 0.8) score -= 0.1;
+  let score =
+    titleSimilarity * 0.42 +
+    entityOverlap * 0.28 +
+    bodyOverlap * 0.17 +
+    timeSignal * 0.07 +
+    (sameTypedEvent ? 0.03 : 0) +
+    (sharedEntities >= 3 ? 0.03 : 0);
+  if (divergentGeography) score -= 0.12;
+  if (article.sourceId === other.sourceId && titleSimilarity < 0.8)
+    score -= 0.1;
   return {
     score: Math.max(0, Math.min(1, score)),
     compatible: true,
@@ -226,11 +701,15 @@ function evidenceForPair(article: ClusterableArticle, other: ClusterableArticle)
   };
 }
 
-export function clusterSimilarity(article: ClusterableArticle, candidate: ClusterCandidate): { score: number; compatible: boolean; reason: string } {
+export function clusterSimilarity(
+  article: ClusterableArticle,
+  candidate: ClusterCandidate,
+): { score: number; compatible: boolean; reason: string } {
   let best = { score: 0, compatible: false, reason: "empty_candidate" };
   for (const other of candidate.articles) {
     const result = evidenceForPair(article, other);
-    if (result.compatible && (!best.compatible || result.score > best.score)) best = result;
+    if (result.compatible && (!best.compatible || result.score > best.score))
+      best = result;
     else if (!best.compatible && result.score >= best.score) best = result;
   }
   return best;
@@ -238,10 +717,17 @@ export function clusterSimilarity(article: ClusterableArticle, candidate: Cluste
 
 function hostname(value: string | null | undefined): string | null {
   if (!value) return null;
-  try { return new URL(value).hostname.toLowerCase().replace(/^(?:www\.|m\.)/, ""); } catch { return null; }
+  try {
+    return new URL(value).hostname.toLowerCase().replace(/^(?:www\.|m\.)/, "");
+  } catch {
+    return null;
+  }
 }
 
-function metadataString(metadata: Record<string, unknown> | undefined, keys: string[]): string | null {
+function metadataString(
+  metadata: Record<string, unknown> | undefined,
+  keys: string[],
+): string | null {
   if (!metadata) return null;
   for (const key of keys) {
     const value = metadata[key];
@@ -251,7 +737,15 @@ function metadataString(metadata: Record<string, unknown> | undefined, keys: str
 }
 
 function agencyName(article: ClusterableArticle): string | null {
-  const explicit = metadataString(article.rawMetadata, ["originalSource", "original_source", "syndicatedFrom", "syndicated_from", "wireSource", "wire_source", "agency"]);
+  const explicit = metadataString(article.rawMetadata, [
+    "originalSource",
+    "original_source",
+    "syndicatedFrom",
+    "syndicated_from",
+    "wireSource",
+    "wire_source",
+    "agency",
+  ]);
   const value = explicit ?? article.author ?? article.sourceName ?? "";
   const match = value.match(AGENCY_PATTERN);
   return match ? normalized(match[0]) : explicit ? normalized(explicit) : null;
@@ -267,40 +761,89 @@ export function analyzeSourceIndependence(articles: ClusterableArticle[]): {
   syndicatedArticleIds: Set<string>;
   groupByArticleId: Map<string, string>;
 } {
-  const syndicatedArticleIds = new Set(articles.filter((article) => article.isSyndicated).map((article) => article.id));
+  const syndicatedArticleIds = new Set(
+    articles
+      .filter((article) => article.isSyndicated)
+      .map((article) => article.id),
+  );
   const groupByArticleId = new Map<string, string>();
 
   for (const article of articles) {
     const agency = agencyName(article);
-    const publisher = hostname(article.canonicalUrl ?? article.originalUrl) ?? normalized(article.sourceName ?? article.sourceId);
-    const sourceLooksLikeAgency = agency ? normalized(article.sourceName ?? "").includes(agency) : false;
+    const publisher =
+      hostname(article.canonicalUrl ?? article.originalUrl) ??
+      normalized(article.sourceName ?? article.sourceId);
+    const sourceLooksLikeAgency = agency
+      ? normalized(article.sourceName ?? "").includes(agency)
+      : false;
     if (agency) {
       groupByArticleId.set(article.id, `agency:${agency}`);
       if (!sourceLooksLikeAgency) syndicatedArticleIds.add(article.id);
     } else {
-      groupByArticleId.set(article.id, `publisher:${publisher || article.sourceId}`);
+      groupByArticleId.set(
+        article.id,
+        `publisher:${publisher || article.sourceId}`,
+      );
     }
   }
 
-  const ordered = [...articles].sort((a, b) => (validTime(a.publishedAt) ?? 0) - (validTime(b.publishedAt) ?? 0));
+  const ordered = [...articles].sort(
+    (a, b) => (validTime(a.publishedAt) ?? 0) - (validTime(b.publishedAt) ?? 0),
+  );
   for (let index = 0; index < ordered.length; index += 1) {
     const primary = ordered[index];
-    for (let otherIndex = index + 1; otherIndex < ordered.length; otherIndex += 1) {
+    for (
+      let otherIndex = index + 1;
+      otherIndex < ordered.length;
+      otherIndex += 1
+    ) {
       const copy = ordered[otherIndex];
-      if (primary.sourceId === copy.sourceId || primary.isOfficial || copy.isOfficial) continue;
-      const hours = Math.abs((validTime(primary.publishedAt) ?? 0) - (validTime(copy.publishedAt) ?? 0)) / 3_600_000;
-      if (hours > 24 || primary.excerpt.length < 80 || copy.excerpt.length < 80) continue;
+      if (
+        primary.sourceId === copy.sourceId ||
+        primary.isOfficial ||
+        copy.isOfficial
+      )
+        continue;
+      const hours =
+        Math.abs(
+          (validTime(primary.publishedAt) ?? 0) -
+            (validTime(copy.publishedAt) ?? 0),
+        ) / 3_600_000;
+      if (hours > 24 || primary.excerpt.length < 80 || copy.excerpt.length < 80)
+        continue;
       const titleSimilarity = duplicateSimilarity(primary.title, copy.title);
-      const excerptSimilarity = duplicateSimilarity(primary.excerpt, copy.excerpt);
-      if (titleSimilarity >= 0.82 && excerptSimilarity >= CLUSTER_THRESHOLDS.nearDuplicate) {
-        groupByArticleId.set(copy.id, groupByArticleId.get(primary.id) ?? `publisher:${primary.sourceId}`);
+      const excerptSimilarity = duplicateSimilarity(
+        primary.excerpt,
+        copy.excerpt,
+      );
+      if (
+        titleSimilarity >= 0.82 &&
+        excerptSimilarity >= CLUSTER_THRESHOLDS.nearDuplicate
+      ) {
+        groupByArticleId.set(
+          copy.id,
+          groupByArticleId.get(primary.id) ?? `publisher:${primary.sourceId}`,
+        );
         syndicatedArticleIds.add(copy.id);
       }
     }
   }
 
-  const independentArticles = articles.filter((article) => !syndicatedArticleIds.has(article.id));
-  const counted = independentArticles.length ? independentArticles : articles.slice(0, 1);
-  const groups = new Set(counted.map((article) => groupByArticleId.get(article.id) ?? `publisher:${article.sourceId}`));
-  return { independentSourceCount: groups.size, syndicatedArticleIds, groupByArticleId };
+  const independentArticles = articles.filter(
+    (article) => !syndicatedArticleIds.has(article.id),
+  );
+  const counted = independentArticles.length
+    ? independentArticles
+    : articles.slice(0, 1);
+  const groups = new Set(
+    counted.map(
+      (article) =>
+        groupByArticleId.get(article.id) ?? `publisher:${article.sourceId}`,
+    ),
+  );
+  return {
+    independentSourceCount: groups.size,
+    syndicatedArticleIds,
+    groupByArticleId,
+  };
 }

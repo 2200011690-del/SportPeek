@@ -41,6 +41,30 @@ test("old stories remain addressable outside the latest feed and archive is pagi
   assert.equal(archive.data?.totalPages, 2);
 });
 
+test("archive filters the entire persisted collection before pagination", async () => {
+  const source = await createStoryRepository(async () => makeAggregatedNews(), { provider: "aggregated-rss" }).getStoryFeed();
+  assert.equal(source.data?.length, 2);
+  const science = { ...source.data[0], title: "Kính thiên văn ghi nhận ngoại hành tinh", summary: "Dữ liệu khoa học mới", summaryLong: "Dữ liệu khoa học mới", category: "Khoa học", sourceNames: ["Nguồn A"], hotnessScore: 82 };
+  const economy = { ...source.data[1], title: "Thị trường tài chính hôm nay", summary: "Diễn biến kinh tế", summaryLong: "Diễn biến kinh tế", category: "Kinh tế", sourceNames: ["Nguồn B"], hotnessScore: 35 };
+  const repository = createPersistedStoryRepository(async () => ({
+    stories: [economy, science],
+    lastSyncAt: new Date().toISOString(),
+    sources: ["Nguồn A", "Nguồn B"],
+    aiStatus: { provider: "off", state: "off", translatedCount: 0 },
+  }));
+
+  const archive = await repository.getStoryArchive(1, 12, {
+    query: "ngoại hành tinh",
+    category: "Khoa học",
+    source: "Nguồn A",
+    minHotness: 70,
+  });
+
+  assert.equal(archive.status, "success");
+  assert.equal(archive.data?.total, 1);
+  assert.deepEqual(archive.data?.stories.map((story) => story.id), [science.id]);
+});
+
 test("latest feed sorts by material updates and ignores later duplicate-source observations", async () => {
   const source = await createStoryRepository(async () => makeAggregatedNews(), { provider: "aggregated-rss" }).getStoryFeed();
   assert.equal(source.data?.length, 2);
