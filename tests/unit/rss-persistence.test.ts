@@ -22,3 +22,10 @@ test("Atom normalization supports alternate links and stable source-scoped hashe
 test("RSS parser rejects entity declarations", () => {
   assert.throws(() => parseRssXml(`<!DOCTYPE x [<!ENTITY y "bad">]><rss><channel /></rss>`, { feedUrl: "https://example.com/rss", language: "vi" }), /không được hỗ trợ/);
 });
+
+test("general-news ingestion keeps sports beyond football", () => {
+  const xml = `<?xml version="1.0"?><rss><channel><item><title>Wimbledon công bố lịch thi đấu mới</title><link>https://example.com/tennis</link><guid>tennis-1</guid><description>Giải quần vợt cập nhật lịch thi đấu.</description><pubDate>Tue, 14 Jul 2026 09:00:00 GMT</pubDate><category>Thể thao</category></item></channel></rss>`;
+  const rows = parseRssXml(xml, { feedUrl: "https://example.com/rss", language: "vi" }, new Date("2026-07-14T10:00:00.000Z"));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].title, "Wimbledon công bố lịch thi đấu mới");
+});

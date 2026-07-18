@@ -2,7 +2,7 @@ import { ConfigurationError, ProviderError } from "@/lib/core/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getNotificationProvider } from "./index";
 
-export type TelegramNotificationType = "breaking_news" | "match_start" | "match_result" | "transfer" | "daily_digest";
+export type TelegramNotificationType = "breaking_news" | "world_news" | "vietnam_news" | "technology_news" | "economy_news" | "daily_digest";
 
 function minutes(value: string): number | null {
   const match = /^(\d{2}):(\d{2})/.exec(value); if (!match) return null; const hour = Number(match[1]); const minute = Number(match[2]); return hour <= 23 && minute <= 59 ? hour * 60 + minute : null;
@@ -16,7 +16,8 @@ export function isQuietTime(now: Date, timezone: string, start: string | null, e
 }
 
 export function preferenceAllows(type: TelegramNotificationType, row: Record<string, unknown>): boolean {
-  const key = type === "transfer" ? "transfer_news" : type; return row.telegram_enabled === true && row[key] === true;
+  const legacyKeys: Record<TelegramNotificationType, string> = { breaking_news: "breaking_news", world_news: "match_start", vietnam_news: "goal_alert", technology_news: "match_result", economy_news: "transfer_news", daily_digest: "daily_digest" };
+  return row.telegram_enabled === true && row[legacyKeys[type]] === true;
 }
 
 export async function sendTelegramNotification(input: { userId: string; type: TelegramNotificationType; referenceId: string; versionKey: string; message: string; now?: Date }) {
@@ -24,7 +25,7 @@ export async function sendTelegramNotification(input: { userId: string; type: Te
   const provider = getNotificationProvider(); if (!provider.configured) return { status: "configuration_required" as const };
   const [connection, preferences, profile] = await Promise.all([
     client.from("telegram_connections").select("telegram_chat_id,verified_at").eq("user_id", input.userId).maybeSingle(),
-    client.from("notification_preferences").select("breaking_news,match_start,match_result,transfer_news,daily_digest,telegram_enabled,quiet_hours_start,quiet_hours_end").eq("user_id", input.userId).maybeSingle(),
+    client.from("notification_preferences").select("breaking_news,match_start,goal_alert,match_result,transfer_news,daily_digest,telegram_enabled,quiet_hours_start,quiet_hours_end").eq("user_id", input.userId).maybeSingle(),
     client.from("profiles").select("timezone").eq("id", input.userId).maybeSingle(),
   ]);
   if (connection.error || preferences.error || profile.error) throw new ProviderError("Không thể đọc cấu hình Telegram.", "supabase");

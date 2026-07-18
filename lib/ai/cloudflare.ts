@@ -88,24 +88,6 @@ async function runStructured<T>(schema: z.ZodType<T>, jsonSchema: Record<string,
   return schema.parse(parseModelPayload(payload));
 }
 
-async function runText(system: string, input: unknown): Promise<string> {
-  const ai = globalThis.__SPORTPEEK_WORKERS_AI__;
-  if (!ai) throw new Error("Cloudflare Workers AI binding chưa khả dụng");
-  const payload = await ai.run(modelName(), {
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: JSON.stringify(input) },
-    ],
-    max_tokens: 700,
-    temperature: 0.15,
-  });
-  const response = payload && typeof payload === "object" && "response" in payload
-    ? (payload as { response: unknown }).response
-    : payload;
-  if (typeof response !== "string" || !response.trim()) throw new Error("Cloudflare Workers AI không trả về nội dung");
-  return response.trim();
-}
-
 const enrichmentJsonSchema: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -138,7 +120,7 @@ export async function enrichInternationalNewsWithCloudflare(articles: Array<{ id
     const result = await runStructured(
       enrichmentSchema,
       enrichmentJsonSchema,
-      "Bạn là biên tập viên thể thao trung lập. Phải trả đúng một item và giữ nguyên tuyệt đối trường id. Chỉ dùng dữ kiện trong metadata được cung cấp. Dịch tự nhiên, ngắn gọn sang tiếng Việt, giữ nguyên tên riêng, không suy đoán, không giật tít quá mức và không sao chép dài.",
+      "Bạn là biên tập viên tin tức trung lập của NewsPeek. Phải trả đúng một item và giữ nguyên tuyệt đối trường id. Chỉ dùng dữ kiện trong metadata được cung cấp. Dịch tự nhiên, ngắn gọn sang tiếng Việt, giữ nguyên tên riêng, không suy đoán, không giật tít quá mức và không sao chép dài.",
       { articles: [article] },
       900,
     );
@@ -148,7 +130,7 @@ export async function enrichInternationalNewsWithCloudflare(articles: Array<{ id
   }));
   const valid = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
   const failures = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-  if (failures.length) console.warn(`[SportPeek AI] ${failures.length}/${articles.length} article translations failed`);
+  if (failures.length) console.warn(`[NewsPeek AI] ${failures.length}/${articles.length} article translations failed`);
   if (!valid.length) {
     const reason = failures[0]?.reason;
     throw reason instanceof Error ? reason : new Error("Cloudflare AI không dịch được bài nào");
@@ -157,11 +139,12 @@ export async function enrichInternationalNewsWithCloudflare(articles: Array<{ id
 }
 
 const classificationSchema = z.object({
-  sport: z.string(),
-  competition: z.string().nullable(),
-  teams: z.array(z.string()),
-  players: z.array(z.string()),
+  category: z.string(),
   topics: z.array(z.string()),
+  people: z.array(z.string()),
+  organizations: z.array(z.string()),
+  locations: z.array(z.string()),
+  countries: z.array(z.string()),
   articleType: z.string(),
   language: z.string(),
 });
@@ -169,13 +152,14 @@ const classificationSchema = z.object({
 const classificationJsonSchema: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["sport", "competition", "teams", "players", "topics", "articleType", "language"],
+  required: ["category", "topics", "people", "organizations", "locations", "countries", "articleType", "language"],
   properties: {
-    sport: { type: "string" },
-    competition: { type: ["string", "null"] },
-    teams: { type: "array", items: { type: "string" } },
-    players: { type: "array", items: { type: "string" } },
+    category: { type: "string" },
     topics: { type: "array", items: { type: "string" } },
+    people: { type: "array", items: { type: "string" } },
+    organizations: { type: "array", items: { type: "string" } },
+    locations: { type: "array", items: { type: "string" } },
+    countries: { type: "array", items: { type: "string" } },
     articleType: { type: "string" },
     language: { type: "string" },
   },
@@ -185,7 +169,7 @@ export class CloudflareAIProvider implements AIProvider {
   readonly name = "cloudflare";
 
   classifyArticle(input: { title: string; excerpt: string }): Promise<ClassifiedArticle> {
-    return runStructured(classificationSchema, classificationJsonSchema, "Phân loại metadata bài thể thao. Không thêm thực thể không có trong đầu vào.", input, 900);
+    return runStructured(classificationSchema, classificationJsonSchema, "Phân loại metadata tin tức tổng quát. Chọn một chuyên mục phù hợp và không thêm thực thể không có trong đầu vào.", input, 900);
   }
 
   async summarizeCluster(input: { articles: Array<{ id: string; title: string; excerpt: string }> }): Promise<ClusterSummary> {
@@ -205,11 +189,11 @@ export class CloudflareAIProvider implements AIProvider {
 
   async extractEntities(input: { title: string; excerpt: string }) {
     const result = await this.classifyArticle(input);
-    return { teams: result.teams, players: result.players, competitions: result.competition ? [result.competition] : [] };
+    return { people: result.people, organizations: result.organizations, locations: result.locations, countries: result.countries };
   }
 
   evaluateClusterMatch(input: { article: ClusterArticleInput; candidate: ClusterArticleInput[] }) {
-    return runStructured(matchEvaluationSchema, z.toJSONSchema(matchEvaluationSchema) as Record<string, unknown>, "Đánh giá đúng cùng một sự kiện thể thao; không gộp preview với result, injury với recovery hoặc hai thương vụ khác nhau.", input, 900);
+    return runStructured(matchEvaluationSchema, z.toJSONSchema(matchEvaluationSchema) as Record<string, unknown>, "Đánh giá đúng cùng một sự kiện tin tức; không gộp hai sự kiện, hai thời điểm hoặc hai diễn biến khác nhau chỉ vì có chung thực thể.", input, 900);
   }
 
   generateTimeline(input: { articles: ClusterArticleInput[] }) {
@@ -229,11 +213,4 @@ export class CloudflareAIProvider implements AIProvider {
     return `${result.answer}${result.sourceArticleIds.length ? ` (Nguồn: ${result.sourceArticleIds.join(", ")})` : ""}`;
   }
 
-  createMatchPreview(input: Record<string, unknown>): Promise<string> {
-    return runText("Viết nhận định trước trận ngắn bằng tiếng Việt, chỉ dùng dữ liệu đầu vào và nói rõ dữ kiện nào còn thiếu.", input);
-  }
-
-  createMatchRecap(input: Record<string, unknown>): Promise<string> {
-    return runText("Viết tóm tắt sau trận ngắn bằng tiếng Việt, chỉ dùng dữ liệu đầu vào và không tự tạo thống kê.", input);
-  }
 }

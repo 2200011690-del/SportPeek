@@ -25,7 +25,6 @@ export type HealthSnapshot = {
   services: {
     rss: ServiceHealth;
     stories: ServiceHealth;
-    sports: ServiceHealth;
     ai: ServiceHealth;
     telegram: ServiceHealth;
   };
@@ -228,7 +227,6 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
       services: {
         rss: unavailable,
         stories: unavailable,
-        sports: unavailable,
         ai: service(
           "configuration_required",
           "AI chưa cấu hình",
@@ -257,9 +255,6 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
     aiClusters,
     aiJobs,
     aiBacklog,
-    sportsSync,
-    matches,
-    standings,
   ] = await Promise.all([
     client
       .from("news_sources")
@@ -302,13 +297,6 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
       .from("story_clusters")
       .select("id", { count: "exact", head: true })
       .eq("review_status", "pending"),
-    client
-      .from("provider_sync_state")
-      .select("provider,last_attempt_at,last_success_at,last_error_code")
-      .order("last_success_at", { ascending: false })
-      .limit(20),
-    client.from("matches").select("id", { count: "exact", head: true }),
-    client.from("standings").select("id", { count: "exact", head: true }),
   ]);
 
   const sourceErrors = (sources.data ?? []).filter(
@@ -328,26 +316,6 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
   ]);
   if (storyJob.error || clusters.error) storyState = "unavailable";
   else if (storyJob.data?.status === "failed") storyState = "degraded";
-
-  const sportsRows = sportsSync.data ?? [];
-  const sportsUpdated =
-    sportsRows
-      .map((item) => item.last_success_at)
-      .filter(Boolean)
-      .sort()
-      .at(-1) ?? null;
-  let sportsState = ageState(sportsUpdated, 24 * 60 * 60_000);
-  const allSportsProvidersFailing =
-    sportsRows.length > 0 &&
-    sportsRows.every(
-      (item) =>
-        item.last_error_code &&
-        item.last_attempt_at &&
-        Date.now() - Date.parse(item.last_attempt_at) <= 2 * 60 * 60_000,
-    );
-  if (sportsSync.error || matches.error || standings.error)
-    sportsState = "unavailable";
-  else if (allSportsProvidersFailing) sportsState = "degraded";
 
   const ai = getAIProvider();
   const aiCount = aiClusters.count ?? 0;
@@ -388,16 +356,6 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
       storyUpdated,
       clusters.count ?? 0,
     ),
-    sports: service(
-      sportsState,
-      sportsState === "operational"
-        ? `Sports · ${(matches.count ?? 0) + (standings.count ?? 0)} bản ghi`
-        : "Sports cache cần kiểm tra",
-      "Trình duyệt không gọi sports provider trực tiếp.",
-      sportsRows[0]?.provider ?? null,
-      sportsUpdated,
-      (matches.count ?? 0) + (standings.count ?? 0),
-    ),
     ai: service(
       aiEvaluation.state,
       aiEvaluation.state === "operational"
@@ -430,7 +388,6 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
   const considered = [
     services.rss.state,
     services.stories.state,
-    services.sports.state,
     services.ai.state,
   ];
   const state = overallHealthState(considered);

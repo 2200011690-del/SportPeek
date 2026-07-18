@@ -65,7 +65,7 @@ export async function updateSession(request: NextRequest) {
     allowed = Boolean(membership.data);
   }
   if (!allowed) {
-    if (pathname.startsWith("/api/")) return withSessionCookies(NextResponse.json({ status: "unauthorized", error: { code: "FORBIDDEN", message: "Tài khoản chưa được mời vào SportPeek." } }, { status: 403 }), response);
+    if (pathname.startsWith("/api/")) return withSessionCookies(NextResponse.json({ status: "unauthorized", error: { code: "FORBIDDEN", message: "Tài khoản chưa được mời vào NewsPeek." } }, { status: 403 }), response);
     return loginRedirect(request, response, "not_invited");
   }
   return response;

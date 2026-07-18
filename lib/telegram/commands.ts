@@ -1,18 +1,17 @@
 import { ConfigurationError, ProviderError } from "@/lib/core/errors";
-import { sportsService } from "@/lib/application/sports-service";
 import { storyService } from "@/lib/application/story-service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getNotificationProvider } from "./index";
 
 type TelegramUpdate = { update_id?: number; message?: { text?: string; chat?: { id?: number }; from?: { id?: number } } };
 
-const help = ["SportPeek nội bộ", "/link CODE — liên kết tài khoản", "/today — tin đáng chú ý hôm nay", "/live — trận đang diễn ra", "/following — danh sách đang theo dõi", "/stop — tắt thông báo"].join("\n");
+const help = ["NewsPeek nội bộ", "/link CODE — liên kết tài khoản", "/today — tin đáng chú ý hôm nay", "/following — danh sách nguồn đang theo dõi", "/stop — tắt thông báo"].join("\n");
 
 async function followingText(userId: string): Promise<string> {
   const client = createAdminClient(); if (!client) throw new ConfigurationError("Supabase chưa cấu hình.", "supabase");
   const { data, error } = await client.from("user_follows").select("entity_type,entity_id").eq("user_id", userId).limit(50); if (error) throw new ProviderError("Không thể đọc danh sách theo dõi.", "supabase");
-  if (!data?.length) return "Bạn chưa theo dõi đội, giải, cầu thủ hoặc nguồn nào.";
-  const tableByType: Record<string, string> = { team: "teams", competition: "competitions", player: "players", source: "news_sources" }; const labels = new Map<string, string>();
+  if (!data?.length) return "Bạn chưa theo dõi nguồn tin nào.";
+  const tableByType: Record<string, string> = { source: "news_sources" }; const labels = new Map<string, string>();
   for (const [type, table] of Object.entries(tableByType)) {
     const ids = data.filter((row) => row.entity_type === type).map((row) => row.entity_id); if (!ids.length) continue;
     const result = await client.from(table).select("id,name").in("id", ids); for (const row of result.data ?? []) labels.set(row.id, row.name);
@@ -41,7 +40,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
         else {
           const now = new Date().toISOString(); const { error: linkError } = await client.from("telegram_connections").update({ telegram_chat_id: chatId, verified_at: now, verification_code: null, verification_expires_at: null, stopped_at: null, last_update_id: updateId }).eq("id", connection.id);
           if (linkError) throw new ProviderError("Không thể liên kết Telegram.", "supabase");
-          await client.from("notification_preferences").upsert({ user_id: connection.user_id, telegram_enabled: true }, { onConflict: "user_id" }); response = "Đã liên kết Telegram với SportPeek. Dùng /following để kiểm tra sở thích.";
+          await client.from("notification_preferences").upsert({ user_id: connection.user_id, telegram_enabled: true }, { onConflict: "user_id" }); response = "Đã liên kết Telegram với NewsPeek. Dùng /following để kiểm tra nguồn theo dõi.";
         }
       }
     } else {
@@ -51,8 +50,6 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       else if (command === "/today") {
         const stories = await storyService.getFeed(); const top = (stories.data ?? []).slice().sort((a, b) => (b.hotnessScore ?? 0) - (a.hotnessScore ?? 0)).slice(0, 5);
         response = top.length ? ["Tin đáng chú ý hôm nay:", ...top.map((story, index) => `${index + 1}. ${story.title} (${story.sourceCount} nguồn)`)].join("\n") : "Chưa có story đã xử lý trong cache.";
-      } else if (command === "/live") {
-        const live = await sportsService.read("live"); response = live.data.length ? ["Trận đang diễn ra:", ...live.data.slice(0, 10).map((match) => `• ${match.home} ${match.homeScore ?? "–"}–${match.awayScore ?? "–"} ${match.away} · ${match.minute ?? "–"}'${match.dataFreshness === "fresh" ? "" : " (dữ liệu trễ)"}`)].join("\n") : "Hiện không có trận trực tiếp trong sports cache.";
       } else if (command === "/following") response = await followingText(connection.user_id);
       else if (command === "/stop") {
         await client.from("notification_preferences").upsert({ user_id: connection.user_id, telegram_enabled: false }, { onConflict: "user_id" }); await client.from("telegram_connections").update({ stopped_at: new Date().toISOString(), last_update_id: updateId }).eq("id", connection.id); response = "Đã tắt toàn bộ thông báo Telegram. Bạn vẫn có thể dùng các lệnh tra cứu.";

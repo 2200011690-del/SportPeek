@@ -1,4 +1,4 @@
-const CACHE_NAME = "sportpeek-v2";
+const CACHE_NAME = "newspeek-v1";
 const ASSETS = [
   "/",
   "/manifest.json",

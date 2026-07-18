@@ -2,7 +2,12 @@ import type { MetadataRoute } from "next";
 import { loadPersistedStorySitemapEntries, type StorySitemapEntry } from "@/lib/stories/persisted-repository";
 import { getSiteBaseUrl } from "@/lib/stories/seo";
 
-const routes = ["", "/for-you", "/news", "/live", "/fixtures", "/results", "/standings", "/transfers", "/terms", "/privacy", "/copyright", "/sources"];
+const routes = [
+  "", "/for-you", "/news", "/category/viet-nam", "/category/the-gioi",
+  "/category/kinh-te", "/category/cong-nghe", "/category/chinh-tri",
+  "/category/suc-khoe", "/category/khoa-hoc", "/category/van-hoa-giai-tri",
+  "/category/the-thao", "/terms", "/privacy", "/copyright", "/sources",
+];
 
 export const revalidate = 300;
 
@@ -26,8 +31,8 @@ export function buildSitemap(baseUrl: URL, stories: StorySitemapEntry[]): Metada
   const staticEntries: MetadataRoute.Sitemap = routes.map((route) => ({
     url: new URL(route || "/", base).toString(),
     ...(route === "/news" && latestStoryUpdate ? { lastModified: latestStoryUpdate } : {}),
-    changeFrequency: route === "/news" || route === "/live" ? "hourly" : "daily",
-    priority: route === "" ? 1 : route === "/news" ? 0.9 : 0.7,
+    changeFrequency: route === "/news" || route.startsWith("/category/") ? "hourly" : "daily",
+    priority: route === "" ? 1 : route === "/news" ? 0.9 : route.startsWith("/category/") ? 0.8 : 0.7,
   }));
   const storyEntries: MetadataRoute.Sitemap = uniqueStories.map((story) => ({
     url: new URL(`/news/${encodeURIComponent(story.slug)}`, base).toString(),

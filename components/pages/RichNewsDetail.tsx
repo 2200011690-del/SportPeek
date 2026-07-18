@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Clock3, ExternalLink, Newspaper } from "lucide-react";
+import { Clock3, ExternalLink, Newspaper } from "lucide-react";
 import { EmptyState } from "@/components/ui/badges";
 import {
   fetchStoryDetail,
@@ -33,14 +33,8 @@ function storyStatusLabel(
   sourceCount: number,
 ): string {
   if (status === "reported" && sourceCount < 2) return "Một nguồn đưa tin";
-  if (
-    status === "rumor" &&
-    /chuyển nhượng|thương vụ|transfer|gia nhập|đàm phán/i.test(
-      `${category} ${title}`,
-    )
-  ) {
-    return "Tin đồn chuyển nhượng";
-  }
+  void category;
+  void title;
   return storyStatusLabels[status];
 }
 
@@ -215,9 +209,6 @@ export default function RichNewsDetail({
         .map((article) => [article.originalUrl, article]),
     ).values(),
   ];
-  const sourceByArticleId = new Map(
-    story.articles.map((article) => [article.id, article.sourceName]),
-  );
   const publisherCount = story.sourceCount;
   const publishedAt = story.firstPublishedAt ?? story.publishedAt;
   const updatedAt = story.lastMaterialUpdateAt ?? story.updatedAt;
@@ -300,49 +291,6 @@ export default function RichNewsDetail({
             ))}
           </div>
         </section>
-        {story.disputedPoints.length > 0 && (
-          <section
-            className="simple-news-disputes"
-            aria-labelledby="disputed-points-heading"
-          >
-            <div className="simple-news-section-title">
-              <AlertTriangle size={19} aria-hidden="true" />
-              <div>
-                <h2 id="disputed-points-heading">Các nguồn chưa thống nhất</h2>
-                <p>
-                  SportPeek giữ riêng từng cách tường thuật, không tự chọn một
-                  phía làm sự thật.
-                </p>
-              </div>
-            </div>
-            <div className="simple-news-dispute-list">
-              {story.disputedPoints.map((point) => (
-                <article key={point.topic}>
-                  <h3>{point.topic}</h3>
-                  <ul>
-                    {point.positions.map((position, index) => {
-                      const sourceNames = [
-                        ...new Set(
-                          position.sourceArticleIds
-                            .map((id) => sourceByArticleId.get(id))
-                            .filter((name): name is string => Boolean(name)),
-                        ),
-                      ];
-                      return (
-                        <li key={`${point.topic}-${index}`}>
-                          <p>{position.claim}</p>
-                          {sourceNames.length > 0 && (
-                            <small>Nguồn: {sourceNames.join(", ")}</small>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
         <section
           className="simple-news-sources"
           aria-labelledby="source-links-heading"

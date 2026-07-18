@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 const base = process.env.E2E_BASE_URL;
-test("SportPeek critical routes render", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => { for (const route of ["/","/search","/news","/live","/fixtures","/results","/standings","/transfers","/settings","/bookmarks","/login","/for-you","/admin"]) { const response=await fetch(`${base}${route}`); assert.equal(response.status,200,route); const html=await response.text(); assert.match(html,/SportPeek|SPORTPEEK/i); } });
+test("NewsPeek critical routes render", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => { for (const route of ["/","/search","/news","/category/viet-nam","/category/the-gioi","/category/cong-nghe","/settings","/bookmarks","/login","/for-you","/sources","/admin"]) { const response=await fetch(`${base}${route}`); assert.equal(response.status,200,route); const html=await response.text(); assert.match(html,/NewsPeek|NEWSPEEK/i); } });
 
-test("runtime search queries the current RSS feed", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => {
+test("runtime search queries the current RSS feed", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => {
   const feedResponse = await fetch(`${base}/api/news`);
   assert.equal(feedResponse.status, 200);
   const feed = await feedResponse.json();
@@ -16,24 +16,17 @@ test("runtime search queries the current RSS feed", { skip: !base && "Set E2E_BA
   assert.ok(result.news.some((item) => item.id === expected.id), `search should find ${expected.id}`);
 });
 
-test("live API never returns scheduled fixtures", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => {
-  const response = await fetch(`${base}/api/matches/live`);
-  assert.equal(response.status, 200);
-  const payload = await response.json();
-  assert.ok((payload.data ?? []).every((match) => match.status === "live"));
-});
-
-test("news API reports the real AI state", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => {
+test("news API reports the real AI state", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => {
   const response = await fetch(`${base}/api/news`);
   assert.equal(response.status, 200);
   const payload = await response.json();
-  assert.ok(["cloudflare", "openai", "gemini", "groq", "off"].includes(payload.aiStatus?.provider));
+  assert.ok(typeof payload.aiStatus?.provider === "string");
   assert.ok(["ok", "off", "error"].includes(payload.aiStatus?.state));
   assert.equal(payload.aiTranslation, payload.aiStatus.translatedCount > 0);
   if (payload.aiTranslation) assert.ok(payload.data.some((item) => item.translatedByAI));
 });
 
-test("news API exposes publisher images and a richer reading body", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => {
+test("news API exposes publisher images and a richer reading body", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => {
   const response = await fetch(`${base}/api/news`);
   assert.equal(response.status, 200);
   const payload = await response.json();
@@ -42,7 +35,7 @@ test("news API exposes publisher images and a richer reading body", { skip: !bas
   assert.ok(payload.data.every((item) => item.sourceDetails?.every((source) => source.excerpt)), "source comparison should include short excerpts");
 });
 
-test("feed story opens through the shared detail API", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => {
+test("feed story opens through the shared detail API", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => {
   const feedResponse = await fetch(`${base}/api/stories`);
   assert.equal(feedResponse.status, 200);
   const feed = await feedResponse.json();
@@ -60,7 +53,7 @@ test("feed story opens through the shared detail API", { skip: !base && "Set E2E
   assert.equal(pageResponse.status, 200);
 });
 
-test("missing story returns a real 404 envelope", { skip: !base && "Set E2E_BASE_URL to a running SportPeek instance" }, async () => {
+test("missing story returns a real 404 envelope", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => {
   const response = await fetch(`${base}/api/stories/story-does-not-exist`);
   assert.equal(response.status, 404);
   const payload = await response.json();

@@ -11,7 +11,6 @@ const environmentSchema = z.object({
   ADMIN_EMAILS: optionalString,
   ENABLE_DEVELOPMENT_FIXTURES: booleanString,
   NEWS_PROVIDER: optionalString,
-  SPORTS_DATA_PROVIDER: optionalString,
   AI_PROVIDER: optionalString,
   TELEGRAM_BOT_TOKEN: optionalString,
 });
@@ -46,4 +45,3 @@ export function isAllowedEmail(email: string | null | undefined, source: NodeJS.
   const config = getRuntimeEnvironment(source);
   return [...parseEmailList(config.ALLOWED_EMAILS), ...parseEmailList(config.ADMIN_EMAILS)].includes(normalized);
 }
-

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ConfigurationError, ProviderError, toSafeError } from "@/lib/core/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { providerFetch } from "@/lib/sports-data/rate-limiter";
+import { providerFetch } from "@/lib/core/provider-fetch";
 import { parseRssXml, readResponseText } from "./parser";
-import { configuredRssSources } from "./sources";
+import { configuredRssSources, RETIRED_RSS_SOURCE_NAMES } from "./sources";
 import { rssSourceSchema, type ParsedRssArticle, type RssSource } from "./types";
 
 export type RssSyncSummary = { jobId: string; sources: number; succeeded: number; failed: number; notModified: number; fetched: number; inserted: number; skipped: number; errors: Array<{ source: string; message: string }> };
@@ -14,14 +14,17 @@ export function rssContentHash(sourceId: string, article: Pick<ParsedRssArticle,
 export async function ensureRssSources(): Promise<RssSource[]> {
   const client = admin();
   const configured = configuredRssSources();
+  const configuredByName = new Map(configured.map((source) => [source.name, source]));
   const rows = configured.map((source) => ({ name: source.name, base_url: new URL(source.feedUrl).origin, rss_url: source.feedUrl, language: source.language, country: source.country, is_official: Boolean(source.official), reliability_score: source.reliability, is_active: true, fetch_interval_minutes: source.fetchIntervalMinutes ?? 15 }));
   if (rows.length) {
     const { error } = await client.from("news_sources").upsert(rows, { onConflict: "name" });
     if (error) throw new ProviderError("Không thể lưu danh mục RSS sources.", "supabase");
   }
+  const retired = await client.from("news_sources").update({ is_active: false }).in("name", [...RETIRED_RSS_SOURCE_NAMES]);
+  if (retired.error) throw new ProviderError("Không thể tắt nguồn RSS thể thao cũ.", "supabase");
   const { data, error } = await client.from("news_sources").select("id,name,base_url,rss_url,language,country,is_official,reliability_score,is_active,fetch_interval_minutes,last_fetched_at,last_error,etag,last_modified").not("rss_url", "is", null).order("name");
   if (error) throw new ProviderError("Không thể đọc RSS sources.", "supabase");
-  return (data ?? []).flatMap((row): RssSource[] => { const parsed = rssSourceSchema.safeParse({ id: row.id, name: row.name, baseUrl: row.base_url, feedUrl: row.rss_url, language: row.language, country: row.country, official: row.is_official, reliability: row.reliability_score, active: row.is_active, fetchIntervalMinutes: row.fetch_interval_minutes, lastFetchedAt: row.last_fetched_at, lastError: row.last_error, etag: row.etag, lastModified: row.last_modified }); return parsed.success ? [parsed.data] : []; });
+  return (data ?? []).flatMap((row): RssSource[] => { const parsed = rssSourceSchema.safeParse({ id: row.id, name: row.name, baseUrl: row.base_url, feedUrl: row.rss_url, language: row.language, country: row.country, official: row.is_official, reliability: row.reliability_score, active: row.is_active, defaultCategory: configuredByName.get(row.name)?.defaultCategory ?? null, fetchIntervalMinutes: row.fetch_interval_minutes, lastFetchedAt: row.last_fetched_at, lastError: row.last_error, etag: row.etag, lastModified: row.last_modified }); return parsed.success ? [parsed.data] : []; });
 }
 
 function due(source: RssSource, force: boolean) { return force || !source.lastFetchedAt || Date.now() - Date.parse(source.lastFetchedAt) >= source.fetchIntervalMinutes * 60_000; }
@@ -48,13 +51,13 @@ async function persistArticles(source: RssSource, articles: ParsedRssArticle[]):
 }
 
 async function syncSource(source: RssSource): Promise<{ status: "success" | "not_modified"; fetched: number; inserted: number; skipped: number }> {
-  const headers: Record<string, string> = { accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9", "user-agent": `SportPeek/1.0 (+${process.env.NEXT_PUBLIC_APP_URL ?? "https://sportpeek.local"})`, "accept-encoding": "gzip, br" };
+  const headers: Record<string, string> = { accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9", "user-agent": `NewsPeek/1.0 (+${process.env.NEXT_PUBLIC_APP_URL ?? "https://newspeek.local"})`, "accept-encoding": "gzip, br" };
   if (source.etag) headers["if-none-match"] = source.etag;
   if (source.lastModified) headers["if-modified-since"] = source.lastModified;
   const response = await providerFetch(`rss:${source.id}`, source.feedUrl, { headers, redirect: "follow" }, { timeoutMs: 12_000, retries: 1, minimumIntervalMs: 100 });
   const now = new Date().toISOString();
   if (response.status === 304) { await admin().from("news_sources").update({ last_fetched_at: now, last_error: null }).eq("id", source.id); return { status: "not_modified", fetched: 0, inserted: 0, skipped: 0 }; }
-  const xml = await readResponseText(response); const articles = parseRssXml(xml, source); const { inserted, skipped } = await persistArticles(source, articles);
+  const xml = await readResponseText(response); const parsedArticles = parseRssXml(xml, source); const articles = source.defaultCategory ? parsedArticles.map((article) => ({ ...article, rawMetadata: { ...article.rawMetadata, categories: [...new Set([source.defaultCategory, ...(Array.isArray(article.rawMetadata.categories) ? article.rawMetadata.categories.filter((value): value is string => typeof value === "string") : [])])] } })) : parsedArticles; const { inserted, skipped } = await persistArticles(source, articles);
   await admin().from("news_sources").update({ last_fetched_at: now, last_error: null, etag: response.headers.get("etag"), last_modified: response.headers.get("last-modified") }).eq("id", source.id);
   return { status: "success", fetched: articles.length, inserted, skipped };
 }

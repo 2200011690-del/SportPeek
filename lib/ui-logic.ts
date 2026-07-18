@@ -2,8 +2,8 @@ import type { NewsItem } from "@/lib/types";
 
 export type NewsFilter = {
   query?: string;
-  competition?: string;
-  team?: string;
+  category?: string;
+  source?: string;
   minHotness?: number;
 };
 
@@ -23,8 +23,13 @@ export function newsSearchText(item: NewsItem): string {
       item.title,
       item.summary,
       item.category,
+      item.primaryTopic,
+      item.region,
       item.competition,
       item.team,
+      ...(item.topics ?? []),
+      ...(item.locations ?? []),
+      ...(item.countries ?? []),
       ...item.sources,
       ...item.keyPoints,
     ].join(" "),
@@ -38,9 +43,8 @@ export function filterNewsItems(
   const query = normalizeSearchText(filter.query ?? "");
   return items.filter((item) => {
     if (query && !newsSearchText(item).includes(query)) return false;
-    if (filter.competition && item.competition !== filter.competition)
-      return false;
-    if (filter.team && item.team !== filter.team) return false;
+    if (filter.category && item.category !== filter.category) return false;
+    if (filter.source && !item.sources.includes(filter.source)) return false;
     if (filter.minHotness && item.hotness < filter.minHotness) return false;
     return true;
   });
@@ -78,25 +82,19 @@ export function relatedNewsItems(
 
 export function personalizedNewsItems(
   items: NewsItem[],
-  followedTeamNames: string[],
+  followedTerms: string[],
 ): NewsItem[] {
-  const followed = followedTeamNames.map(normalizeSearchText);
+  const followed = followedTerms.map(normalizeSearchText);
   return [...items].sort((a, b) => {
     const aText = newsSearchText(a);
     const bText = newsSearchText(b);
-    const aFollow = followed.some((team) => aText.includes(team)) ? 120 : 0;
-    const bFollow = followed.some((team) => bText.includes(team)) ? 120 : 0;
+    const aFollow = followed.some((term) => aText.includes(term)) ? 120 : 0;
+    const bFollow = followed.some((term) => bText.includes(term)) ? 120 : 0;
     return (
       bFollow + b.hotness + b.reliability -
       (aFollow + a.hotness + a.reliability)
     );
   });
-}
-
-export function isTransferNews(item: NewsItem): boolean {
-  return /(chuyen nhuong|thuong vu|transfer|sign(?:s|ed|ing)?|deal|loan|gia nhap|dam phan|hop dong)/i.test(
-    newsSearchText(item),
-  );
 }
 
 export function paginateItems<T>(

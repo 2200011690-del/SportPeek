@@ -5,7 +5,7 @@ import type { NewsAIStatus } from "@/lib/ingestion/official-feed";
 import { deriveEventImportance, dynamicStoryHotness, eventHalfLifeHours } from "@/lib/scoring";
 import { storyEventType } from "./clustering";
 import { storyClusterSchema, type RawArticle, type StoryCluster, type StoryDetailPayload } from "./schema";
-import type { StoryRepositoryResult } from "./repository";
+import type { StoryRepositoryResult } from "./repository-types";
 
 export type PersistedStorySnapshot = { stories: StoryCluster[]; lastSyncAt: string | null; sources: string[]; aiStatus: NewsAIStatus };
 export type PersistedStoryLoader = () => Promise<PersistedStorySnapshot>;
@@ -135,8 +135,8 @@ export function derivePersistedAIStatus(
 }
 
 function relatedStories(stories: StoryCluster[], current: StoryCluster, limit = 4): StoryCluster[] {
-  const terms = new Set([...current.teams, ...current.players, current.competition ?? ""].map((value) => value.toLowerCase()).filter(Boolean));
-  return stories.filter((story) => story.id !== current.id).map((story) => ({ story, score: [...terms].filter((term) => `${story.title} ${story.summary} ${story.teams.join(" ")} ${story.players.join(" ")}`.toLowerCase().includes(term)).length })).filter((item) => item.score > 0).sort((left, right) => right.score - left.score || (right.story.hotnessScore ?? 0) - (left.story.hotnessScore ?? 0)).slice(0, limit).map((item) => item.story);
+  const terms = new Set([current.category, ...current.sourceNames, ...current.title.split(/[:\-–—]/).slice(0, 2)].map((value) => value.toLowerCase()).filter(Boolean));
+  return stories.filter((story) => story.id !== current.id).map((story) => ({ story, score: [...terms].filter((term) => `${story.title} ${story.summary} ${story.category} ${story.sourceNames.join(" ")}`.toLowerCase().includes(term)).length })).filter((item) => item.score > 0).sort((left, right) => right.score - left.score || (right.story.hotnessScore ?? 0) - (left.story.hotnessScore ?? 0)).slice(0, limit).map((item) => item.story);
 }
 
 export const loadPersistedStories: PersistedStoryLoader = async () => {

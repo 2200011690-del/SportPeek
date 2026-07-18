@@ -3,6 +3,7 @@ import { z } from "zod";
 export const rssSourceSchema = z.object({
   id: z.string().uuid(), name: z.string().min(1), baseUrl: z.string().url(), feedUrl: z.string().url(), language: z.enum(["vi", "en"]),
   country: z.string().nullable(), official: z.boolean(), reliability: z.number().int().min(0).max(100), active: z.boolean(),
+  defaultCategory: z.string().min(1).max(160).nullable().default(null),
   fetchIntervalMinutes: z.number().int().min(5).max(1440), lastFetchedAt: z.string().datetime({ offset: true }).nullable(), lastError: z.string().nullable(), etag: z.string().nullable(), lastModified: z.string().nullable(),
 });
 export type RssSource = z.infer<typeof rssSourceSchema>;

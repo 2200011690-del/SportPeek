@@ -11,6 +11,8 @@ const eslintConfig = defineConfig([
     ".next/**",
     ".vinext/**",
     ".wrangler/**",
+    ".gitnexus/**",
+    ".codegraph/**",
     "dist/**",
     "out/**",
     "build/**",

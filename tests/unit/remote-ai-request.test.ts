@@ -4,12 +4,13 @@ import { GeminiAIProvider } from "../../lib/ai/gemini";
 import { GroqAIProvider } from "../../lib/ai/groq";
 
 const classification = {
-  sport: "football",
-  competition: null,
-  teams: ["Arsenal"],
-  players: [],
-  topics: ["result"],
-  articleType: "result",
+  category: "Công nghệ",
+  topics: ["trí tuệ nhân tạo"],
+  people: [],
+  organizations: ["OpenAI"],
+  locations: ["San Francisco"],
+  countries: ["Hoa Kỳ"],
+  articleType: "news",
   language: "vi",
 };
 
@@ -25,8 +26,8 @@ test("Gemini requests schema-constrained JSON with enough output capacity", asyn
   }) as typeof fetch;
 
   try {
-    const result = await new GeminiAIProvider().classifyArticle({ title: "Arsenal thắng", excerpt: "Arsenal giành chiến thắng." });
-    assert.equal(result.teams[0], "Arsenal");
+    const result = await new GeminiAIProvider().classifyArticle({ title: "OpenAI công bố sản phẩm mới", excerpt: "Thông báo được đưa ra tại San Francisco." });
+    assert.equal(result.organizations[0], "OpenAI");
     const config = body?.generationConfig as Record<string, unknown>;
     assert.equal(config.responseMimeType, "application/json");
     assert.ok(config.responseJsonSchema);
@@ -44,12 +45,12 @@ test("Gemini reports a token-limited response before parsing truncated JSON", as
   const previousKey = process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY = "test-key";
   globalThis.fetch = (async () => Response.json({
-    candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: '{"sport":"football"' }] } }],
+    candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: '{"category":"Công nghệ"' }] } }],
   })) as typeof fetch;
 
   try {
     await assert.rejects(
-      () => new GeminiAIProvider().classifyArticle({ title: "Arsenal thắng", excerpt: "Arsenal giành chiến thắng." }),
+      () => new GeminiAIProvider().classifyArticle({ title: "Tin công nghệ", excerpt: "Một sản phẩm mới được công bố." }),
       /chạm giới hạn độ dài đầu ra/,
     );
   } finally {
@@ -70,12 +71,12 @@ test("Groq uses strict JSON Schema and current completion-token field", async ()
   }) as typeof fetch;
 
   try {
-    const result = await new GroqAIProvider().classifyArticle({ title: "Arsenal thắng", excerpt: "Arsenal giành chiến thắng." });
-    assert.equal(result.sport, "football");
+    const result = await new GroqAIProvider().classifyArticle({ title: "OpenAI công bố sản phẩm mới", excerpt: "Thông báo được đưa ra tại San Francisco." });
+    assert.equal(result.category, "Công nghệ");
     const responseFormat = body?.response_format as { type?: string; json_schema?: Record<string, unknown> };
     assert.equal(responseFormat.type, "json_schema");
     assert.equal(responseFormat.json_schema?.strict, true);
-    assert.equal(responseFormat.json_schema?.name, "sportpeek_structured_output");
+    assert.equal(responseFormat.json_schema?.name, "newspeek_structured_output");
     assert.ok(responseFormat.json_schema?.schema);
     assert.equal(body?.max_tokens, undefined);
     assert.equal(body?.max_completion_tokens, 1600);
@@ -93,12 +94,12 @@ test("Groq reports a length-limited response before parsing truncated JSON", asy
   const previousKey = process.env.GROQ_API_KEY;
   process.env.GROQ_API_KEY = "test-key";
   globalThis.fetch = (async () => Response.json({
-    choices: [{ finish_reason: "length", message: { content: '{"sport":"football"' } }],
+    choices: [{ finish_reason: "length", message: { content: '{"category":"Công nghệ"' } }],
   })) as typeof fetch;
 
   try {
     await assert.rejects(
-      () => new GroqAIProvider().classifyArticle({ title: "Arsenal thắng", excerpt: "Arsenal giành chiến thắng." }),
+      () => new GroqAIProvider().classifyArticle({ title: "Tin công nghệ", excerpt: "Một sản phẩm mới được công bố." }),
       /chạm giới hạn độ dài đầu ra/,
     );
   } finally {

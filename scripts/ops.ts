@@ -1,11 +1,8 @@
 import { createAdminClient } from "../lib/supabase/admin";
 import { getHealthSnapshot } from "../lib/health";
 import { ProviderRegistry } from "../lib/providers/registry";
-import { getSportsAdapterDescriptors } from "../lib/sports-data/adapters";
 import { processStories, summarizePersistedStories } from "../lib/stories/processor";
 import { syncRss } from "../lib/rss/sync";
-import { syncSports, type SportsSyncCommand } from "../lib/sports-data/sync";
-import type { SportsProviderName } from "../lib/sports-data/models";
 
 try { process.loadEnvFile?.(".env.local"); } catch { /* Host may already supply environment variables. */ }
 
@@ -20,7 +17,7 @@ function output(value: unknown) { console.log(JSON.stringify(value, null, 2)); }
 function mutationPlan(action: string, details: Record<string, unknown>) { output({ dryRun: !apply, action, ...details, hint: apply ? "Đã yêu cầu áp dụng thay đổi." : "Kiểm tra kế hoạch; thêm --apply để thực thi." }); }
 
 async function health() { const snapshot = await getHealthSnapshot(); output(snapshot); if (["unavailable", "degraded"].includes(snapshot.state)) process.exitCode = 2; }
-async function providers() { const registry = new ProviderRegistry().describe(); output({ application: registry, sportsAdapters: getSportsAdapterDescriptors() }); }
+async function providers() { const registry = new ProviderRegistry().describe(); output({ application: registry }); }
 
 async function failedJobs() {
   const client = admin(); const [ingestion, ai] = await Promise.all([
@@ -31,19 +28,12 @@ async function failedJobs() {
 }
 
 async function staleData() {
-  const client = admin(); const sixHours = new Date(Date.now() - 6 * 60 * 60_000).toISOString(); const oneDay = new Date(Date.now() - 24 * 60 * 60_000).toISOString(); const twoHours = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
-  const [sources, matches, standings, stories] = await Promise.all([
+  const client = admin(); const oneDay = new Date(Date.now() - 24 * 60 * 60_000).toISOString(); const twoHours = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+  const [sources, stories] = await Promise.all([
     client.from("news_sources").select("id,name,last_fetched_at,last_error").eq("is_active", true).or(`last_fetched_at.is.null,last_fetched_at.lt.${twoHours}`).limit(limit),
-    client.from("matches").select("id", { count: "exact", head: true }).lt("updated_at", sixHours),
-    client.from("standings").select("id", { count: "exact", head: true }).lt("updated_at", oneDay),
     client.from("story_clusters").select("id", { count: "exact", head: true }).lt("last_updated_at", oneDay),
   ]);
-  if (sources.error || matches.error || standings.error || stories.error) throw new Error("Không thể kiểm tra dữ liệu stale."); const report = { staleSources: sources.data ?? [], staleMatches: matches.count ?? 0, staleStandings: standings.count ?? 0, storiesOlderThanOneDay: stories.count ?? 0, thresholds: { rssHours: 2, matchHours: 6, standingsHours: 24 } }; output(report); if (report.staleSources.length || report.staleMatches || report.staleStandings) process.exitCode = 2;
-}
-
-async function conflicts() {
-  const { data, error } = await admin().from("provider_conflicts").select("id,entity_type,internal_id,capability,providers,status,values,created_at").eq("status", "open").order("created_at", { ascending: false }).limit(limit);
-  if (error) throw new Error("Không thể đọc conflict."); output({ open: data ?? [], limit }); if (data?.length) process.exitCode = 2;
+  if (sources.error || stories.error) throw new Error("Không thể kiểm tra dữ liệu stale."); const report = { staleSources: sources.data ?? [], storiesOlderThanOneDay: stories.count ?? 0, thresholds: { rssHours: 2, storyHours: 24 } }; output(report); if (report.staleSources.length) process.exitCode = 2;
 }
 
 async function members() {
@@ -68,32 +58,20 @@ async function sourceAdd() {
   const { error } = await client.from("news_sources").upsert({ name, base_url: parsed.origin, rss_url: url, language, reliability_score: reliability, is_official: official, is_active: true }, { onConflict: "name" }); if (error) throw new Error("Không thể thêm nguồn RSS.");
 }
 
-async function aliasAdd() {
-  const client = admin(); const entityType = flag("type"); const internalId = flag("id"); const alias = flag("alias")?.trim(); if (!entityType || !["competition", "team", "player", "coach"].includes(entityType) || !internalId || !uuid.test(internalId) || !alias) throw new Error("Cần --type, --id UUID và --alias.");
-  const normalized = alias.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/[^a-z0-9]+/g, " ").trim(); mutationPlan("alias-add", { entityType, internalId, alias, normalized }); if (!apply) return; const { error } = await client.from("entity_aliases").upsert({ entity_type: entityType, internal_id: internalId, alias, normalized_alias: normalized }, { onConflict: "entity_type,normalized_alias,internal_id" }); if (error) throw new Error("Không thể thêm alias.");
-}
-
-async function mappingSet() {
-  const client = admin(); const provider = flag("provider"); const entityType = flag("type"); const externalId = flag("external"); const internalId = flag("internal"); const season = flag("season") ?? ""; if (!provider || !entityType || !externalId || !internalId || !uuid.test(internalId)) throw new Error("Cần --provider --type --external --internal UUID [--season].");
-  mutationPlan("mapping-set", { provider, entityType, externalId, internalId, season }); if (!apply) return; const { error } = await client.from("provider_entity_mappings").upsert({ provider, entity_type: entityType, external_id: externalId, internal_id: internalId, season, confidence: 1, metadata: { manuallyReviewed: true } }, { onConflict: "provider,entity_type,external_id,season" }); if (error) throw new Error("Không thể lưu mapping.");
-}
-
 async function retryJobs() {
   const client = admin(); const { data, error } = await client.from("ingestion_jobs").select("job_type,provider,metadata").eq("status", "failed").order("started_at", { ascending: false }).limit(limit); if (error) throw new Error("Không thể đọc job cần retry."); const types = [...new Set((data ?? []).map((job) => job.job_type))]; mutationPlan("retry-jobs", { failedTypes: types, limit }); if (!apply || !types.length) return;
   const results: unknown[] = [];
   if (types.some((type) => type.startsWith("rss:"))) results.push(await syncRss({ force: true, dryRun: false }));
   if (types.some((type) => type.startsWith("stories:"))) results.push(await processStories({ dryRun: false, includeFailed: true, limit }));
-  const sportsTypes = types.filter((type) => type.startsWith("sports:")).map((type) => type.split(":")[1] as SportsSyncCommand).filter((type) => ["competitions", "teams", "fixtures", "results", "standings", "live"].includes(type));
-  for (const type of [...new Set(sportsTypes)].slice(0, 2)) { const provider = data?.find((job) => job.job_type === `sports:${type}`)?.provider as SportsProviderName | undefined; results.push(await syncSports(type, { provider, dryRun: false })); }
   output({ retried: results.length, results });
 }
 
 async function retryAi() { mutationPlan("retry-ai-summary", { limit }); if (!apply) return; output(await summarizePersistedStories({ dryRun: false, limit })); }
 
-function help() { output({ usage: "npm run ops -- <command> [flags]", commands: ["health", "providers", "failed-jobs", "retry-jobs", "retry-ai", "stale", "conflicts", "members", "source-add", "source-status", "alias-add", "mapping-set"], safety: "Các thao tác ghi chỉ chạy khi có --apply; --limit mặc định 20; --timeout mặc định 60000ms." }); }
+function help() { output({ usage: "npm run ops -- <command> [flags]", commands: ["health", "providers", "failed-jobs", "retry-jobs", "retry-ai", "stale", "members", "source-add", "source-status"], safety: "Các thao tác ghi chỉ chạy khi có --apply; --limit mặc định 20; --timeout mặc định 60000ms." }); }
 
 async function main() {
-  const commands: Record<string, () => Promise<void> | void> = { health, providers, "failed-jobs": failedJobs, "retry-jobs": retryJobs, "retry-ai": retryAi, stale: staleData, conflicts, unmapped: conflicts, members, "source-add": sourceAdd, "source-status": sourceStatus, "alias-add": aliasAdd, "mapping-set": mappingSet, help };
+  const commands: Record<string, () => Promise<void> | void> = { health, providers, "failed-jobs": failedJobs, "retry-jobs": retryJobs, "retry-ai": retryAi, stale: staleData, members, "source-add": sourceAdd, "source-status": sourceStatus, help };
   const handler = commands[command]; if (!handler) throw new Error(`Lệnh không hợp lệ: ${command}`); await handler();
 }
 

@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { Bookmark } from "lucide-react";
-import { useRuntimeData } from "@/components/SportPeekApp";
+import { useRuntimeData } from "@/components/runtime/RuntimeDataContext";
 import { DataLoadingState, EmptyState } from "@/components/ui/badges";
 import { NewsCard } from "@/components/pages/NewsPage";
 

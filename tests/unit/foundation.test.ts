@@ -13,25 +13,18 @@ test("internal mode closes signup and uses explicit email allowlists", () => {
 });
 
 test("typed errors expose safe codes without stack traces", () => {
-  const safe = toSafeError(new ConfigurationError("Thiếu key", "football-data"));
+  const safe = toSafeError(new ConfigurationError("Thiếu key", "gemini"));
   assert.deepEqual(safe, { code: "CONFIGURATION_REQUIRED", message: "Thiếu key", status: 503, retryable: false });
   assert.equal("stack" in safe, false);
 });
 
-test("provider registry reports disabled providers instead of production mocks", () => {
-  const previousProvider = process.env.SPORTS_DATA_PROVIDER;
-  const previousKey = process.env.SPORTS_DATA_API_KEY;
+test("provider registry contains only news, AI and notification services", () => {
   const previousFixtures = process.env.ENABLE_DEVELOPMENT_FIXTURES;
-  process.env.SPORTS_DATA_PROVIDER = "";
-  process.env.SPORTS_DATA_API_KEY = "";
   process.env.ENABLE_DEVELOPMENT_FIXTURES = "false";
   try {
-    const sports = new ProviderRegistry().describe().find((entry) => entry.kind === "sports");
-    assert.equal(sports?.name, "disabled");
-    assert.equal(sports?.state, "configuration_required");
+    const providers = new ProviderRegistry().describe();
+    assert.deepEqual(providers.map((entry) => entry.kind), ["news", "ai", "notification"]);
   } finally {
-    if (previousProvider === undefined) delete process.env.SPORTS_DATA_PROVIDER; else process.env.SPORTS_DATA_PROVIDER = previousProvider;
-    if (previousKey === undefined) delete process.env.SPORTS_DATA_API_KEY; else process.env.SPORTS_DATA_API_KEY = previousKey;
     if (previousFixtures === undefined) delete process.env.ENABLE_DEVELOPMENT_FIXTURES; else process.env.ENABLE_DEVELOPMENT_FIXTURES = previousFixtures;
   }
 });

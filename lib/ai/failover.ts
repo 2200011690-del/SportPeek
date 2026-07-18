@@ -47,6 +47,4 @@ export class FailoverAIProvider implements AIProvider {
   identifyAgreements(input: { articles: ClusterArticleInput[] }) { return this.run("agreements", (provider) => provider.identifyAgreements(input)); }
   identifyDisputes(input: { articles: ClusterArticleInput[] }) { return this.run("disputes", (provider) => provider.identifyDisputes(input)); }
   answerFromClusterContext(input: { question: string; articles: ClusterArticleInput[] }) { return this.run("answer", (provider) => provider.answerFromClusterContext(input)); }
-  createMatchPreview(input: Record<string, unknown>) { return this.run("match-preview", (provider) => provider.createMatchPreview(input)); }
-  createMatchRecap(input: Record<string, unknown>) { return this.run("match-recap", (provider) => provider.createMatchRecap(input)); }
 }

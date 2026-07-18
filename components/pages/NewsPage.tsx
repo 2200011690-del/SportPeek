@@ -7,17 +7,15 @@ import {
   Bookmark,
   Check,
   Layers,
-  ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { useRuntimeData } from "@/components/SportPeekApp";
+import { useRuntimeData } from "@/components/runtime/RuntimeDataContext";
 import {
   NewsVisual,
   SectionHeading,
   DataLoadingState,
   EmptyState,
   Pagination,
-  TeamMark,
 } from "@/components/ui/badges";
 import {
   conciseNewsSummary,
@@ -32,9 +30,9 @@ import {
   filterNewsItems,
   paginateItems,
   personalizedNewsItems,
-  isTransferNews,
 } from "@/lib/ui-logic";
-import type { NewsItem, TransferRecord } from "@/lib/types";
+import { matchesNewsCategory, newsCategory } from "@/lib/news/categories";
+import type { NewsItem } from "@/lib/types";
 
 type NewsFeedView = "featured" | "latest";
 
@@ -83,7 +81,7 @@ export function NewsCard({
         ) : null}
         <div className="news-card-footer">
           <span className="source-line">
-            <span className="source-avatar">SP</span>
+            <span className="source-avatar">NP</span>
             {articleCount} bài · {sourceCount} nguồn độc lập
             {officialCount ? ` · ${officialCount} chính thức` : ""}
           </span>
@@ -134,15 +132,18 @@ export function NewsListItem({ item }: { item: NewsItem }) {
 export function NewsPage({
   bookmarks,
   onBookmark,
+  categorySlug,
 }: {
   bookmarks: Set<string>;
   onBookmark: (id: string) => void;
+  categorySlug?: string;
 }) {
   const { newsItems, newsReal, newsSources, loading } = useRuntimeData();
+  const routeCategory = newsCategory(categorySlug);
   const [feedView, setFeedView] = useState<NewsFeedView>("featured");
   const [query, setQuery] = useState("");
-  const [competition, setCompetition] = useState("");
-  const [team, setTeam] = useState("");
+  const [category, setCategory] = useState("");
+  const [source, setSource] = useState("");
   const [minHotness, setMinHotness] = useState(0);
   const [page, setPage] = useState(1);
   const [archiveItems, setArchiveItems] = useState<NewsItem[]>([]);
@@ -154,19 +155,25 @@ export function NewsPage({
   });
   const [archiveLoading, setArchiveLoading] = useState(true);
   const [archiveError, setArchiveError] = useState(false);
+  const categoryItems = categorySlug
+    ? newsItems.filter((item) => matchesNewsCategory(item, categorySlug))
+    : newsItems;
   const orderedItems =
     feedView === "featured"
-      ? rankFeaturedNews(newsItems)
-      : sortLatestNews(newsItems);
-  const filtered = filterNewsItems(orderedItems, {
+      ? rankFeaturedNews(categoryItems)
+      : sortLatestNews(categoryItems);
+  const searched = filterNewsItems(orderedItems, {
     query,
-    competition,
-    team,
     minHotness,
   });
+  const filtered = searched.filter(
+    (item) =>
+      (!category || item.category === category) &&
+      (!source || item.sources.includes(source)),
+  );
   const localPagination = paginateItems(filtered, page, 12);
   const filtersActive = Boolean(
-    query.trim() || competition || team || minHotness > 0,
+    categorySlug || query.trim() || category || source || minHotness > 0,
   );
   const usesArchive = feedView === "latest" && !filtersActive;
   const updateFilter =
@@ -176,11 +183,11 @@ export function NewsPage({
       if (feedView === "latest") setArchiveLoading(true);
       setPage(1);
     };
-  const competitionOptions = [
-    ...new Set(newsItems.map((item) => item.competition)),
-  ].sort();
-  const teamOptions = [...new Set(newsItems.map((item) => item.team))]
-    .filter((value) => !/thể thao|bóng đá|nhiều đội/i.test(value))
+  const categoryOptions = [...new Set(newsItems.map((item) => item.category))]
+    .filter(Boolean)
+    .sort();
+  const sourceOptions = [...new Set(newsItems.flatMap((item) => item.sources))]
+    .filter(Boolean)
     .sort();
   useEffect(() => {
     if (!usesArchive) return;
@@ -241,9 +248,9 @@ export function NewsPage({
   return (
     <div className="page-content">
       <PageHero
-        eyebrow="NEWSROOM"
-        title="Tin bóng đá hôm nay"
-        description="Mỗi sự kiện là một cụm tin duy nhất: ngắn để lướt, đầy đủ khi mở và luôn giữ liên kết về bài gốc."
+        eyebrow={routeCategory ? "CHUYÊN MỤC" : "NEWSROOM"}
+        title={routeCategory ? `Tin ${routeCategory.label}` : "Tin tức mới nhất"}
+        description="Tin quan trọng từ Việt Nam và thế giới được gộp theo sự kiện, tóm tắt rõ ràng và luôn giữ liên kết về bài gốc."
       >
         <div className="hero-stat">
           <strong>{newsSources.length || newsItems.length}</strong>
@@ -277,7 +284,7 @@ export function NewsPage({
         </button>
         <Link href="/for-you">
           <strong>Dành cho bạn</strong>
-          <span>Đội và giải bạn quan tâm</span>
+          <span>Nguồn và chủ đề bạn quan tâm</span>
           <ArrowRight size={16} />
         </Link>
       </nav>
@@ -293,7 +300,7 @@ export function NewsPage({
           </p>
         </div>
         <Link href="/sources">
-          Cách SportPeek xử lý tin
+          Cách NewsPeek xử lý tin
           <ArrowRight size={15} />
         </Link>
       </div>
@@ -301,12 +308,12 @@ export function NewsPage({
         search
         query={query}
         onQueryChange={updateFilter(setQuery)}
-        competition={competition}
-        onCompetitionChange={updateFilter(setCompetition)}
-        competitionOptions={competitionOptions}
-        team={team}
-        onTeamChange={updateFilter(setTeam)}
-        teamOptions={teamOptions}
+        category={category}
+        onCategoryChange={updateFilter(setCategory)}
+        categoryOptions={categoryOptions}
+        source={source}
+        onSourceChange={updateFilter(setSource)}
+        sourceOptions={sourceOptions}
         minHotness={minHotness}
         onMinHotnessChange={updateFilter(setMinHotness)}
       />
@@ -370,15 +377,15 @@ export function ForYouPage({
   onBookmark,
 }: {
   followed: Set<string>;
-  onFollow: (id: string) => void;
+  onFollow: (id: string, type?: "source") => void;
   bookmarks: Set<string>;
   onBookmark: (id: string) => void;
 }) {
-  const { newsItems, forYouItems, personalized, newsReal, loading, teams } =
+  const { newsItems, forYouItems, personalized, newsReal, loading, sourceCatalog } =
     useRuntimeData();
-  const followedNames = teams
-    .filter((team) => followed.has(team.id))
-    .map((team) => team.name);
+  const followedNames = sourceCatalog
+    .filter((source) => followed.has(source.id))
+    .map((source) => source.name);
   const recommendations = (
     forYouItems.length
       ? forYouItems
@@ -404,7 +411,7 @@ export function ForYouPage({
           <strong>
             {personalized
               ? followedNames.length
-                ? `Đang dùng ${followedNames.length} đội bạn theo dõi và lịch sử tài khoản`
+                ? `Đang dùng ${followedNames.length} nguồn bạn theo dõi và lịch sử tài khoản`
                 : "Đang dùng sở thích và lịch sử tài khoản nội bộ"
               : newsReal
                 ? "Chưa đăng nhập — đang xếp theo độ nóng và tin cậy"
@@ -412,7 +419,7 @@ export function ForYouPage({
           </strong>
           <p>
             Mỗi card giải thích lý do xuất hiện; diversity penalty tránh feed
-            chỉ toàn một đội.
+            chỉ toàn một chủ đề hoặc một nguồn.
           </p>
         </div>
         <Link href="/bookmarks">
@@ -421,20 +428,22 @@ export function ForYouPage({
         </Link>
       </div>
       <section>
-        <SectionHeading eyebrow="SỞ THÍCH" title="Chọn đội để ưu tiên" />
+        <SectionHeading eyebrow="SỞ THÍCH" title="Chọn nguồn để ưu tiên" />
         <div className="follow-grid">
-          {teams.slice(0, 8).map((team) => (
-            <div className="follow-card" key={team.id}>
-              <TeamMark name={team.name} size="lg" />
+          {sourceCatalog.slice(0, 8).map((source) => (
+            <div className="follow-card" key={source.id}>
+              <span className="source-avatar">
+                {source.name.split(/\s+/).map((word) => word[0]).slice(0, 2).join("").toUpperCase()}
+              </span>
               <div>
-                <strong>{team.name}</strong>
-                <span>{team.country}</span>
+                <strong>{source.name}</strong>
+                <span>{source.language === "en" ? "Quốc tế" : "Việt Nam"}</span>
               </div>
               <button
-                className={followed.has(team.id) ? "following" : ""}
-                onClick={() => onFollow(team.id)}
+                className={followed.has(source.id) ? "following" : ""}
+                onClick={() => onFollow(source.id, "source")}
               >
-                {followed.has(team.id) ? (
+                {followed.has(source.id) ? (
                   <>
                     <Check size={15} />
                     Đang theo dõi
@@ -469,147 +478,6 @@ export function ForYouPage({
           <EmptyState
             title="Chưa có tin đề xuất"
             description="Không dùng dữ liệu giả khi nguồn RSS không khả dụng."
-          />
-        )}
-      </section>
-    </div>
-  );
-}
-
-export function TransfersPage({
-  bookmarks,
-  onBookmark,
-}: {
-  bookmarks: Set<string>;
-  onBookmark: (id: string) => void;
-}) {
-  const { newsItems, newsReal, loading } = useRuntimeData();
-  const [query, setQuery] = useState("");
-  const [market, setMarket] = useState<TransferRecord[]>([]);
-  const [marketLoading, setMarketLoading] = useState(true);
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetch("/api/transfers", {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return (await response.json()) as { data?: TransferRecord[] };
-      })
-      .then((payload) => setMarket(payload.data ?? []))
-      .catch(() => {
-        if (!controller.signal.aborted) setMarket([]);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setMarketLoading(false);
-      });
-    return () => controller.abort();
-  }, []);
-  const transferNews = filterNewsItems(newsItems.filter(isTransferNews), {
-    query,
-  });
-  const normalizedQuery = query.trim().toLocaleLowerCase("vi");
-  const filteredMarket = market.filter(
-    (item) =>
-      !normalizedQuery ||
-      `${item.player} ${item.fromTeam ?? ""} ${item.toTeam ?? ""}`
-        .toLocaleLowerCase("vi")
-        .includes(normalizedQuery),
-  );
-  return (
-    <div className="page-content">
-      <PageHero
-        eyebrow="MARKET WATCH"
-        title="Tin chuyển nhượng"
-        description="Dữ liệu thương vụ xác nhận từ API-Football được tách riêng khỏi tin đồn và bài báo tổng hợp."
-      >
-        <div className="window-status">
-          <i />
-          {newsReal
-            ? "Nguồn báo chí đang hoạt động"
-            : "Nguồn tin tạm gián đoạn"}
-        </div>
-      </PageHero>
-      <div className="personalization-banner">
-        <div className="ai-orb">
-          <ShieldCheck size={22} />
-        </div>
-        <div>
-          <strong>Phân biệt rõ dữ liệu provider và tin báo chí</strong>
-          <p>
-            Thương vụ API-Football mang nhãn xác nhận; bài RSS vẫn giữ trạng
-            thái tin đồn hoặc nguồn đối chiếu.
-          </p>
-        </div>
-        <Link href="/sources">
-          Nguồn & phương pháp
-          <ArrowRight size={15} />
-        </Link>
-      </div>
-      <FilterBar search query={query} onQueryChange={setQuery} />
-      <section>
-        <SectionHeading eyebrow="API-FOOTBALL" title="Thương vụ đã ghi nhận" />
-        {marketLoading ? (
-          <DataLoadingState label="Đang tải dữ liệu chuyển nhượng" />
-        ) : filteredMarket.length ? (
-          <div className="transfer-data-grid">
-            {filteredMarket.map((item) => (
-              <article key={item.id} className="transfer-data-card">
-                <div>
-                  <span className="status-pill">ĐÃ XÁC NHẬN</span>
-                  <time>{item.transferDate ?? "Chưa rõ ngày"}</time>
-                </div>
-                <Link href={`/players/${item.playerSlug}`}>
-                  <h3>{item.player}</h3>
-                </Link>
-                <p>
-                  <strong>{item.fromTeam ?? "Không rõ đội"}</strong>
-                  <ArrowRight size={14} />
-                  <strong>{item.toTeam ?? "Không rõ đội"}</strong>
-                </p>
-                <small>
-                  {item.fee ?? item.transferType} ·{" "}
-                  {item.provider ?? "provider"}
-                </small>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            title="Chưa có thương vụ API-Football phù hợp"
-            description="Cache sẽ xoay vòng đội bóng mỗi ngày trong giới hạn gói miễn phí."
-          />
-        )}
-      </section>
-      <section>
-        <SectionHeading
-          eyebrow="BÁO CHÍ"
-          title="Tin tức và diễn biến thị trường"
-        />
-        {loading ? (
-          <DataLoadingState />
-        ) : transferNews.length ? (
-          <>
-            <div className="results-summary">
-              Tìm thấy {transferNews.length} tin chuyển nhượng từ các nguồn đang
-              theo dõi
-            </div>
-            <div className="news-page-grid">
-              {transferNews.map((item) => (
-                <NewsCard
-                  item={item}
-                  key={item.id}
-                  bookmarked={bookmarks.has(item.id)}
-                  onBookmark={onBookmark}
-                />
-              ))}
-            </div>
-          </>
-        ) : (
-          <EmptyState
-            title="Chưa có tin chuyển nhượng phù hợp"
-            description="SportPeek sẽ hiển thị khi các nguồn RSS đăng tin có liên quan; hệ thống không điền dữ liệu giả."
           />
         )}
       </section>

@@ -10,9 +10,8 @@ import {
   Search,
   ShieldCheck,
 } from "lucide-react";
-import { useRuntimeData } from "@/components/SportPeekApp";
 import { hotnessLabel } from "@/lib/scoring";
-import type { NewsItem, Standing } from "@/lib/types";
+import type { NewsItem } from "@/lib/types";
 
 const getInitials = (name: string) =>
   (name?.trim() || "TBD")
@@ -21,77 +20,6 @@ const getInitials = (name: string) =>
     .slice(-2)
     .join("")
     .toUpperCase();
-
-export function TeamMark({
-  name,
-  size = "md",
-}: {
-  name: string;
-  size?: "sm" | "md" | "lg";
-}) {
-  const { teams } = useRuntimeData();
-  const team = teams.find((item) => item.name === name);
-  const [failedLogoUrl, setFailedLogoUrl] = useState<string>();
-  const hasLogo = Boolean(team?.logoUrl && team.logoUrl !== failedLogoUrl);
-  return (
-    <span
-      className={`team-mark ${size}`}
-      style={
-        { "--team-accent": team?.accent ?? "#7cfa4c" } as React.CSSProperties
-      }
-      aria-label={name}
-    >
-      {team?.logoUrl && hasLogo ? (
-        <>
-          {/* Provider crests load directly; failed URLs fall back to initials. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={team.logoUrl}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setFailedLogoUrl(team.logoUrl)}
-          />
-        </>
-      ) : (
-        getInitials(name)
-      )}
-    </span>
-  );
-}
-
-export function CompetitionMark({
-  name,
-  size = "md",
-}: {
-  name: string;
-  size?: "sm" | "md" | "lg";
-}) {
-  const { competitions } = useRuntimeData();
-  const competition = competitions.find((item) => item.name === name);
-  const [failedLogoUrl, setFailedLogoUrl] = useState<string>();
-  const hasLogo = Boolean(
-    competition?.logoUrl && competition.logoUrl !== failedLogoUrl,
-  );
-  return (
-    <span className={`competition-mark ${size}`} aria-label={name}>
-      {competition?.logoUrl && hasLogo ? (
-        <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={competition.logoUrl}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setFailedLogoUrl(competition.logoUrl)}
-          />
-        </>
-      ) : (
-        getInitials(name)
-      )}
-    </span>
-  );
-}
 
 export function HotnessBadge({ score }: { score: number }) {
   return (
@@ -151,7 +79,7 @@ export function DataLoadingState({
       <div>
         <strong>{label}</strong>
         <small>
-          SportPeek đang kết nối các nguồn, vui lòng chờ trong giây lát.
+          NewsPeek đang kết nối các nguồn, vui lòng chờ trong giây lát.
         </small>
       </div>
     </div>
@@ -223,7 +151,7 @@ export function NewsVisual({
       {!hasImage && (
         <>
           <div className="field-lines" />
-          <span className="visual-team">{getInitials(item.team)}</span>
+          <span className="visual-team">{getInitials(item.primaryTopic ?? item.category)}</span>
         </>
       )}
       <span className="visual-label">
@@ -310,82 +238,5 @@ export function Pagination({
         <ChevronRight size={16} />
       </button>
     </nav>
-  );
-}
-
-export function StandingsTable({
-  full = false,
-  rows,
-}: {
-  full?: boolean;
-  rows?: Standing[];
-}) {
-  const { standingRows } = useRuntimeData();
-  const data = rows ?? standingRows;
-  return (
-    <div className="table-wrap">
-      <table className="standings-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Đội</th>
-            <th>Tr</th>
-            {full && (
-              <>
-                <th>W</th>
-                <th>D</th>
-                <th>L</th>
-                <th>HS</th>
-              </>
-            )}
-            <th>Đ</th>
-            {full && <th>Phong độ</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row) => (
-            <tr key={`${row.competitionId ?? "table"}-${row.team}`}>
-              <td>
-                <span className={`rank rank-${row.position}`}>
-                  {row.position}
-                </span>
-              </td>
-              <td>
-                <span className="standing-team">
-                  <TeamMark name={row.team} size="sm" />
-                  {row.team}
-                </span>
-              </td>
-              <td>{row.played}</td>
-              {full && (
-                <>
-                  <td>{row.won}</td>
-                  <td>{row.drawn}</td>
-                  <td>{row.lost}</td>
-                  <td>
-                    {row.goalDifference > 0 ? "+" : ""}
-                    {row.goalDifference}
-                  </td>
-                </>
-              )}
-              <td>
-                <strong>{row.points}</strong>
-              </td>
-              {full && (
-                <td>
-                  <span className="form-row">
-                    {row.form.map((result, i) => (
-                      <i key={i} className={result.toLowerCase()}>
-                        {result}
-                      </i>
-                    ))}
-                  </span>
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
   );
 }

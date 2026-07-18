@@ -6,17 +6,20 @@ import {
   ArrowRight,
   Bookmark,
   Clock3,
+  LayoutGrid,
   Newspaper,
-  Radio,
   Rss,
 } from "lucide-react";
-import { useRuntimeData, SourceFilter } from "@/components/SportPeekApp";
 import {
-  TeamMark,
+  useRuntimeData,
+  type SourceFilter,
+} from "@/components/runtime/RuntimeDataContext";
+import {
   SectionHeading,
   DataLoadingState,
   NewsVisual,
 } from "@/components/ui/badges";
+import { NEWS_CATEGORIES } from "@/lib/news/categories";
 import {
   conciseNewsSummary,
   independentSourceCount,
@@ -26,15 +29,15 @@ import {
   rankFeaturedNews,
   sortLatestNews,
 } from "@/components/news/news-presenter";
-import type { NewsItem, Match } from "@/lib/types";
+import type { NewsItem } from "@/lib/types";
 
 function matchesSourceFilter(item: NewsItem, filter: SourceFilter): boolean {
   if (filter === "all" || filter === "rss") return true;
   if (filter === "vi") return newsHasSourceLanguage(item, "vi");
   if (filter === "international") return newsHasSourceLanguage(item, "en");
   if (filter === "official")
-    return item.sources.some((source) => /\b(?:vff|vpf)\b/i.test(source));
-  return item.sources.some((source) => /youtube/i.test(source));
+    return Boolean(item.sourceDetails?.some((source) => source.isOfficialSource));
+  return true;
 }
 
 function HomeHeroNews({
@@ -72,7 +75,7 @@ function HomeHeroNews({
       )}
       {!hasImage && (
         <div className="home-hero-glow" aria-hidden>
-          <span>SP</span>
+          <span>NP</span>
         </div>
       )}
       <div className="home-hero-content">
@@ -166,66 +169,6 @@ function DenseNewsList({
   );
 }
 
-function MatchCard({
-  match,
-  compact = false,
-}: {
-  match: Match;
-  compact?: boolean;
-}) {
-  const statusLabel =
-    match.status === "postponed"
-      ? "HOÃN"
-      : match.status === "cancelled"
-        ? "ĐÃ HỦY"
-        : null;
-  return (
-    <Link
-      href={`/matches/${match.id}`}
-      className={`match-card ${match.status} ${compact ? "compact" : ""}`}
-    >
-      <div className="match-head">
-        <span>{match.competition}</span>
-        {match.status === "live" ? (
-          <span className="live-pill">
-            <i />
-            {match.minute ?? "–"}&apos;
-            {match.dataFreshness === "delayed" ||
-            match.dataFreshness === "stale"
-              ? " · TRỄ"
-              : ""}
-          </span>
-        ) : (
-          <span>
-            {statusLabel ? `${statusLabel} · ` : ""}
-            {match.startTime}
-          </span>
-        )}
-      </div>
-      <div className="match-team">
-        <span>
-          <TeamMark name={match.home} size="sm" />
-          {match.home}
-        </span>
-        <strong>{match.homeScore ?? "–"}</strong>
-      </div>
-      <div className="match-team">
-        <span>
-          <TeamMark name={match.away} size="sm" />
-          {match.away}
-        </span>
-        <strong>{match.awayScore ?? "–"}</strong>
-      </div>
-      {!compact && (
-        <div className="match-venue">
-          <Radio size={13} />
-          {match.venue}
-        </div>
-      )}
-    </Link>
-  );
-}
-
 export default function HomePage({
   bookmarks,
   onBookmark,
@@ -235,7 +178,7 @@ export default function HomePage({
   onBookmark: (id: string) => void;
   sourceFilter: SourceFilter;
 }) {
-  const { newsItems, matchItems, loading } = useRuntimeData();
+  const { newsItems, loading } = useRuntimeData();
   const filteredNews = newsItems.filter((item) =>
     matchesSourceFilter(item, sourceFilter),
   );
@@ -263,7 +206,6 @@ export default function HomePage({
         dateKey(item.updatedTimestamp ?? item.publishedTimestamp) === todayKey,
     ),
   ).slice(0, 5);
-  const liveMatches = matchItems.filter((match) => match.status === "live");
   const today = new Intl.DateTimeFormat("vi-VN", {
     weekday: "long",
     day: "numeric",
@@ -276,7 +218,7 @@ export default function HomePage({
         <div className="home-feed-heading">
           <div>
             <span>{today}</span>
-            <h2>Dòng tin thể thao</h2>
+            <h2>Dòng tin hôm nay</h2>
           </div>
           <Link href="/news">
             Xem toàn bộ
@@ -334,26 +276,19 @@ export default function HomePage({
         </section>
         <section className="rail-card compact-live-rail">
           <SectionHeading
-            eyebrow="DỮ LIỆU TRẬN ĐẤU"
-            title="Đang trực tiếp"
-            action="Mở live"
-            href="/live"
+            eyebrow="KHÁM PHÁ"
+            title="Chuyên mục"
+            action="Mở bảng tin"
+            href="/news"
           />
-          {liveMatches.length ? (
-            liveMatches
-              .slice(0, 2)
-              .map((match) => (
-                <MatchCard key={match.id} match={match} compact />
-              ))
-          ) : (
-            <div className="no-live">
-              <Radio size={18} />
-              <span>
-                <strong>Chưa có trận đang diễn ra</strong>
-                <small>Dữ liệu sẽ tự cập nhật khi trận bắt đầu.</small>
-              </span>
-            </div>
-          )}
+          <div className="dense-news-list">
+            {NEWS_CATEGORIES.slice(0, 6).map((category) => (
+              <Link href={`/category/${category.slug}`} key={category.slug}>
+                <span className="dense-news-index"><LayoutGrid size={15} /></span>
+                <span><strong>{category.label}</strong><small>Xem tin mới nhất</small></span>
+              </Link>
+            ))}
+          </div>
         </section>
       </aside>
     </div>

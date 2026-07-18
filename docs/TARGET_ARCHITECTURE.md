@@ -1,32 +1,30 @@
-# Target architecture
+# NewsPeek target architecture
 
 ```text
-React UI
-  -> application services / API envelopes
-    -> repositories
-      -> Supabase PostgreSQL cache and user-owned records
+Cloudflare Worker / Next-compatible routes
+  ├─ public newsroom UI
+  ├─ news/search/source/personalization APIs
+  └─ one-minute scheduler
+       ├─ RSS source sync
+       └─ story clustering + AI summarization
 
-Scheduled/manual jobs
-  -> provider registry and capability resolver
-    -> RSS / football-data / API-Football / metadata / AI / Telegram adapters
-      -> normalization + validation + dedupe
-        -> Supabase repositories
+RSS publishers
+  → normalized metadata + canonical URLs
+  → Supabase raw articles
+  → event clusters
+  → Gemini / Groq / Workers AI failover
+  → Vietnamese editorial summary
+  → feed cards and source-linked reader
 ```
 
-## Boundaries
+The production runtime contains no dedicated sports-data provider. Sport is one editorial category and arrives through the same RSS/story pipeline as every other topic.
 
-- `lib/core`: typed errors, logging and common result/status contracts.
-- `lib/config`: environment parsing and Internal Mode policy.
-- `lib/application`: feed, story, sports, personalization and health use cases.
-- `lib/providers`: capability registry and external adapters.
-- `lib/repositories`: Supabase reads/writes; no UI imports.
-- `lib/news`: RSS normalization, dedupe, clustering and AI job orchestration.
-- `lib/sports`: normalized sports models, provider mapping and sync.
-- `lib/auth`: invited-user policy and authenticated user context.
+Legacy sports tables remain in old migrations only as rollback-compatible storage. New application code must not query them.
 
-Read APIs never call AI or live sports providers. They read persisted data and return explicit `success`, `empty`, `not_found`, `stale`, `configuration_required`, `unauthorized` or `error` states. Jobs use bounded retries, provider-specific cache intervals and safe structured logs.
+## Reliability rules
 
-## Data ownership
-
-Supabase is the source of truth for raw articles, clusters, sports cache, mappings and user state. Provider external IDs are unique mapping attributes, never primary keys. RLS owns all user writes. Service credentials stay in server/jobs only.
-
+- RSS and AI failures are explicit in health state.
+- AI output is grounded in retained source metadata.
+- One provider failure advances to the next configured AI provider.
+- A last-good summary is retained when remote AI is temporarily unavailable.
+- Canonical links and publisher attribution are always preserved.

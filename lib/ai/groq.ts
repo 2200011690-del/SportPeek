@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import { ConfigurationError, ProviderError } from "@/lib/core/errors";
-import { providerFetch } from "@/lib/sports-data/rate-limiter";
+import { providerFetch } from "@/lib/core/provider-fetch";
 import { parseStructuredText, providerJsonSchema, RemoteAIProvider } from "./remote-base";
 
 export class GroqAIProvider extends RemoteAIProvider {
@@ -16,13 +16,13 @@ export class GroqAIProvider extends RemoteAIProvider {
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: `Bạn là biên tập viên SportPeek. ${task} Chỉ trả dữ liệu đúng schema được yêu cầu.` },
+          { role: "system", content: `Bạn là biên tập viên tin tức trung lập của NewsPeek. ${task} Chỉ trả dữ liệu đúng schema được yêu cầu.` },
           { role: "user", content: JSON.stringify(input) },
         ],
         response_format: {
           type: "json_schema",
           json_schema: {
-            name: "sportpeek_structured_output",
+            name: "newspeek_structured_output",
             strict: true,
             schema: providerJsonSchema(schema),
           },

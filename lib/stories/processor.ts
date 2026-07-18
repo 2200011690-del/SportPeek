@@ -6,7 +6,6 @@ import { isAIQuotaExceeded, safeAIErrorMessage } from "@/lib/ai/quota";
 import type { AIProvider, ClusterArticleInput } from "@/lib/ai/types";
 import { ConfigurationError, ProviderError, toSafeError } from "@/lib/core/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { normalizeEntityName } from "@/lib/sports-data/matching";
 import { normalizeSearchText } from "@/lib/ui-logic";
 import { calculateHotness, calculateReliability, deriveEventImportance, eventHalfLifeHours } from "@/lib/scoring";
 import { createStorySlug } from "./slug";
@@ -17,7 +16,6 @@ import { buildLongSummary, prioritizeAISummaryCandidates } from "./summary";
 type SourceJoin = { name: string; logo_url: string | null; is_official: boolean; reliability_score: number } | Array<{ name: string; logo_url: string | null; is_official: boolean; reliability_score: number }> | null;
 type RawRow = { id: string; source_id: string; external_id: string | null; original_url: string; canonical_url: string | null; title: string; normalized_title: string | null; excerpt: string | null; author: string | null; image_url: string | null; published_at: string; fetched_at: string; content_hash: string; language: "vi" | "en"; processing_status: string; raw_metadata: Record<string, unknown>; news_sources: SourceJoin };
 type ArticleRecord = ClusterableArticle & { sourceName: string; sourceLogoUrl: string | null; reliability: number; isOfficial: boolean; originalUrl: string; canonicalUrl: string | null; author: string | null; imageUrl: string | null; fetchedAt: string; language: "vi" | "en"; contentHash: string; rawMetadata: Record<string, unknown> };
-type EntityRecord = { id: string; name: string; slug: string };
 type Draft = { id: string; clusterKey: string; articles: ArticleRecord[]; existing: boolean; touched: boolean; previousStory: StoryCluster | null };
 type RemoteAIExecution = { remaining: number; attempts: number; generated: number; errors: string[]; provider: string | null };
 export type StoryProcessingSummary = { jobId: string; dryRun: boolean; inputArticles: number; createdClusters: number; updatedClusters: number; mergedArticles: number; failedArticles: number; aiProvider: string; aiAttempts: number; aiGenerated: number; aiErrors: string[]; errors: string[] };
@@ -64,12 +62,7 @@ function articleFromStory(article: StoryCluster["articles"][number], reliability
 
 function stableClusterKey(article: ArticleRecord) { return createHash("sha256").update(`${article.contentHash}\0${storyEventType(`${article.title} ${article.excerpt}`)}`).digest("hex"); }
 
-function entityMatches(text: string, entities: EntityRecord[]): EntityRecord[] {
-  const normalized = ` ${normalizeEntityName(text)} `;
-  return entities.filter((entity) => { const name = normalizeEntityName(entity.name); return name.length >= 4 && normalized.includes(` ${name} `); }).slice(0, 8);
-}
-
-async function buildStory(draft: Draft, provider: AIProvider, teams: EntityRecord[], competitions: EntityRecord[], remoteAI: RemoteAIExecution): Promise<{ story: StoryCluster; teamIds: string[]; competitionId: string | null; materialFingerprint: string; lastSourceSeenAt: string }> {
+async function buildStory(draft: Draft, provider: AIProvider, remoteAI: RemoteAIExecution): Promise<{ story: StoryCluster; materialFingerprint: string; lastSourceSeenAt: string }> {
   const articles = [...draft.articles].sort((a, b) => Number(b.isOfficial) - Number(a.isOfficial) || b.reliability - a.reliability || Date.parse(b.publishedAt) - Date.parse(a.publishedAt)); const lead = articles[0];
   const independence = analyzeSourceIndependence(articles);
   const representativeByGroup = new Map<string, ArticleRecord>(); for (const article of articles) { if (independence.syndicatedArticleIds.has(article.id)) continue; const group = independence.groupByArticleId.get(article.id) ?? article.sourceId; if (!representativeByGroup.has(group)) representativeByGroup.set(group, article); } if (!representativeByGroup.size) representativeByGroup.set(lead.sourceId, lead); const representatives = [...representativeByGroup.values()];
@@ -122,22 +115,33 @@ async function buildStory(draft: Draft, provider: AIProvider, teams: EntityRecor
   const preservedSummaryIsStale = preservedAI && previousEvidenceHash !== null && currentEvidenceHash !== previousEvidenceHash;
   const sourceNames = unique(representatives.map((article) => article.sourceName)); const official = articles.some((article) => article.isOfficial); const type = storyEventType(`${lead.title} ${lead.excerpt}`); const speculative = type === "transfer" && /tin đồn|có thể|được cho là|reportedly|rumou?r|could|may\b/i.test(articles.map((article) => `${article.title} ${article.excerpt}`).join(" "));
   const reliability = calculateReliability({ sourceScores: representatives.map((article) => article.reliability), independentSources: independence.independentSourceCount, official, speculativeLanguage: speculative, contradictionPenalty: disputes.length ? 8 : 0 }); const newestMaterialTimestamp = Math.max(...representatives.map((article) => Date.parse(article.publishedAt))); const ageHours = Math.max(0, (Date.now() - newestMaterialTimestamp) / 3_600_000); const averageSourceReliability = representatives.reduce((sum, article) => sum + article.reliability, 0) / Math.max(1, representatives.length); const eventImportance = deriveEventImportance(articles.map((article) => article.title).join(" "), type, official); const hotness = calculateHotness({ ageHours, halfLifeHours: eventHalfLifeHours(type), sourceCount: independence.independentSourceCount, averageSourceReliability, entityPopularity: metadataMetric(articles, ["entityPopularity", "entity_popularity"]), readVelocity: metadataMetric(articles, ["readVelocity", "read_velocity"]), eventImportance, verified: official || independence.independentSourceCount >= 2 });
-  const title = generated ? generatedSummary.title : lead.title; const matchedTeams = entityMatches(`${title} ${articles.map((article) => article.title).join(" ")}`, teams); const matchedCompetitions = entityMatches(`${title} ${articles.map((article) => article.title).join(" ")}`, competitions);
-  let categoryValue = articles.flatMap((article) => Array.isArray(article.rawMetadata.categories) ? article.rawMetadata.categories : []).find((value): value is string => typeof value === "string");
-  if (!categoryValue || /^(thể thao|tin tức|news story|news|sports|general|chưa phân loại)$/i.test(categoryValue)) {
-    const isFootballSource = articles.some(article =>
-      /\b(vff|vpf|football|soccer|premier league|champions league|la liga|serie a)\b/i.test(article.sourceName)
-    );
-    const hasFootballKeywords = articles.some(article =>
-      /\b(bong da|cau thu|hlv|san co|tran dau|ban thang|cup|vo dich|football|soccer|match|player|coach|manager|league)\b/i.test(
-        normalizeSearchText(article.title + " " + article.excerpt)
-      )
-    );
-    categoryValue = isFootballSource || hasFootballKeywords ? "Bóng đá" : "Thể thao";
-  }
+  const title = generated ? generatedSummary.title : lead.title;
+  const categoryCandidates = articles.flatMap((article) =>
+    Array.isArray(article.rawMetadata.categories)
+      ? article.rawMetadata.categories.filter((value): value is string => typeof value === "string")
+      : [],
+  );
+  const normalizedCategories = normalizeSearchText(categoryCandidates.join(" "));
+  const normalizedStoryText = normalizeSearchText(
+    articles.map((article) => `${article.sourceName} ${article.title} ${article.excerpt}`).join(" "),
+  );
+  const categoryRules: Array<[RegExp, string]> = [
+    [/\b(the thao|bong da|sports?|football|soccer|tennis|olympic)\b/, "Thể thao"],
+    [/\b(cong nghe|so hoa|technology|tech|artificial intelligence|tri tue nhan tao|internet|cyber)\b/, "Công nghệ"],
+    [/\b(suc khoe|y te|health|medical|medicine|benh vien|dich benh)\b/, "Sức khỏe"],
+    [/\b(khoa hoc|moi truong|science|environment|climate|space|vu tru)\b/, "Khoa học"],
+    [/\b(kinh te|kinh doanh|tai chinh|thi truong|business|economy|finance|market)\b/, "Kinh tế"],
+    [/\b(van hoa|giai tri|am nhac|dien anh|culture|entertainment|film|music|arts?)\b/, "Văn hóa & Giải trí"],
+    [/\b(chinh tri|politics|quoc hoi|chinh phu|bau cu|election)\b/, "Chính trị"],
+    [/\b(the gioi|quoc te|world|global)\b/, "Thế giới"],
+    [/\b(viet nam|thoi su|xa hoi|doi song|phap luat|giao duc|news)\b/, "Việt Nam"],
+  ];
+  const declaredCategory = categoryRules.find(([pattern]) => pattern.test(normalizedCategories))?.[1];
+  const inferredCategory = categoryRules.find(([pattern]) => pattern.test(normalizedStoryText))?.[1];
+  const categoryValue = declaredCategory ?? inferredCategory ?? (lead.language === "en" ? "Thế giới" : "Việt Nam");
   const publishedAt = new Date(Math.min(...articles.map((article) => Date.parse(article.publishedAt)))).toISOString(); const updatedAt = new Date(newestMaterialTimestamp).toISOString(); const rawArticles = articles.map((article) => ({ id: article.id, sourceId: article.sourceId, sourceName: article.sourceName, sourceLogoUrl: article.sourceLogoUrl, originalUrl: article.originalUrl, canonicalUrl: article.canonicalUrl, title: article.title, excerpt: article.excerpt || null, imageUrl: article.imageUrl, author: article.author, publishedAt: article.publishedAt, fetchedAt: article.fetchedAt, isOfficialSource: article.isOfficial, isSyndicated: independence.syndicatedArticleIds.has(article.id), language: article.language, processingStatus: "completed" as const })); const summary = buildLongSummary(generatedSummary.summary).slice(0, 2_000); const nextSlug = draft.previousStory?.slug ?? createStorySlug(title, draft.id); const legacySlugs = draft.previousStory?.legacySlugs ?? [];
-  const story = storyClusterSchema.parse({ id: draft.id, slug: nextSlug, legacySlugs, title, summary, summaryLong: preservedAI && draft.previousStory ? draft.previousStory.summaryLong : summary, category: String(categoryValue).slice(0, 160), language: lead.language, status: type === "correction" ? "correction" : official ? "official" : disputes.length ? "disputed" : speculative ? "rumor" : independence.independentSourceCount >= 2 ? "reported" : ageHours <= 12 ? "developing" : "unverified", sourceCount: independence.independentSourceCount, sourceNames, officialSources: rawArticles.filter((article) => article.isOfficialSource), hasOfficialSource: official, hotnessScore: hotness, reliabilityScore: reliability, publishedAt, updatedAt, imageUrl: articles.find((article) => article.imageUrl)?.imageUrl ?? null, agreedFacts: agreements.map((item) => ({ text: item.text, sourceArticleIds: item.sourceArticleIds })), disputedPoints: disputes, timeline: timeline.map((item, index) => ({ id: `timeline-${draft.id}-${index}`, occurredAt: item.occurredAt, description: item.content, sourceArticleIds: item.supportingArticleIds })), linkedMatch: null, competition: matchedCompetitions[0]?.name ?? null, teams: matchedTeams.map((team) => team.name), players: [], articles: rawArticles, aiGenerated: generated, reviewStatus: remoteGenerated ? "auto" : preservedSummaryIsStale ? "pending" : preservedAI && draft.previousStory ? draft.previousStory.reviewStatus : "pending" });
-  return { story, teamIds: matchedTeams.map((team) => team.id), competitionId: matchedCompetitions[0]?.id ?? null, materialFingerprint: currentEvidenceHash, lastSourceSeenAt };
+  const story = storyClusterSchema.parse({ id: draft.id, slug: nextSlug, legacySlugs, title, summary, summaryLong: preservedAI && draft.previousStory ? draft.previousStory.summaryLong : summary, category: String(categoryValue).slice(0, 160), language: lead.language, status: type === "correction" ? "correction" : official ? "official" : disputes.length ? "disputed" : speculative ? "rumor" : independence.independentSourceCount >= 2 ? "reported" : ageHours <= 12 ? "developing" : "unverified", sourceCount: independence.independentSourceCount, sourceNames, officialSources: rawArticles.filter((article) => article.isOfficialSource), hasOfficialSource: official, hotnessScore: hotness, reliabilityScore: reliability, publishedAt, updatedAt, imageUrl: articles.find((article) => article.imageUrl)?.imageUrl ?? null, agreedFacts: agreements.map((item) => ({ text: item.text, sourceArticleIds: item.sourceArticleIds })), disputedPoints: disputes, timeline: timeline.map((item, index) => ({ id: `timeline-${draft.id}-${index}`, occurredAt: item.occurredAt, description: item.content, sourceArticleIds: item.supportingArticleIds })), linkedMatch: null, competition: null, teams: [], players: [], articles: rawArticles, aiGenerated: generated, reviewStatus: remoteGenerated ? "auto" : preservedSummaryIsStale ? "pending" : preservedAI && draft.previousStory ? draft.previousStory.reviewStatus : "pending" });
+  return { story, materialFingerprint: currentEvidenceHash, lastSourceSeenAt };
 }
 
 async function loadExistingDrafts(): Promise<Draft[]> {
@@ -145,20 +149,16 @@ async function loadExistingDrafts(): Promise<Draft[]> {
   return (data ?? []).flatMap((row): Draft[] => { const parsed = storyClusterSchema.safeParse(row.payload); return parsed.success ? [{ id: row.id, clusterKey: row.cluster_key, articles: parsed.data.articles.map((article) => articleFromStory(article, parsed.data.reliabilityScore ?? 70)), existing: true, touched: false, previousStory: parsed.data }] : []; });
 }
 
-async function loadEntities() { const client = admin(); const [teams, competitions] = await Promise.all([client.from("teams").select("id,name,slug").limit(1000), client.from("competitions").select("id,name,slug").limit(500)]); if (teams.error || competitions.error) throw new ProviderError("Không thể đọc entity dictionary.", "supabase"); return { teams: (teams.data ?? []) as EntityRecord[], competitions: (competitions.data ?? []) as EntityRecord[] }; }
-
-async function persistDrafts(drafts: Array<{ draft: Draft; story: StoryCluster; teamIds: string[]; competitionId: string | null; materialFingerprint: string; lastSourceSeenAt: string }>, summary: StoryProcessingSummary) {
+async function persistDrafts(drafts: Array<{ draft: Draft; story: StoryCluster; materialFingerprint: string; lastSourceSeenAt: string }>, summary: StoryProcessingSummary) {
   const client = admin();
   for (let index = 0; index < drafts.length; index += 50) {
-    const batch = drafts.slice(index, index + 50); const rows = batch.map(({ draft, story, teamIds, competitionId, materialFingerprint, lastSourceSeenAt }) => ({ id: draft.id, cluster_key: draft.clusterKey, slug: story.slug, title: story.title, summary: story.summary, key_points: story.agreedFacts.map((item) => item.text).slice(0, 5), agreed_facts: story.agreedFacts, disputed_points: story.disputedPoints, status: story.status, hotness_score: story.hotnessScore, reliability_score: story.reliabilityScore, competition_id: competitionId, primary_team_id: teamIds[0] ?? null, first_published_at: story.publishedAt, last_updated_at: story.updatedAt, last_source_seen_at: lastSourceSeenAt, material_fingerprint: materialFingerprint, ai_generated: story.aiGenerated, ai_provider: story.aiGenerated ? summary.aiProvider : null, review_status: story.reviewStatus, payload: story })); const { error } = await client.from("story_clusters").upsert(rows, { onConflict: "cluster_key" }); if (error) throw new ProviderError(`Không thể lưu story cluster (${error.code ?? ''}).`, "supabase");
+    const batch = drafts.slice(index, index + 50); const rows = batch.map(({ draft, story, materialFingerprint, lastSourceSeenAt }) => ({ id: draft.id, cluster_key: draft.clusterKey, slug: story.slug, title: story.title, summary: story.summary, key_points: story.agreedFacts.map((item) => item.text).slice(0, 5), agreed_facts: story.agreedFacts, disputed_points: story.disputedPoints, status: story.status, hotness_score: story.hotnessScore, reliability_score: story.reliabilityScore, competition_id: null, primary_team_id: null, first_published_at: story.publishedAt, last_updated_at: story.updatedAt, last_source_seen_at: lastSourceSeenAt, material_fingerprint: materialFingerprint, ai_generated: story.aiGenerated, ai_provider: story.aiGenerated ? summary.aiProvider : null, review_status: story.reviewStatus, payload: story })); const { error } = await client.from("story_clusters").upsert(rows, { onConflict: "cluster_key" }); if (error) throw new ProviderError(`Không thể lưu story cluster (${error.code ?? ''}).`, "supabase");
   }
   const clusterIds = drafts.map(({ draft }) => draft.id); const links = drafts.flatMap(({ draft }) => { const independence = analyzeSourceIndependence(draft.articles); return draft.articles.map((article, index) => ({ cluster_id: draft.id, raw_article_id: article.id, similarity_score: index === 0 ? 1 : clusterSimilarity(article, { articles: [draft.articles[0]] }).score, is_primary_source: index === 0, is_syndicated: independence.syndicatedArticleIds.has(article.id) })); }) ;
   for (let index = 0; index < links.length; index += 200) { const { error } = await client.from("story_cluster_articles").upsert(links.slice(index, index + 200), { onConflict: "cluster_id,raw_article_id" }); if (error) throw new ProviderError("Không thể lưu cluster article links.", "supabase"); }
   if (clusterIds.length) { await client.from("story_timeline").delete().in("cluster_id", clusterIds); await client.from("story_entities").delete().in("cluster_id", clusterIds); }
   const timeline = drafts.flatMap(({ draft, story }) => story.timeline.map((item) => ({ cluster_id: draft.id, occurred_at: item.occurredAt, update_type: "source_update", content: item.description, supporting_article_ids: item.sourceArticleIds }))) ;
   for (let index = 0; index < timeline.length; index += 200) { const { error } = await client.from("story_timeline").insert(timeline.slice(index, index + 200)); if (error) throw new ProviderError("Không thể lưu story timeline.", "supabase"); }
-  const entityRows = drafts.flatMap(({ draft, story, teamIds, competitionId }) => [...teamIds.map((id, index) => ({ cluster_id: draft.id, entity_type: "team", entity_id: id, label: story.teams[index] ?? null, relevance_score: index === 0 ? 1 : 0.8 })), ...(competitionId ? [{ cluster_id: draft.id, entity_type: "competition", entity_id: competitionId, label: story.competition, relevance_score: 1 }] : [])]);
-  for (let index = 0; index < entityRows.length; index += 200) { const { error } = await client.from("story_entities").insert(entityRows.slice(index, index + 200)); if (error) throw new ProviderError("Không thể lưu story entities.", "supabase"); }
   const articleIds = [...new Set(drafts.flatMap(({ draft }) => draft.articles.map((article) => article.id)))]; for (let index = 0; index < articleIds.length; index += 200) { const { error } = await client.from("raw_articles").update({ processing_status: "completed" }).in("id", articleIds.slice(index, index + 200)); if (error) throw new ProviderError("Không thể hoàn tất raw articles.", "supabase"); }
 }
 
@@ -175,9 +175,9 @@ export async function processStories(options: { dryRun?: boolean; includeFailed?
     if (merge && best) { if (!best.draft.articles.some((item) => item.id === article.id)) { best.draft.articles.push(article); best.draft.touched = true; summary.mergedArticles += 1; } }
     else { drafts.push({ id: randomUUID(), clusterKey: stableClusterKey(article), articles: [article], existing: false, touched: true, previousStory: null }); summary.createdClusters += 1; }
   }
-  const touched = drafts.filter((draft) => draft.touched); const entities = await loadEntities(); const built = [] as Array<{ draft: Draft; story: StoryCluster; teamIds: string[]; competitionId: string | null; materialFingerprint: string; lastSourceSeenAt: string }>;
+  const touched = drafts.filter((draft) => draft.touched); const built = [] as Array<{ draft: Draft; story: StoryCluster; materialFingerprint: string; lastSourceSeenAt: string }>;
   const incomingIds = new Set(incoming.map((article) => article.id));
-  for (const draft of touched) { try { built.push({ draft, ...(await buildStory(draft, provider, entities.teams, entities.competitions, remoteAI)) }); if (draft.existing) summary.updatedClusters += 1; } catch (error) { const message = error instanceof Error ? error.message.slice(0, 600) : toSafeError(error).message; summary.errors.push(`${draft.id}: ${message}`); const failedIds = draft.articles.filter((article) => incomingIds.has(article.id)).map((article) => article.id); summary.failedArticles += failedIds.length; if (failedIds.length) { try { await client.from("raw_articles").update({ processing_status: "failed" }).in("id", failedIds); } catch { /* ignore */ } } } }
+  for (const draft of touched) { try { built.push({ draft, ...(await buildStory(draft, provider, remoteAI)) }); if (draft.existing) summary.updatedClusters += 1; } catch (error) { const message = error instanceof Error ? error.message.slice(0, 600) : toSafeError(error).message; summary.errors.push(`${draft.id}: ${message}`); const failedIds = draft.articles.filter((article) => incomingIds.has(article.id)).map((article) => article.id); summary.failedArticles += failedIds.length; if (failedIds.length) { try { await client.from("raw_articles").update({ processing_status: "failed" }).in("id", failedIds); } catch { /* ignore */ } } } }
   summary.aiAttempts = remoteAI.attempts; summary.aiGenerated = remoteAI.generated; summary.aiErrors = remoteAI.errors; summary.aiProvider = remoteAI.provider ?? provider.name;
   const jobMetadata = { useAi: Boolean(options.useAi), aiLimit: options.aiLimit ?? 1, aiAttempts: summary.aiAttempts, aiGenerated: summary.aiGenerated, aiErrors: summary.aiErrors, recluster: Boolean(options.recluster), includeFailed: Boolean(options.includeFailed), oldestFirst: Boolean(options.oldestFirst) };
   if (!summary.dryRun) { await client.from("ingestion_jobs").insert({ id: jobId, job_type: "stories:process", provider: summary.aiProvider, status: "processing", fetched_count: incoming.length, metadata: jobMetadata }); try { if (built.length) await persistDrafts(built, summary); await client.from("ingestion_jobs").update({ status: summary.errors.length ? "failed" : "completed", fetched_count: incoming.length, inserted_count: summary.createdClusters, updated_count: summary.updatedClusters, skipped_count: summary.failedArticles, error_code: summary.errors.length ? "PARTIAL_FAILURE" : null, error_message: summary.errors.join("; ").slice(0, 1000) || null, metadata: jobMetadata, completed_at: new Date().toISOString() }).eq("id", jobId); } catch (error) { const safe = toSafeError(error); await client.from("ingestion_jobs").update({ status: "failed", error_code: safe.code, error_message: safe.message, completed_at: new Date().toISOString() }).eq("id", jobId); throw error; } }

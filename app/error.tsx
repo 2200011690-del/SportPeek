@@ -6,7 +6,7 @@ import { ShieldAlert, RefreshCw, Home } from "lucide-react";
 
 export default function ErrorPage({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error("[SportPeek Error Boundary]", error);
+    console.error("[NewsPeek Error Boundary]", error);
   }, [error]);
 
   return (
@@ -57,7 +57,7 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
           lineHeight: "1.5",
           marginBottom: "2rem"
         }}>
-          SportPeek gặp sự cố kết nối hoặc dữ liệu tạm thời. Vui lòng thử lại hoặc quay lại trang chủ.
+          NewsPeek gặp sự cố kết nối hoặc dữ liệu tạm thời. Vui lòng thử lại hoặc quay lại trang chủ.
         </p>
         <div style={{
           display: "flex",

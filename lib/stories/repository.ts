@@ -10,15 +10,9 @@ import {
   type StoryDetailPayload,
   type StoryResponseMeta,
 } from "./schema";
+import type { StoryRepositoryResult } from "./repository-types";
 
-export type StoryRepositoryStatus = "success" | "empty" | "not_found" | "stale" | "configuration_required" | "error";
-export type StoryRepositoryResult<T> = {
-  status: StoryRepositoryStatus;
-  data: T | null;
-  meta: StoryResponseMeta;
-  error?: { code: string; message: string } | null;
-  diagnostics?: Pick<AggregatedNews, "sources" | "aiTranslation" | "aiStatus">;
-};
+export type { StoryRepositoryResult, StoryRepositoryStatus } from "./repository-types";
 
 export type StoryNewsLoader = () => Promise<AggregatedNews>;
 
@@ -98,8 +92,6 @@ function itemToStory(item: NewsItem): StoryCluster {
   const summaryLong = (summaryParagraphs.length ? summaryParagraphs : [item.summary]).join("\n\n").slice(0, 12_000);
   const sourceArticleIds = articles.map((article) => article.id);
   const latestArticleTime = Math.max(...articles.map((article) => Date.parse(article.publishedAt)), Date.parse(publishedAt));
-  const teams = unique([item.team]).filter((value) => !/^(bóng đá quốc tế|thể thao việt nam|thể thao)$/i.test(value));
-  const competition = /^(bóng đá quốc tế|thể thao việt nam|thể thao)$/i.test(item.competition) ? null : item.competition;
   return storyClusterSchema.parse({
     id: item.id,
     slug: canonicalSlug,
@@ -127,8 +119,8 @@ function itemToStory(item: NewsItem): StoryCluster {
       .map((article) => ({ id: `timeline-${article.id}`, occurredAt: article.publishedAt, description: `${article.sourceName} đăng: ${article.title}`, sourceArticleIds: [article.id] }))
       .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt)),
     linkedMatch: null,
-    competition,
-    teams,
+    competition: null,
+    teams: [],
     players: [],
     articles,
     aiGenerated: Boolean(item.translatedByAI),
@@ -138,16 +130,15 @@ function itemToStory(item: NewsItem): StoryCluster {
 
 function relatedStories(stories: StoryCluster[], current: StoryCluster, limit = 4): StoryCluster[] {
   const terms = unique([
-    ...current.teams,
-    ...current.players,
-    current.competition,
+    current.category,
+    ...current.sourceNames,
     ...current.title.split(/[:\-–—]/).slice(0, 2),
   ]).map(normalizeSearchText).filter((term) => term.length >= 3);
   const currentArticleIds = new Set(current.articles.map((article) => article.id));
   return stories
     .filter((story) => story.id !== current.id && !story.articles.some((article) => currentArticleIds.has(article.id)))
     .map((story) => {
-      const haystack = normalizeSearchText(`${story.title} ${story.summary} ${story.competition ?? ""} ${story.teams.join(" ")} ${story.players.join(" ")}`);
+      const haystack = normalizeSearchText(`${story.title} ${story.summary} ${story.category} ${story.sourceNames.join(" ")}`);
       return { story, score: terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0) };
     })
     .filter(({ score }) => score > 0)

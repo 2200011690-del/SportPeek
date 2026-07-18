@@ -15,7 +15,7 @@ test("quiet hours support same-day and overnight ranges in account timezone", ()
   assert.equal(isQuietTime(afternoonUtc, "Asia/Ho_Chi_Minh", "22:00", "07:00"), false);
 });
 
-test("notification preference maps transfer alerts explicitly", () => {
-  assert.equal(preferenceAllows("transfer", { telegram_enabled: true, transfer_news: true }), true);
+test("notification preference maps general-news topics onto the legacy preference columns", () => {
+  assert.equal(preferenceAllows("economy_news", { telegram_enabled: true, transfer_news: true }), true);
   assert.equal(preferenceAllows("breaking_news", { telegram_enabled: false, breaking_news: true }), false);
 });

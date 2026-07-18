@@ -18,13 +18,13 @@ export async function enrichInternationalNews(articles: NewsInput[]): Promise<Ne
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || "gpt-5.4-nano",
       input: [
-        { role: "system", content: "Bạn là biên tập viên thể thao trung lập. Chỉ dùng dữ kiện có trong metadata được cung cấp. Dịch tự nhiên sang tiếng Việt, giữ nguyên tên riêng, không giật tít quá mức, không suy đoán và không sao chép dài. Trả đúng JSON schema." },
+        { role: "system", content: "Bạn là biên tập viên tin tức trung lập của NewsPeek. Chỉ dùng dữ kiện có trong metadata được cung cấp. Dịch tự nhiên sang tiếng Việt, giữ nguyên tên riêng, không giật tít quá mức, không suy đoán và không sao chép dài. Trả đúng JSON schema." },
         { role: "user", content: JSON.stringify(articles) },
       ],
       text: {
         format: {
           type: "json_schema",
-          name: "sportpeek_news_enrichment",
+          name: "newspeek_news_enrichment",
           strict: true,
           schema: {
             type: "object",

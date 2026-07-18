@@ -42,17 +42,17 @@ export function buildStoryMetadata(story: StoryCluster, baseUrl = getSiteBaseUrl
   const image = absoluteUrl(story.imageUrl ?? "/og.png", baseUrl);
   const publishedTime = story.firstPublishedAt ?? story.publishedAt;
   const modifiedTime = storyMaterialTimestamp(story);
-  const tags = unique([story.category, story.competition, ...story.teams, ...story.players]);
+  const tags = unique([story.category, ...story.sourceNames]);
   return {
     title: story.title,
     description: summary,
-    authors: [{ name: "SportPeek" }],
+    authors: [{ name: "NewsPeek" }],
     keywords: tags,
     alternates: { canonical },
     openGraph: {
       type: "article",
       url: canonical,
-      siteName: "SportPeek",
+      siteName: "NewsPeek",
       locale: story.language === "vi" ? "vi_VN" : "en_US",
       title: story.title,
       description: summary,
@@ -81,7 +81,7 @@ export function buildNewsArticleJsonLd(story: StoryCluster, baseUrl = getSiteBas
     datePublished: article.publishedAt,
     publisher: { "@type": "Organization", name: article.sourceName },
   }));
-  const about = unique([story.competition, ...story.teams, ...story.players]).map((name) => ({
+  const about = unique([story.category, ...story.sourceNames]).map((name) => ({
     "@type": "Thing",
     name,
   }));
@@ -98,9 +98,9 @@ export function buildNewsArticleJsonLd(story: StoryCluster, baseUrl = getSiteBas
     dateModified: storyMaterialTimestamp(story),
     inLanguage: story.language,
     articleSection: story.category,
-    author: [{ "@type": "Organization", name: "SportPeek", url: baseUrl.toString() }],
+    author: [{ "@type": "Organization", name: "NewsPeek", url: baseUrl.toString() }],
     contributor: contributorNames.map((name) => ({ "@type": "Person", name })),
-    publisher: { "@type": "Organization", name: "SportPeek", url: baseUrl.toString() },
+    publisher: { "@type": "Organization", name: "NewsPeek", url: baseUrl.toString() },
     isAccessibleForFree: true,
     about,
     citation: unique(story.articles.map((article) => article.canonicalUrl ?? article.originalUrl)),

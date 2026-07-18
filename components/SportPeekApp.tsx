@@ -1,28 +1,20 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { Home, Newspaper, Radio, CalendarDays, Goal, Trophy, Activity, Sparkles } from "lucide-react";
-import type { Competition, Match, NewsItem, NewsSourceCatalogItem, Standing, Team, Player } from "@/lib/types";
-import type { HealthSnapshot, ServiceHealth } from "@/lib/health";
+import type { NewsItem, NewsSourceCatalogItem } from "@/lib/types";
+import type { HealthSnapshot } from "@/lib/health";
 import type { StoryDetailPayload } from "@/lib/stories/schema";
+import {
+  RuntimeDataContext,
+  STORAGE_KEYS,
+  emptyRuntimeData,
+  type NewsAIStatus,
+  type RuntimeData,
+  type SourceFilter,
+} from "@/components/runtime/RuntimeDataContext";
 
-// Types and Context
-export type SourceFilter = "all" | "vi" | "international" | "official" | "youtube" | "rss";
-export type NewsAIStatus = { provider: string; state: "ok" | "off" | "error"; translatedCount: number };
-export type RuntimeData = { newsItems: NewsItem[]; forYouItems: NewsItem[]; personalized: boolean; matchItems: Match[]; standingRows: Standing[]; teams: Team[]; competitions: Competition[]; players: Player[]; sourceCatalog: NewsSourceCatalogItem[]; newsReal: boolean; sportsReal: boolean; newsSources: string[]; aiTranslation: boolean; aiStatus: NewsAIStatus; loading: boolean; lastUpdated: string | null; health: HealthSnapshot };
 type RuntimeResponse<T> = { status?: string; data: T; demo?: boolean; personalized?: boolean; provider?: string; sources?: string[]; aiTranslation?: boolean; aiStatus?: NewsAIStatus; error?: { code: string; message: string } | null };
-
-const loadingService = (label: string): ServiceHealth => ({ state: "unavailable", label, message: "Đang tải trạng thái từ server.", provider: null, lastUpdatedAt: null, count: null });
-const loadingHealth: HealthSnapshot = { state: "unavailable", generatedAt: new Date(0).toISOString(), services: { rss: loadingService("Đang tải RSS"), stories: loadingService("Đang tải stories"), sports: loadingService("Đang tải sports"), ai: loadingService("Đang tải AI"), telegram: loadingService("Đang tải Telegram") } };
-export const emptyRuntimeData: RuntimeData = { newsItems: [], forYouItems: [], personalized: false, matchItems: [], standingRows: [], teams: [], competitions: [], players: [], sourceCatalog: [], newsReal: false, sportsReal: false, newsSources: [], aiTranslation: false, aiStatus: { provider: "off", state: "off", translatedCount: 0 }, loading: true, lastUpdated: null, health: loadingHealth };
-
-export const RuntimeDataContext = createContext<RuntimeData>(emptyRuntimeData);
-export const useRuntimeData = () => useContext(RuntimeDataContext);
-
-export const STORAGE_KEYS = { theme: "sportpeek.theme" } as const;
-export type StoredSettings = { displayName: string; language: "vi" | "en"; timezone: string; notifications: boolean[]; quietHoursStart: string; quietHoursEnd: string };
-export const DEFAULT_DEVICE_SETTINGS: StoredSettings = { displayName: "Người hâm mộ", language: "vi", timezone: "Asia/Ho_Chi_Minh", notifications: [true, true, true, true, false, false], quietHoursStart: "", quietHoursEnd: "" };
 
 async function fetchRuntime<T>(url: string): Promise<RuntimeResponse<T>> {
   const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(12_000) });
@@ -30,24 +22,10 @@ async function fetchRuntime<T>(url: string): Promise<RuntimeResponse<T>> {
   return response.json() as Promise<RuntimeResponse<T>>;
 }
 
-export const navItems = [
-  { href: "/", label: "Tổng quan", icon: Home },
-  { href: "/for-you", label: "Dành cho bạn", icon: Sparkles },
-  { href: "/news", label: "Tin mới nhất", icon: Newspaper },
-  { href: "/live", label: "Trực tiếp", icon: Radio },
-  { href: "/fixtures", label: "Lịch thi đấu", icon: CalendarDays },
-  { href: "/results", label: "Kết quả", icon: Goal },
-  { href: "/standings", label: "Bảng xếp hạng", icon: Trophy },
-  { href: "/transfers", label: "Chuyển nhượng", icon: Activity },
-];
-
 // Split page and layout components
 import HomePage from "@/components/pages/HomePage";
-import { ForYouPage, NewsPage, TransfersPage } from "@/components/pages/NewsPage";
+import { ForYouPage, NewsPage } from "@/components/pages/NewsPage";
 import RichNewsDetail from "@/components/pages/RichNewsDetail";
-import { LivePage, MatchDetail } from "@/components/pages/LivePage";
-import StandingsPage from "@/components/pages/StandingsPage";
-import EntityPage from "@/components/pages/EntityPage";
 import SearchPage from "@/components/pages/SearchPage";
 import BookmarksPage from "@/components/pages/BookmarksPage";
 import SettingsPage from "@/components/pages/SettingsPage";
@@ -70,7 +48,7 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
   useEffect(() => {
     queueMicrotask(() => {
       try {
-        const storedTheme = localStorage.getItem(STORAGE_KEYS.theme);
+        const storedTheme = localStorage.getItem(STORAGE_KEYS.theme) ?? localStorage.getItem(STORAGE_KEYS.legacyTheme);
         if (storedTheme === "dark" || storedTheme === "light") setTheme(storedTheme);
       } catch { /* ignore invalid device-local data */ }
       setPreferencesLoaded(true);
@@ -82,9 +60,9 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
 
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").then((reg) => {
-        console.log("[SportPeek PWA] Service Worker registered:", reg.scope);
+        console.log("[NewsPeek PWA] Service Worker registered:", reg.scope);
       }).catch((err) => {
-        console.error("[SportPeek PWA] Service Worker registration failed:", err);
+        console.error("[NewsPeek PWA] Service Worker registration failed:", err);
       });
     }
   }, []);
@@ -99,34 +77,20 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
       try {
         const requests = await Promise.allSettled([
           fetchRuntime<NewsItem[]>("/api/news"),
-          fetchRuntime<Match[]>("/api/matches/live"),
-          fetchRuntime<Match[]>("/api/fixtures"),
-          fetchRuntime<Match[]>("/api/results"),
-          fetchRuntime<Standing[]>("/api/standings"),
           fetchRuntime<HealthSnapshot>("/api/health"),
-          fetchRuntime<Team[]>("/api/teams"),
-          fetchRuntime<Competition[]>("/api/competitions"),
-          fetchRuntime<Player[]>("/api/players"),
           fetchRuntime<NewsItem[]>("/api/feed/for-you"),
           fetchRuntime<NewsSourceCatalogItem[]>("/api/sources"),
         ]);
         if (!active) return;
         const newsResponse = requests[0].status === "fulfilled" ? requests[0].value : null;
-        const sportsResponses = requests.slice(1, 4).filter((result): result is PromiseFulfilledResult<RuntimeResponse<Match[]>> => result.status === "fulfilled").map((result) => result.value);
-        const tableResponse = requests[4].status === "fulfilled" ? requests[4].value : null;
-        const healthResponse = requests[5].status === "fulfilled" ? requests[5].value : null;
-        const teamResponse = requests[6].status === "fulfilled" ? requests[6].value : null;
-        const competitionResponse = requests[7].status === "fulfilled" ? requests[7].value : null;
-        const playerResponse = requests[8].status === "fulfilled" ? requests[8].value : null;
-        const forYouResponse = requests[9].status === "fulfilled" ? requests[9].value : null;
-        const sourceCatalogResponse = requests[10].status === "fulfilled" ? requests[10].value : null;
-        const health = healthResponse?.data ?? loadingHealth;
-        const mergedMatches = [...new Map(sportsResponses.flatMap((result) => result.data ?? []).map((match) => [match.id, match])).values()];
+        const healthResponse = requests[1].status === "fulfilled" ? requests[1].value : null;
+        const forYouResponse = requests[2].status === "fulfilled" ? requests[2].value : null;
+        const sourceCatalogResponse = requests[3].status === "fulfilled" ? requests[3].value : null;
+        const health = healthResponse?.data ?? emptyRuntimeData.health;
         const rssActive = newsResponse?.demo === false && Boolean(newsResponse.data?.length) && !["unavailable", "configuration_required", "development_mock"].includes(health.services.rss.state);
-        const sportsActive = !["unavailable", "configuration_required", "development_mock"].includes(health.services.sports.state);
         const aiStatus = newsResponse?.aiStatus ?? { provider: "off" as const, state: "off" as const, translatedCount: 0 };
         const aiActive = newsResponse?.aiTranslation === true;
-        setRuntimeData({ newsItems: newsResponse?.data ?? [], forYouItems: forYouResponse?.data ?? [], personalized: forYouResponse?.personalized === true, matchItems: mergedMatches, standingRows: tableResponse?.data ?? [], teams: teamResponse?.data ?? [], competitions: competitionResponse?.data ?? [], players: playerResponse?.data ?? [], sourceCatalog: sourceCatalogResponse?.data ?? [], newsReal: rssActive, sportsReal: sportsActive, newsSources: newsResponse?.sources ?? [], aiTranslation: aiActive, aiStatus, loading: false, lastUpdated: health.generatedAt, health });
+        setRuntimeData({ newsItems: newsResponse?.data ?? [], forYouItems: forYouResponse?.data ?? [], personalized: forYouResponse?.personalized === true, sourceCatalog: sourceCatalogResponse?.data ?? [], newsReal: rssActive, newsSources: newsResponse?.sources ?? [], aiTranslation: aiActive, aiStatus, loading: false, lastUpdated: health.generatedAt, health });
       } finally { loading = false; }
     };
     void load();
@@ -140,7 +104,7 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
       if (!response.ok) setBookmarks((current) => { const next = new Set(current); if (remove) next.add(id); else next.delete(id); return next; });
     }).catch(() => setBookmarks((current) => { const next = new Set(current); if (remove) next.add(id); else next.delete(id); return next; }));
   };
-  const toggleFollow = (id: string, entityType: "team" | "player" | "competition" | "source" = "team") => {
+  const toggleFollow = (id: string, entityType: "source" = "source") => {
     const remove = followed.has(id);
     setFollowed((current) => { const next = new Set(current); if (remove) next.delete(id); else next.add(id); return next; });
     void fetch("/api/follows", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ entityType, entityId: id, action: remove ? "unfollow" : "follow" }), signal: AbortSignal.timeout(12_000) }).then((response) => {
@@ -154,16 +118,8 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
   if (route === "/") page = <HomePage bookmarks={bookmarks} onBookmark={toggleBookmark} sourceFilter={homeSourceFilter} />;
   else if (route === "/for-you") page = <ForYouPage followed={followed} onFollow={toggleFollow} bookmarks={bookmarks} onBookmark={toggleBookmark} />;
   else if (route === "/news") page = <NewsPage bookmarks={bookmarks} onBookmark={toggleBookmark} />;
+  else if (segments[0] === "category" && segments[1]) page = <NewsPage bookmarks={bookmarks} onBookmark={toggleBookmark} categorySlug={segments[1]} />;
   else if (segments[0] === "news" && segments[1]) page = <RichNewsDetail slug={segments[1]} bookmarks={bookmarks} onBookmark={toggleBookmark} initialData={initialStory} />;
-  else if (route === "/live") page = <LivePage mode="live" />;
-  else if (route === "/fixtures") page = <LivePage mode="fixtures" />;
-  else if (route === "/results") page = <LivePage mode="results" />;
-  else if (segments[0] === "matches") page = <MatchDetail id={segments[1] ?? "m1"} />;
-  else if (route === "/standings") page = <StandingsPage />;
-  else if (route === "/transfers") page = <TransfersPage bookmarks={bookmarks} onBookmark={toggleBookmark} />;
-  else if (segments[0] === "teams") page = <EntityPage type="team" slug={segments[1] ?? "arsenal"} followed={followed} onFollow={toggleFollow} />;
-  else if (segments[0] === "players") page = <EntityPage type="player" slug={segments[1] ?? "minh-quan-1"} followed={followed} onFollow={toggleFollow} />;
-  else if (segments[0] === "competitions") page = <EntityPage type="competition" slug={segments[1] ?? "premier-league"} followed={followed} onFollow={toggleFollow} />;
   else if (route === "/search") page = <SearchPage />;
   else if (route === "/bookmarks") page = <BookmarksPage bookmarks={bookmarks} onBookmark={toggleBookmark} />;
   else if (route === "/settings") page = <SettingsPage />;

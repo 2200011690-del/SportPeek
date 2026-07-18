@@ -3,14 +3,25 @@ import { dedupeClaims } from "./grounding";
 import type { AIProvider, ClassifiedArticle, ClusterArticleInput, ClusterSummary } from "./types";
 
 function articleType(text: string) {
-  if (/tro lai|hoi phuc|return|fit again/.test(text)) return "recovery";
-  if (/chan thuong|injur/.test(text)) return "injury";
-  if (/chuyen nhuong|transfer|ky hop dong|signing/.test(text)) return "transfer";
-  if (/ket qua|danh bai|thang|thua|draw|win|beat|full.?time/.test(text)) return "result";
-  if (/doi hinh|line.?up/.test(text)) return "lineup";
-  if (/truoc tran|preview/.test(text)) return "preview";
-  if (/phat bieu|says|said|quote/.test(text)) return "quote";
+  if (/truc tiep|live|dang dien ra|breaking|khan cap|moi nhat/.test(text)) return "breaking";
+  if (/phan tich|analysis|giai thich|explainer/.test(text)) return "analysis";
+  if (/phong van|interview|hoi dap/.test(text)) return "interview";
+  if (/binh luan|quan diem|opinion|goc nhin/.test(text)) return "opinion";
   return "news";
+}
+
+function category(text: string) {
+  const rules: Array<[RegExp, string]> = [
+    [/cong nghe|ai\b|tri tue nhan tao|software|chip|smartphone|cyber|internet|technology|tech\b/, "Công nghệ"],
+    [/suc khoe|benh|y te|bac si|vaccine|health|medical|hospital/, "Sức khỏe"],
+    [/khoa hoc|nghien cuu|khong gian|vu tru|science|research|nasa/, "Khoa học"],
+    [/kinh te|tai chinh|chung khoan|ngan hang|doanh nghiep|thi truong|economy|business|finance|market/, "Kinh tế"],
+    [/chinh tri|quoc hoi|chinh phu|tong thong|bau cu|ngoai giao|politic|election|government/, "Chính trị"],
+    [/van hoa|giai tri|dien anh|am nhac|nghe si|phim|culture|entertainment|movie|music/, "Văn hóa & Giải trí"],
+    [/the thao|bong da|football|soccer|tennis|olympic|v league|premier league/, "Thể thao"],
+    [/the gioi|quoc te|global|world|europe|asia|africa|america|middle east/, "Thế giới"],
+  ];
+  return rules.find(([pattern]) => pattern.test(text))?.[1] ?? "Việt Nam";
 }
 
 function sentences(value: string) {
@@ -54,8 +65,17 @@ export class HeuristicAIProvider implements AIProvider {
 
   async classifyArticle(input: { title: string; excerpt: string }): Promise<ClassifiedArticle> {
     const text = normalizeTitle(`${input.title} ${input.excerpt}`);
-    const competitions = [["premier league", "Premier League"], ["champions league", "Champions League"], ["world cup", "World Cup"], ["v league", "V.League"]] as const;
-    return { sport: "football", competition: competitions.find(([key]) => text.includes(key))?.[1] ?? null, teams: [], players: [], topics: [articleType(text)], articleType: articleType(text), language: /\b(the|and|with|from|after|before)\b/.test(text) ? "en" : "vi" };
+    const selectedCategory = category(text);
+    return {
+      category: selectedCategory,
+      topics: [selectedCategory, articleType(text)],
+      people: [],
+      organizations: [],
+      locations: [],
+      countries: [],
+      articleType: articleType(text),
+      language: /\b(the|and|with|from|after|before)\b/.test(text) ? "en" : "vi",
+    };
   }
 
   async summarizeCluster(input: { articles: ClusterArticleInput[] }): Promise<ClusterSummary> {
@@ -70,18 +90,18 @@ export class HeuristicAIProvider implements AIProvider {
       if (words(chosen.map((item) => item.text).join(" ")) >= 180 || chosen.length >= 5) break;
       chosen.push(claim);
     }
-    const summary = chosen.map((claim) => claim.text).join(" ").split(/\s+/).slice(0, 200).join(" ") || lead?.title || "Bản tin thể thao";
+    const summary = chosen.map((claim) => claim.text).join(" ").split(/\s+/).slice(0, 200).join(" ") || lead?.title || "Bản tin tổng hợp";
     const keyPoints = dedupeClaims(chosen.map((claim) => claim.text), 0.72).slice(0, 5);
     const sourceIds = [...new Set(chosen.flatMap((claim) => claim.articleIds))];
     return {
-      title: lead?.title ?? "Bản tin thể thao",
+      title: lead?.title ?? "Bản tin tổng hợp",
       summary,
-      keyPoints: keyPoints.length ? keyPoints : [lead?.title ?? "Bản tin thể thao"],
+      keyPoints: keyPoints.length ? keyPoints : [lead?.title ?? "Bản tin tổng hợp"],
       sourceIds: sourceIds.length ? sourceIds : input.articles.map((article) => article.id),
     };
   }
 
-  async extractEntities() { return { teams: [], players: [], competitions: [] }; }
+  async extractEntities() { return { people: [], organizations: [], locations: [], countries: [] }; }
 
   async evaluateClusterMatch(input: { article: ClusterArticleInput; candidate: ClusterArticleInput[] }) {
     const score = Math.max(0, ...input.candidate.map((item) => duplicateSimilarity(input.article.title, item.title)));
@@ -125,6 +145,4 @@ export class HeuristicAIProvider implements AIProvider {
     return evidence.length ? `${evidence.map((item) => item.text).join(" ")} (Nguồn: ${[...new Set(evidence.map((item) => item.id))].join(", ")})` : "Không đủ dữ kiện trong các bài nguồn để trả lời câu hỏi này.";
   }
 
-  async createMatchPreview() { return "Chưa đủ dữ liệu có kiểm chứng để tạo nhận định trước trận."; }
-  async createMatchRecap() { return "Chưa đủ dữ liệu có kiểm chứng để tạo tóm tắt sau trận."; }
 }

@@ -69,16 +69,13 @@ export function newsStatusLabel(
   item: Pick<NewsItem, "storyStatus" | "category" | "title" | "sources">,
 ): string {
   const sourceCount = independentSourceCount(item);
-  const isTransfer = /chuyển nhượng|thương vụ|transfer|gia nhập|đàm phán/i.test(
-    `${item.category} ${item.title}`,
-  );
   switch (item.storyStatus) {
     case "official":
       return "Đã xác nhận";
     case "reported":
       return sourceCount >= 2 ? "Nhiều nguồn xác nhận" : "Một nguồn đưa tin";
     case "rumor":
-      return isTransfer ? "Tin đồn chuyển nhượng" : "Chưa xác nhận";
+      return "Chưa xác nhận";
     case "unverified":
       return "Chưa kiểm chứng";
     case "developing":
@@ -134,7 +131,7 @@ function featuredScore(item: NewsItem, now: number): number {
   );
 }
 
-/** UI ranking for the editorial "Nổi bật" view, with caps that keep one team from taking over the first screen. */
+/** UI ranking for the editorial "Nổi bật" view, with caps that keep one topic from taking over the first screen. */
 export function rankFeaturedNews(items: NewsItem[]): NewsItem[] {
   const now = Date.now();
   const ranked = [...items].sort(
@@ -144,29 +141,28 @@ export function rankFeaturedNews(items: NewsItem[]): NewsItem[] {
   );
   const selected: NewsItem[] = [];
   const deferred: NewsItem[] = [];
-  const teamCounts = new Map<string, number>();
-  const competitionCounts = new Map<string, number>();
+  const topicCounts = new Map<string, number>();
+  const categoryCounts = new Map<string, number>();
 
   for (const item of ranked) {
     if (selected.length >= 12) {
       deferred.push(item);
       continue;
     }
-    const teamKey = item.team.trim().toLocaleLowerCase("vi");
-    const competitionKey = item.competition.trim().toLocaleLowerCase("vi");
-    const teamCount = teamCounts.get(teamKey) ?? 0;
-    const competitionCount = competitionCounts.get(competitionKey) ?? 0;
+    const topicKey = (item.primaryTopic ?? item.topics?.[0] ?? item.category).trim().toLocaleLowerCase("vi");
+    const categoryKey = item.category.trim().toLocaleLowerCase("vi");
+    const topicCount = topicCounts.get(topicKey) ?? 0;
+    const categoryCount = categoryCounts.get(categoryKey) ?? 0;
     if (
-      (teamKey && teamCount >= 2) ||
-      (competitionKey && competitionCount >= 3)
+      (topicKey && topicCount >= 2) ||
+      (categoryKey && categoryCount >= 3)
     ) {
       deferred.push(item);
       continue;
     }
     selected.push(item);
-    if (teamKey) teamCounts.set(teamKey, teamCount + 1);
-    if (competitionKey)
-      competitionCounts.set(competitionKey, competitionCount + 1);
+    if (topicKey) topicCounts.set(topicKey, topicCount + 1);
+    if (categoryKey) categoryCounts.set(categoryKey, categoryCount + 1);
   }
 
   return [...selected, ...deferred];
