@@ -49,6 +49,13 @@ export function AppSidebar({
 }) {
   const { newsItems } = useRuntimeData();
   const homeMode = route === "/";
+  const [isMobile, setIsMobile] = React.useState(false);
+  React.useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
   const primaryItems = [navItems[0], navItems[1], navItems[2]];
   const sourceCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -98,7 +105,7 @@ export function AppSidebar({
   return (
     <>
       <div className={`drawer-backdrop ${open ? "show" : ""}`} onClick={onClose} />
-      <aside className={`app-sidebar ${open ? "open" : ""}`}>
+      <aside className={`app-sidebar ${open ? "open" : ""}`} inert={isMobile && !open}>
         <Link className="brand" href="/" aria-label="NewsPeek — Trang chủ">
           <span className="brand-symbol"><span /></span>
           <span>NEWS<b>PEEK</b></span>

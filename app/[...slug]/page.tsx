@@ -7,6 +7,7 @@ import { isInternalMode, isPublicSignupAllowed } from "@/lib/config";
 import { newsCategory } from "@/lib/news/categories";
 import { buildNewsArticleJsonLd, buildStoryMetadata, serializeJsonLd } from "@/lib/stories/seo";
 import { loadStoryArticleContents } from "@/lib/articles/content";
+import { getInitialData } from "@/lib/application/ssr-data";
 
 type PageProps = { params: Promise<{ slug: string[] }> };
 
@@ -66,16 +67,19 @@ export default async function CatchAllPage({ params }: PageProps) {
   const dynamicRoutes = new Set(["news", "category"]);
   const validRoute = slug.length === 1 ? staticRoutes.has(slug[0]) : slug.length === 2 && dynamicRoutes.has(slug[0]) && Boolean(slug[1]);
   if (!validRoute) notFound();
+  if (slug[0] === "category" && !newsCategory(slug[1])) notFound();
   if (slug[0] === "register" && isInternalMode()) redirect("/login?error=invitation_only");
   const storyData = slug.length === 2 && slug[0] === "news" ? await loadStoryPageData(slug[1]) : null;
+  if (slug[0] === "news" && !storyData?.story) notFound();
   const story = storyData?.story ?? null;
   if (story && story.slug !== slug[1]) redirect(`/news/${story.slug}`);
   const initialStory = storyData && story
     ? { ...storyData, articleContents: await loadStoryArticleContents(story).catch(() => []) }
     : storyData;
+  const initialData = await getInitialData(`/${slug.join("/")}`, slug[0] === "category" ? slug[1] : undefined);
   const jsonLd = story ? serializeJsonLd(buildNewsArticleJsonLd(story)) : null;
   return <>
     {jsonLd ? <script id="newspeek-newsarticle" type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} /> : null}
-    <SportPeekApp route={`/${slug.join("/")}`} signupAllowed={isPublicSignupAllowed()} initialStory={initialStory} />
+    <SportPeekApp route={`/${slug.join("/")}`} signupAllowed={isPublicSignupAllowed()} initialStory={initialStory} initialData={initialData} />
   </>;
 }

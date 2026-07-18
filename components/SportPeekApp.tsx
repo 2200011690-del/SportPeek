@@ -36,7 +36,7 @@ import { AppSidebar, Header, MobileNavigation, SystemStatusBanner, AppFooter } f
 import { SearchCommand } from "@/components/ui/Search";
 import { EmptyState } from "@/components/ui/badges";
 
-export default function SportPeekApp({ route, signupAllowed = false, initialStory = null }: { route: string; signupAllowed?: boolean; initialStory?: StoryDetailPayload | null }) {
+export default function SportPeekApp({ route, signupAllowed = false, initialStory = null, initialData = null }: { route: string; signupAllowed?: boolean; initialStory?: StoryDetailPayload | null; initialData?: any | null }) {
   const [theme, setTheme] = useState("dark");
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -44,7 +44,31 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
   const [bookmarks, setBookmarks] = useState<Set<string>>(() => new Set());
   const [followed, setFollowed] = useState<Set<string>>(() => new Set());
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
-  const [runtimeData, setRuntimeData] = useState<RuntimeData>(emptyRuntimeData);
+  const [runtimeData, setRuntimeData] = useState<RuntimeData>(() => {
+    if (initialData) {
+      const health = initialData.health;
+      const newsResponse = initialData.news;
+      const forYouResponse = initialData.forYou;
+      const sourceCatalogResponse = initialData.sources;
+      const rssActive = newsResponse?.demo === false && Boolean(newsResponse.data?.length) && !["unavailable", "configuration_required", "development_mock"].includes(health.services.rss.state);
+      const aiStatus = newsResponse?.aiStatus ?? { provider: "off" as const, state: "off" as const, translatedCount: 0 };
+      const aiActive = newsResponse?.aiTranslation === true;
+      return {
+        newsItems: newsResponse?.data ?? [],
+        forYouItems: forYouResponse?.data ?? [],
+        personalized: forYouResponse?.personalized === true,
+        sourceCatalog: sourceCatalogResponse ?? [],
+        newsReal: rssActive,
+        newsSources: newsResponse?.sources ?? [],
+        aiTranslation: aiActive,
+        aiStatus,
+        loading: false,
+        lastUpdated: health.generatedAt,
+        health
+      };
+    }
+    return emptyRuntimeData;
+  });
   useEffect(() => {
     queueMicrotask(() => {
       try {
@@ -93,7 +117,9 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
         setRuntimeData({ newsItems: newsResponse?.data ?? [], forYouItems: forYouResponse?.data ?? [], personalized: forYouResponse?.personalized === true, sourceCatalog: sourceCatalogResponse?.data ?? [], newsReal: rssActive, newsSources: newsResponse?.sources ?? [], aiTranslation: aiActive, aiStatus, loading: false, lastUpdated: health.generatedAt, health });
       } finally { loading = false; }
     };
-    void load();
+    if (!initialData) {
+      void load();
+    }
     const refreshTimer = window.setInterval(() => { void load(); }, 120_000);
     return () => { active = false; window.clearInterval(refreshTimer); };
   }, []);
@@ -126,5 +152,22 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
   else if (route === "/sources") page = <SourcesPage followed={followed} onFollow={toggleFollow} />;
   else if (["terms", "privacy", "copyright"].includes(segments[0])) page = <LegalPage type={segments[0]} />;
   else page = <div className="large-empty"><EmptyState title="Không tìm thấy trang" description="Trang bạn tìm kiếm không tồn tại hoặc đã được di chuyển." /><Link href="/" className="primary-button">Về trang chủ</Link></div>;
-  return <RuntimeDataContext.Provider value={runtimeData}><div className={`app-shell ${route === "/" ? "home-shell" : ""}`}><AppSidebar route={route} open={menuOpen} onClose={() => setMenuOpen(false)} sourceFilter={homeSourceFilter} onSourceFilter={setHomeSourceFilter} /><div className="app-column"><Header onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} theme={theme} onTheme={() => setTheme(theme === "dark" ? "light" : "dark")} /><SystemStatusBanner /><main className="content-wrap">{page}</main><AppFooter compact={route === "/"} /></div><MobileNavigation route={route} /><SearchCommand open={searchOpen} onClose={() => setSearchOpen(false)} /></div></RuntimeDataContext.Provider>;
+  return (
+    <RuntimeDataContext.Provider value={runtimeData}>
+      <div className={`app-shell ${route === "/" ? "home-shell" : ""}`}>
+        <a href="#main-content" className="skip-link">Bỏ qua nội dung điều hướng</a>
+        <AppSidebar route={route} open={menuOpen} onClose={() => setMenuOpen(false)} sourceFilter={homeSourceFilter} onSourceFilter={setHomeSourceFilter} />
+        <div className="app-column">
+          <Header onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} theme={theme} onTheme={() => setTheme(theme === "dark" ? "light" : "dark")} />
+          <SystemStatusBanner />
+          <main id="main-content" className="content-wrap" tabIndex={-1}>
+            {page}
+          </main>
+          <AppFooter compact={route === "/"} />
+        </div>
+        <MobileNavigation route={route} />
+        <SearchCommand open={searchOpen} onClose={() => setSearchOpen(false)} />
+      </div>
+    </RuntimeDataContext.Provider>
+  );
 }

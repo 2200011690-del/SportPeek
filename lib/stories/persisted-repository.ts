@@ -1,6 +1,7 @@
 import { ConfigurationError, ProviderError } from "@/lib/core/errors";
 import { logger } from "@/lib/core/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { normalizeSearchText } from "@/lib/ui-logic";
 import type { NewsAIStatus } from "@/lib/ingestion/official-feed";
 import { deriveEventImportance, dynamicStoryHotness, eventHalfLifeHours } from "@/lib/scoring";
 import { storyEventType } from "./clustering";
@@ -191,15 +192,18 @@ export async function loadPersistedStoryArchive(page: number, pageSize: number, 
   const safePageSize = Math.min(48, Math.max(1, Math.floor(pageSize)));
   const from = (safePage - 1) * safePageSize;
   const client = persistedClient();
-  const queryTerm = filters.query?.trim().slice(0, 120).replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim();
+  const queryTerm = filters.query?.trim().slice(0, 120);
+  const normalizedQueryTerm = queryTerm ? normalizeSearchText(queryTerm) : "";
   const category = filters.category?.trim().slice(0, 160);
   const source = filters.source?.trim().slice(0, 160);
   const minHotness = Math.min(100, Math.max(0, Math.floor(filters.minHotness ?? 0)));
+  
   let freshQuery = client.from("story_clusters").select(FRESH_STORY_COLUMNS, { count: "exact" });
-  if (queryTerm) freshQuery = freshQuery.or(`title.ilike.%${queryTerm}%,summary.ilike.%${queryTerm}%`);
-  if (category) freshQuery = freshQuery.eq("payload->>category", category);
-  if (source) freshQuery = freshQuery.contains("payload->sourceNames", [source]);
+  if (normalizedQueryTerm) freshQuery = freshQuery.ilike("search_text", `%${normalizedQueryTerm}%`);
+  if (category) freshQuery = freshQuery.eq("category", category);
+  if (source) freshQuery = freshQuery.contains("source_names", [source]);
   if (minHotness > 0) freshQuery = freshQuery.gte("hotness_score", minHotness);
+  
   const fresh = await freshQuery
     .order("last_material_update_at", { ascending: false })
     .order("first_published_at", { ascending: false })
@@ -210,8 +214,9 @@ export async function loadPersistedStoryArchive(page: number, pageSize: number, 
     count: number | null;
   };
   if (fresh.error && isFreshnessSchemaMissing(fresh.error)) {
+    const rawQueryTerm = queryTerm ? queryTerm.replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim() : "";
     let legacyQuery = client.from("story_clusters").select(LEGACY_STORY_COLUMNS, { count: "exact" });
-    if (queryTerm) legacyQuery = legacyQuery.or(`title.ilike.%${queryTerm}%,summary.ilike.%${queryTerm}%`);
+    if (rawQueryTerm) legacyQuery = legacyQuery.or(`title.ilike.%${rawQueryTerm}%,summary.ilike.%${rawQueryTerm}%`);
     if (category) legacyQuery = legacyQuery.eq("payload->>category", category);
     if (source) legacyQuery = legacyQuery.contains("payload->sourceNames", [source]);
     if (minHotness > 0) legacyQuery = legacyQuery.gte("hotness_score", minHotness);
