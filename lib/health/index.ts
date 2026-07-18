@@ -28,6 +28,24 @@ export type HealthSnapshot = {
     ai: ServiceHealth;
     telegram: ServiceHealth;
   };
+  metrics?: {
+    latestArticleAgeMinutes: number | null;
+    latestStoryAgeMinutes: number | null;
+    queue: {
+      pending: number;
+      processing: number;
+      failed: number;
+      deadLetter: number;
+      longestPendingAgeMinutes: number | null;
+    };
+    aiBacklog: number;
+    lastSuccessfulAiProvider: string | null;
+    successRate1h: number | null;
+    failureRate1h: number | null;
+    successRate24h: number | null;
+    failureRate24h: number | null;
+    noNewArticlesWarning: boolean;
+  };
 };
 
 export type AIJobHealthRecord = {
@@ -255,6 +273,15 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
     aiClusters,
     aiJobs,
     aiBacklog,
+    latestArticleRow,
+    latestStoryRow,
+    pendingArticleCount,
+    processingArticleCount,
+    failedArticleCount,
+    deadLetterArticleCount,
+    longestPendingArticleRow,
+    jobs1h,
+    jobs24h,
   ] = await Promise.all([
     client
       .from("news_sources")
@@ -297,6 +324,51 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
       .from("story_clusters")
       .select("id", { count: "exact", head: true })
       .eq("review_status", "pending"),
+    client
+      .from("raw_articles")
+      .select("fetched_at")
+      .order("fetched_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    client
+      .from("story_clusters")
+      .select("first_published_at")
+      .order("first_published_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    client
+      .from("raw_articles")
+      .select("id", { count: "exact", head: true })
+      .eq("processing_status", "pending"),
+    client
+      .from("raw_articles")
+      .select("id", { count: "exact", head: true })
+      .eq("processing_status", "processing"),
+    client
+      .from("raw_articles")
+      .select("id", { count: "exact", head: true })
+      .eq("processing_status", "failed")
+      .lt("processing_attempts", 5),
+    client
+      .from("raw_articles")
+      .select("id", { count: "exact", head: true })
+      .eq("processing_status", "failed")
+      .gte("processing_attempts", 5),
+    client
+      .from("raw_articles")
+      .select("published_at")
+      .eq("processing_status", "pending")
+      .order("published_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    client
+      .from("ingestion_jobs")
+      .select("status")
+      .gte("started_at", new Date(Date.now() - 3600_000).toISOString()),
+    client
+      .from("ingestion_jobs")
+      .select("status")
+      .gte("started_at", new Date(Date.now() - 24 * 3600_000).toISOString()),
   ]);
 
   const sourceErrors = (sources.data ?? []).filter(
@@ -385,17 +457,78 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
       null,
     ),
   };
+
+  const latestArticleFetchedAt = latestArticleRow.data?.fetched_at ?? null;
+  const latestArticleAgeMinutes = latestArticleFetchedAt
+    ? Math.max(0, Math.floor((Date.now() - Date.parse(latestArticleFetchedAt)) / 60_000))
+    : null;
+
+  const latestStoryPublishedAt = latestStoryRow.data?.first_published_at ?? null;
+  const latestStoryAgeMinutes = latestStoryPublishedAt
+    ? Math.max(0, Math.floor((Date.now() - Date.parse(latestStoryPublishedAt)) / 60_000))
+    : null;
+
+  const longestPendingPublishedAt = longestPendingArticleRow.data?.published_at ?? null;
+  const longestPendingAgeMinutes = longestPendingPublishedAt
+    ? Math.max(0, Math.floor((Date.now() - Date.parse(longestPendingPublishedAt)) / 60_000))
+    : null;
+
+  const latestSuccessAiJob = (aiJobs.data ?? []).find(job => job.status === "completed");
+  const lastSuccessfulAiProvider = latestSuccessAiJob?.provider ?? null;
+
+  const jobs1hList = jobs1h.data ?? [];
+  const successRate1h = jobs1hList.length
+    ? jobs1hList.filter(j => j.status === "completed").length / jobs1hList.length
+    : null;
+  const failureRate1h = jobs1hList.length
+    ? jobs1hList.filter(j => j.status === "failed").length / jobs1hList.length
+    : null;
+
+  const jobs24hList = jobs24h.data ?? [];
+  const successRate24h = jobs24hList.length
+    ? jobs24hList.filter(j => j.status === "completed").length / jobs24hList.length
+    : null;
+  const failureRate24h = jobs24hList.length
+    ? jobs24hList.filter(j => j.status === "failed").length / jobs24hList.length
+    : null;
+
+  const noNewArticlesWarning = latestArticleAgeMinutes !== null && latestArticleAgeMinutes > 120;
+
   const considered = [
     services.rss.state,
     services.stories.state,
     services.ai.state,
   ];
   const state = overallHealthState(considered);
+  const resultSnapshot: HealthSnapshot = {
+    state,
+    generatedAt,
+    services,
+    metrics: {
+      latestArticleAgeMinutes,
+      latestStoryAgeMinutes,
+      queue: {
+        pending: pendingArticleCount.count ?? 0,
+        processing: processingArticleCount.count ?? 0,
+        failed: failedArticleCount.count ?? 0,
+        deadLetter: deadLetterArticleCount.count ?? 0,
+        longestPendingAgeMinutes,
+      },
+      aiBacklog: backlogCount,
+      lastSuccessfulAiProvider,
+      successRate1h,
+      failureRate1h,
+      successRate24h,
+      failureRate24h,
+      noNewArticlesWarning,
+    },
+  };
+
   if (
     developmentFixturesEnabled() &&
     considered.every((value) => value !== "unavailable")
   ) {
-    return { state: "development_mock", generatedAt, services };
+    return { ...resultSnapshot, state: "development_mock" };
   }
-  return { state, generatedAt, services };
+  return resultSnapshot;
 }

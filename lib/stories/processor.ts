@@ -917,6 +917,22 @@ export async function processStories(
   let claimedIds: string[] = [];
 
   if (!summary.dryRun) {
+    const { data: activeJobs, error: activeCheckError } = await client
+      .from("ingestion_jobs")
+      .select("id")
+      .eq("job_type", "stories:process")
+      .eq("status", "processing")
+      .gt("started_at", new Date(Date.now() - 10 * 60_000).toISOString())
+      .limit(1);
+    if (activeCheckError)
+      throw new ProviderError("Không thể kiểm tra trạng thái job.", "supabase");
+    if (activeJobs && activeJobs.length > 0) {
+      console.log(
+        "[Story Processing] Another story processing job is already running. Skipping execution.",
+      );
+      return summary;
+    }
+
     const inserted = await client.from("ingestion_jobs").insert({
       id: jobId,
       job_type: "stories:process",
@@ -1340,7 +1356,35 @@ export async function summarizePersistedStories(
     );
   const client = admin();
   const limit = Math.min(100, Math.max(1, options.limit ?? 20));
+  const backfillJobId = randomUUID();
   if (!options.dryRun) {
+    const { data: activeJobs, error: activeCheckError } = await client
+      .from("ingestion_jobs")
+      .select("id")
+      .eq("job_type", "ai:backfill")
+      .eq("status", "processing")
+      .gt("started_at", new Date(Date.now() - 10 * 60_000).toISOString())
+      .limit(1);
+    if (activeCheckError)
+      throw new ProviderError("Không thể kiểm tra trạng thái job.", "supabase");
+    if (activeJobs && activeJobs.length > 0) {
+      console.log(
+        "[AI Backfill] Another AI backfill job is already processing. Skipping execution.",
+      );
+      return { provider: provider.name, dryRun: false, queued: 0, updated: 0, errors: [] };
+    }
+
+    const started = await client.from("ingestion_jobs").insert({
+      id: backfillJobId,
+      job_type: "ai:backfill",
+      provider: provider.name,
+      status: "processing",
+      fetched_count: 0,
+      metadata: { limit },
+    });
+    if (started.error)
+      throw new ProviderError("Không thể tạo AI backfill job.", "supabase");
+
     const leaseCutoff = new Date(Date.now() - 10 * 60_000).toISOString();
     const released = await client
       .from("ai_jobs")
@@ -1559,6 +1603,18 @@ export async function summarizePersistedStories(
           })
           .eq("id", jobId);
     }
+  }
+  if (!options.dryRun) {
+    await client
+      .from("ingestion_jobs")
+      .update({
+        status: errors.length && updated === 0 ? "failed" : "completed",
+        updated_count: updated,
+        error_code: errors.length ? "PARTIAL_FAILURE" : null,
+        error_message: errors.join("; ").slice(0, 1000) || null,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", backfillJobId);
   }
   return {
     provider: provider.name,

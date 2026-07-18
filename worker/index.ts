@@ -112,35 +112,49 @@ const worker = {
     const scheduledAt = controller.scheduledTime ?? Date.now();
     const task = scheduledPipelineTask(scheduledAt);
     const run = async () => {
+      let timerId: any;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timerId = setTimeout(() => {
+          reject(new Error("Timeout: Cron task execution exceeded 50 seconds."));
+        }, 50000);
+      });
+
       try {
-        if (task === "rss") {
-          // Even invocation: sync RSS feeds
-          console.log("[Cron] Running RSS sync...");
-          const rssSummary = await syncRss({ maxSources: 6 });
-          console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
-        } else if (task === "stories") {
-          // Odd invocation: process one small, atomically-leased story batch.
-          console.log("[Cron] Running story processing...");
-          const storySummary = await processStories(
-            scheduledStoryProcessingOptions(scheduledAt),
-          );
-          console.log(
-            "[Cron] Story processing result:",
-            JSON.stringify(storySummary),
-          );
-        } else {
-          // Dedicated backfill phase: keep pending stories receiving remote AI
-          // summaries even when fresh RSS never fully drains.
-          console.log("[Cron] Running AI summary backfill...");
-          const aiBackfill = await summarizePersistedStories({ limit: 1 });
-          console.log(
-            "[Cron] AI backfill result:",
-            JSON.stringify(aiBackfill),
-          );
-        }
+        await Promise.race([
+          (async () => {
+            if (task === "rss") {
+              // Even invocation: sync RSS feeds
+              console.log("[Cron] Running RSS sync...");
+              const rssSummary = await syncRss({ maxSources: 6 });
+              console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
+            } else if (task === "stories") {
+              // Odd invocation: process one small, atomically-leased story batch.
+              console.log("[Cron] Running story processing...");
+              const storySummary = await processStories(
+                scheduledStoryProcessingOptions(scheduledAt),
+              );
+              console.log(
+                "[Cron] Story processing result:",
+                JSON.stringify(storySummary),
+              );
+            } else {
+              // Dedicated backfill phase: keep pending stories receiving remote AI
+              // summaries even when fresh RSS never fully drains.
+              console.log("[Cron] Running AI summary backfill...");
+              const aiBackfill = await summarizePersistedStories({ limit: 1 });
+              console.log(
+                "[Cron] AI backfill result:",
+                JSON.stringify(aiBackfill),
+              );
+            }
+          })(),
+          timeoutPromise
+        ]);
       } catch (error) {
         console.error("[Cron] Error running scheduled task:", error);
         throw error;
+      } finally {
+        if (timerId) clearTimeout(timerId);
       }
     };
     if (ctx) ctx.waitUntil(run());
