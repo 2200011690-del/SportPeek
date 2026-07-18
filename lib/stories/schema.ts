@@ -91,6 +91,11 @@ export const storyClusterSchema = z.object({
   articles: z.array(rawArticleSchema).min(1),
   aiGenerated: z.boolean(),
   reviewStatus: z.enum(["pending", "auto", "reviewed"]),
+  region: z.string().optional(),
+  geography: z.string().nullable().optional(),
+  articleLanguage: z.string().optional(),
+  publisherCountry: z.string().optional(),
+  citations: z.array(storyFactSchema).optional(),
 });
 
 export const storyApiStatusSchema = z.enum([

@@ -68,11 +68,22 @@ export function sanitizeClusterSummary(output: ClusterSummary, articles: Cluster
   const keyPoints = dedupeClaims(output.keyPoints, 0.74).slice(0, 5);
   if (!keyPoints.length) throw new Error("AI summary has no distinct source-backed key points");
 
+  const citations = (output.citations ?? [])
+    .map((citation) => {
+      const validIds = [...new Set(citation.sourceArticleIds)].filter((id) => allowed.has(id));
+      return {
+        fact: citation.fact.replace(/\s+/g, " ").trim(),
+        sourceArticleIds: validIds,
+      };
+    })
+    .filter((c) => c.fact && c.sourceArticleIds.length > 0);
+
   return {
     title: output.title.replace(/\s+/g, " ").trim(),
     summary,
     keyPoints,
     sourceIds,
+    citations,
   };
 }
 
@@ -97,6 +108,7 @@ export type PreviousClusterSummary = {
   summary: string;
   keyPoints: string[];
   sourceIds: string[];
+  citations?: Array<{ fact: string; sourceArticleIds: string[] }>;
 };
 
 export function selectClusterSummary(input: {

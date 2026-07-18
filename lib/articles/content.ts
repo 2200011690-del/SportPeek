@@ -165,7 +165,7 @@ async function fetchAndPersistPublisherContent(
   try {
     const extracted = await fetchPublisherArticleContent(row.original_url);
     const fetchedAt = new Date().toISOString();
-    const patch = extracted
+    const patch = extracted && !extracted.error
       ? {
           full_content: extracted.content,
           content_status: "available",
@@ -177,11 +177,11 @@ async function fetchAndPersistPublisherContent(
         }
       : {
           full_content: null,
-          content_status: "source_only",
+          content_status: extracted?.error ? "failed" as const : "source_only" as const,
           content_source: null,
           content_fetched_at: fetchedAt,
           content_word_count: 0,
-          content_error: "Không tìm thấy toàn văn công khai trên trang nguồn.",
+          content_error: extracted?.error ?? "Không tìm thấy toàn văn công khai trên trang nguồn.",
           content_lease_expires_at: null,
         };
     const { data, error } = await client

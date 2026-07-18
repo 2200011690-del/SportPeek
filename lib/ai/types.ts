@@ -8,7 +8,7 @@ export interface ClassifiedArticle {
   articleType: string;
   language: string;
 }
-export interface ClusterSummary { title: string; summary: string; keyPoints: string[]; sourceIds: string[]; }
+export interface ClusterSummary { title: string; summary: string; keyPoints: string[]; sourceIds: string[]; citations?: Array<{ fact: string; sourceArticleIds: string[] }>; }
 export type ClusterArticleInput = { id: string; title: string; excerpt: string; publishedAt?: string; sourceName?: string };
 export interface ClusterMatchEvaluation { sameEvent: boolean; confidence: number; reason: string; }
 export interface TimelineItem { occurredAt: string; content: string; updateType: string; supportingArticleIds: string[]; }

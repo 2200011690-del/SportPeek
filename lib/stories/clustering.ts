@@ -592,6 +592,15 @@ function evidenceForPair(
   if (hours > maxHours)
     return { score: 0, compatible: false, reason: "outside_event_time_window" };
 
+  if (hasConflictingNumbers(article.title, other.title))
+    return { score: 0, compatible: false, reason: "number_sequence_conflict" };
+  if (hasAwardConflict(article.title, other.title))
+    return { score: 0, compatible: false, reason: "award_rank_conflict" };
+  if (hasTrainingScheduleConflict(article.title, other.title))
+    return { score: 0, compatible: false, reason: "training_schedule_conflict" };
+  if (hasDateMismatch(article.title, other.title))
+    return { score: 0, compatible: false, reason: "date_mismatch_conflict" };
+
   if (!eventTypesCompatible(articleType, otherType))
     return { score: 0, compatible: false, reason: "event_phase_conflict" };
   if (
@@ -846,4 +855,89 @@ export function analyzeSourceIndependence(articles: ClusterableArticle[]): {
     syndicatedArticleIds,
     groupByArticleId,
   };
+}
+
+function hasConflictingNumbers(title1: string, title2: string): boolean {
+  const t1 = canonicalized(title1);
+  const t2 = canonicalized(title2);
+  const matches1 = t1.match(/\b\d+\b/g);
+  const matches2 = t2.match(/\b\d+\b/g);
+  if (!matches1 || !matches2) return false;
+  const nums1 = [...new Set(matches1.map(n => parseInt(n, 10)).filter(n => n < 1900 || n > 2100))];
+  const nums2 = [...new Set(matches2.map(n => parseInt(n, 10)).filter(n => n < 1900 || n > 2100))];
+  if (nums1.length === 0 || nums2.length === 0) return false;
+  const intersection = nums1.filter(n => nums2.includes(n));
+  if (intersection.length === 0) {
+    const getPatternValue = (text: string, pattern: RegExp): number | null => {
+      const m = text.match(pattern);
+      return m ? parseInt(m[1], 10) : null;
+    };
+    const patterns = [
+      /\bno\s+(\d+)\b/i,
+      /\bngay\s+(\d+)\b/i,
+      /\bvong\s+(\d+)\b/i,
+      /\btran\s+(\d+)\b/i,
+      /\btap\s+(\d+)\b/i,
+      /\btop\s+(\d+)\b/i,
+      /\bstar\s+(\d+)\b/i,
+    ];
+    for (const pattern of patterns) {
+      const val1 = getPatternValue(t1, pattern);
+      const val2 = getPatternValue(t2, pattern);
+      if (val1 !== null && val2 !== null && val1 !== val2) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function hasAwardConflict(title1: string, title2: string): boolean {
+  const t1 = canonicalized(title1);
+  const t2 = canonicalized(title2);
+  const isChampion1 = /\b(vo dich|champion|cup|quan quan|giai nhat|giai cup)\b/i.test(t1);
+  const isChampion2 = /\b(vo dich|champion|cup|quan quan|giai nhat|giai cup)\b/i.test(t2);
+  const isRunnerUp1 = /\b(giai nhi|a quan|giai ba|khuyen khich)\b/i.test(t1);
+  const isRunnerUp2 = /\b(giai nhi|a quan|giai ba|khuyen khich)\b/i.test(t2);
+  if ((isChampion1 && isRunnerUp2) || (isChampion2 && isRunnerUp1)) {
+    return true;
+  }
+  return false;
+}
+
+function hasTrainingScheduleConflict(title1: string, title2: string): boolean {
+  const t1 = canonicalized(title1);
+  const t2 = canonicalized(title2);
+  const isTraining1 = /\b(tap huan|training|hoi quan|ren luyen)\b/i.test(t1);
+  const isTraining2 = /\b(tap huan|training|hoi quan|ren luyen)\b/i.test(t2);
+  const isSchedule1 = /\b(lich thi dau|schedule|fixture|thi dau|ket qua)\b/i.test(t1);
+  const isSchedule2 = /\b(lich thi dau|schedule|fixture|thi dau|ket qua)\b/i.test(t2);
+  if ((isTraining1 && isSchedule2) || (isTraining2 && isSchedule1)) {
+    return true;
+  }
+  return false;
+}
+
+function hasDateMismatch(title1: string, title2: string): boolean {
+  const t1 = canonicalized(title1);
+  const t2 = canonicalized(title2);
+  const datePattern = /\b(\d{1,2})[/-](\d{1,2})\b/g;
+  const dates1 = [...t1.matchAll(datePattern)].map(m => `${m[1]}/${m[2]}`);
+  const dates2 = [...t2.matchAll(datePattern)].map(m => `${m[1]}/${m[2]}`);
+  if (dates1.length && dates2.length) {
+    const shared = dates1.filter(d => dates2.includes(d));
+    if (shared.length === 0) {
+      return true;
+    }
+  }
+  const dayPattern = /\bngay\s+(\d{1,2})\b/g;
+  const days1 = [...t1.matchAll(dayPattern)].map(m => parseInt(m[1], 10));
+  const days2 = [...t2.matchAll(dayPattern)].map(m => parseInt(m[1], 10));
+  if (days1.length && days2.length) {
+    const shared = days1.filter(d => days2.includes(d));
+    if (shared.length === 0) {
+      return true;
+    }
+  }
+  return false;
 }

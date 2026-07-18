@@ -34,6 +34,29 @@ import {
 import { storyClusterSchema, type StoryCluster } from "./schema";
 import { buildLongSummary, prioritizeAISummaryCandidates } from "./summary";
 
+const GEOGRAPHY_KEYWORDS: Record<string, string[]> = {
+  "Việt Nam": ["viet nam", "việt nam", "trong nước", "v-league", "v.league", "tuyển việt nam", "hà nội", "hồ chí minh", "hải phòng", "thanh hóa", "nam định", "đà nẵng", "sông lam nghệ an", "bình định", "hoàng anh gia lai", "thể công viettel", "viettel", "bình dương"],
+  "Anh": ["premier league", "ngoại hạng anh", "arsenal", "manchester united", "man utd", "man city", "chelsea", "liverpool", "tottenham", "newcastle", "aston villa", "west ham", "anh quốc", "nước anh", "london", "manchester"],
+  "Tây Ban Nha": ["la liga", "barcelona", "real madrid", "atletico madrid", "tây ban nha", "spain", "sevilla", "valencia", "villarreal", "sociedad"],
+  "Ý": ["serie a", "juventus", "inter milan", "ac milan", "as roma", "napoli", "lazio", "italy", "italia", "nước ý"],
+  "Đức": ["bundesliga", "bayern munich", "dortmund", "leverkusen", "leipzig", "nước đức", "germany", "munich"],
+  "Pháp": ["ligue 1", "psg", "paris saint-germain", "nước pháp", "france", "marseille", "lyon", "monaco"],
+  "Mỹ": ["mls", "inter miami", "nước mỹ", "usa", "america", "united states", "los angeles", "new york"],
+  "Ả Rập Xê Út": ["saudi pro league", "al nassr", "al hilal", "al ittihad", "al ahli", "saudi", "arabia"],
+};
+
+function detectGeography(title: string, excerpt: string, sourceName: string): string | null {
+  const text = `${title} ${excerpt} ${sourceName}`.toLowerCase();
+  for (const [country, keywords] of Object.entries(GEOGRAPHY_KEYWORDS)) {
+    for (const kw of keywords) {
+      if (text.includes(kw.toLowerCase())) {
+        return country;
+      }
+    }
+  }
+  return null;
+}
+
 type SourceJoin =
   | {
       name: string;
@@ -600,6 +623,26 @@ async function buildStory(
   const nextSlug =
     draft.previousStory?.slug ?? createStorySlug(title, draft.id);
   const legacySlugs = draft.previousStory?.legacySlugs ?? [];
+
+  const geoCounts: Record<string, number> = {};
+  for (const article of rawArticles) {
+    const geo = detectGeography(article.title ?? "", article.excerpt ?? "", article.sourceName ?? "");
+    if (geo) {
+      geoCounts[geo] = (geoCounts[geo] || 0) + 1;
+    }
+  }
+  let geography: string | null = null;
+  let maxCount = 0;
+  for (const [geo, count] of Object.entries(geoCounts)) {
+    if (count > maxCount) {
+      maxCount = count;
+      geography = geo;
+    }
+  }
+  const region = geography === "Việt Nam"
+    ? "Việt Nam"
+    : (geography ? "Thế giới" : (lead.language === "vi" ? "Việt Nam" : "Thế giới"));
+
   const story = storyClusterSchema.parse({
     id: draft.id,
     slug: nextSlug,
@@ -612,6 +655,10 @@ async function buildStory(
         : fullSummary.slice(0, 12_000),
     category: String(categoryValue).slice(0, 160),
     language: lead.language,
+    region,
+    geography,
+    articleLanguage: lead.language,
+    publisherCountry: geography || (lead.language === "vi" ? "Việt Nam" : null),
     status:
       type === "correction"
         ? "correction"
@@ -735,6 +782,12 @@ async function persistDrafts(
         ai_generated: story.aiGenerated,
         ai_provider: story.aiGenerated ? summary.aiProvider : null,
         review_status: story.reviewStatus,
+        category: story.category,
+        language: story.articleLanguage ?? "vi",
+        geography: story.geography ?? null,
+        region: story.region ?? "Việt Nam",
+        source_names: story.sourceNames,
+        search_text: normalizeSearchText(`${story.title} ${story.summary} ${story.category} ${story.sourceNames.join(" ")}`),
         payload: story,
       }),
     );
@@ -1556,6 +1609,10 @@ export async function summarizePersistedStories(
         })),
         aiGenerated: true,
         reviewStatus: "auto",
+        citations: (output.citations ?? []).map((c) => ({
+          text: c.fact,
+          sourceArticleIds: c.sourceArticleIds,
+        })),
       });
       const selectedProvider =
         "lastProviderName" in provider &&

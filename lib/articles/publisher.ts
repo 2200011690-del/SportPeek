@@ -3,6 +3,7 @@ import { decode } from "html-entities";
 export type PublisherArticleContent = {
   content: string;
   wordCount: number;
+  error?: string;
 };
 
 type FetchOptions = {
@@ -110,6 +111,8 @@ function candidateBlocks(html: string): string[] {
 
 export function extractPublisherArticleContent(html: string): PublisherArticleContent | null {
   if (!allowsReaderExtraction(html)) return null;
+  const PAYWALL_PATTERN = /\b(dang nhap de doc tiep|đăng nhập để đọc tiếp|dang nhap de tiep tuc|đăng nhập để tiếp tục|danh cho thanh vien|dành cho thành viên|membership required|please log\s*in|subscription required|premium article|membership is required)\b/i;
+  if (PAYWALL_PATTERN.test(html)) return null;
   const fromJsonLd = articleBodyFromJsonLd(html);
   const candidates = [
     ...(fromJsonLd ? [fromJsonLd] : []),
@@ -168,6 +171,13 @@ export async function fetchPublisherArticleContent(
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) return null;
     const html = await readBoundedResponseText(response, options.maxBytes ?? DEFAULT_MAX_BYTES);
+    if (!allowsReaderExtraction(html)) {
+      return { content: "", wordCount: 0, error: "Extraction blocked by robots noarchive directive." } as any;
+    }
+    const PAYWALL_PATTERN = /\b(dang nhap de doc tiep|đăng nhập để đọc tiếp|dang nhap de tiep tuc|đăng nhập để tiếp tục|danh cho thanh vien|dành cho thành viên|membership required|please log\s*in|subscription required|premium article|membership is required)\b/i;
+    if (PAYWALL_PATTERN.test(html)) {
+      return { content: "", wordCount: 0, error: "Extraction blocked by paywall restriction." } as any;
+    }
     return extractPublisherArticleContent(html);
   } finally {
     clearTimeout(timeout);
