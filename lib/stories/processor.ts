@@ -35,14 +35,23 @@ import { storyClusterSchema, type StoryCluster } from "./schema";
 import { buildLongSummary, prioritizeAISummaryCandidates } from "./summary";
 
 const GEOGRAPHY_KEYWORDS: Record<string, string[]> = {
-  "Việt Nam": ["viet nam", "việt nam", "trong nước", "v-league", "v.league", "tuyển việt nam", "hà nội", "hồ chí minh", "hải phòng", "thanh hóa", "nam định", "đà nẵng", "sông lam nghệ an", "bình định", "hoàng anh gia lai", "thể công viettel", "viettel", "bình dương"],
-  "Anh": ["premier league", "ngoại hạng anh", "arsenal", "manchester united", "man utd", "man city", "chelsea", "liverpool", "tottenham", "newcastle", "aston villa", "west ham", "anh quốc", "nước anh", "london", "manchester"],
-  "Tây Ban Nha": ["la liga", "barcelona", "real madrid", "atletico madrid", "tây ban nha", "spain", "sevilla", "valencia", "villarreal", "sociedad"],
-  "Ý": ["serie a", "juventus", "inter milan", "ac milan", "as roma", "napoli", "lazio", "italy", "italia", "nước ý"],
-  "Đức": ["bundesliga", "bayern munich", "dortmund", "leverkusen", "leipzig", "nước đức", "germany", "munich"],
-  "Pháp": ["ligue 1", "psg", "paris saint-germain", "nước pháp", "france", "marseille", "lyon", "monaco"],
-  "Mỹ": ["mls", "inter miami", "nước mỹ", "usa", "america", "united states", "los angeles", "new york"],
-  "Ả Rập Xê Út": ["saudi pro league", "al nassr", "al hilal", "al ittihad", "al ahli", "saudi", "arabia"],
+  "Việt Nam": ["viet nam", "việt nam", "trong nước", "tuyển việt nam", "hà nội", "hồ chí minh", "tp.hcm", "hải phòng", "thanh hóa", "nam định", "đà nẵng", "sông lam nghệ an", "bình định", "bình dương", "cần thơ"],
+  "Anh": ["anh quốc", "nước anh", "london", "manchester", "united kingdom", "england"],
+  "Tây Ban Nha": ["tây ban nha", "spain", "madrid", "barcelona"],
+  "Ý": ["nước ý", "italy", "italia", "rome"],
+  "Đức": ["nước đức", "germany", "berlin", "munich"],
+  "Pháp": ["nước pháp", "france", "paris"],
+  "Mỹ": ["nước mỹ", "usa", "america", "united states", "hoa kỳ", "los angeles", "new york", "washington"],
+  "Ả Rập Xê Út": ["saudi", "saudi arabia", "ả rập xê út", "riyadh"],
+  "Trung Quốc": ["trung quốc", "china", "bắc kinh", "thượng hải"],
+  "Nhật Bản": ["nhật bản", "japan", "tokyo"],
+  "Hàn Quốc": ["hàn quốc", "south korea", "seoul"],
+  "Nga": ["nước nga", "russia", "moscow", "kremlin"],
+  "Ukraine": ["ukraine", "kyiv", "kiev"],
+  "Iran": ["iran", "tehran"],
+  "Israel": ["israel", "tel aviv", "jerusalem"],
+  "Palestine": ["palestine", "gaza"],
+  "Thái Lan": ["thái lan", "thailand", "bangkok"],
 };
 
 function detectGeography(title: string, excerpt: string, sourceName: string): string | null {
@@ -641,7 +650,7 @@ async function buildStory(
   }
   const region = geography === "Việt Nam"
     ? "Việt Nam"
-    : (geography ? "Thế giới" : (lead.language === "vi" ? "Việt Nam" : "Thế giới"));
+    : (geography ? "Thế giới" : "Quốc tế");
 
   const story = storyClusterSchema.parse({
     id: draft.id,
@@ -658,7 +667,7 @@ async function buildStory(
     region,
     geography,
     articleLanguage: lead.language,
-    publisherCountry: geography || (lead.language === "vi" ? "Việt Nam" : null),
+    publisherCountry: lead.language === "vi" ? "Việt Nam" : null,
     status:
       type === "correction"
         ? "correction"

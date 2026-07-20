@@ -96,6 +96,13 @@ export const storyClusterSchema = z.object({
   articleLanguage: z.string().optional(),
   publisherCountry: z.string().optional(),
   citations: z.array(storyFactSchema).optional(),
+  whatHappened: z.string().optional(),
+  context: z.string().optional(),
+  differingAccounts: z.array(storyFactSchema).optional(),
+  unverified: z.array(z.string()).optional(),
+  impact: z.string().optional(),
+  whatNext: z.string().optional(),
+  providerModel: z.string().optional(),
 });
 
 export const storyApiStatusSchema = z.enum([
