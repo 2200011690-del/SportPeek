@@ -3,7 +3,7 @@ import { z } from "zod";
 export const storySlugSchema = z.string()
   .min(1)
   .max(180)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+  .refine((val) => !/[\/\s\\]/.test(val), "Slug must not contain path delimiters or whitespace");
 
 function slugToken(value: string): string {
   return value

@@ -185,9 +185,12 @@ function storyFromRow(row: PersistedStoryRow): StoryCluster | null {
 
 async function findPersistedStory(column: "slug" | "id", value: string): Promise<StoryCluster | null> {
   const client = persistedClient();
-  const fresh = await client.from("story_clusters").select(FRESH_STORY_COLUMNS).eq(column, value).limit(1);
+  let fresh = await client.from("story_clusters").select(FRESH_STORY_COLUMNS).eq(column, value).limit(1);
+  if (!fresh.data?.length && column === "slug") {
+    fresh = await client.from("story_clusters").select(FRESH_STORY_COLUMNS).eq("id", value).limit(1);
+  }
   const result = fresh.error && isFreshnessSchemaMissing(fresh.error)
-    ? await client.from("story_clusters").select(LEGACY_STORY_COLUMNS).eq(column, value).limit(1)
+    ? await client.from("story_clusters").select(LEGACY_STORY_COLUMNS).or(`slug.eq.${value},id.eq.${value}`).limit(1)
     : fresh;
   if (result.error) throw new ProviderError("Không thể đọc bài viết trong kho lưu trữ.", "supabase");
   const row = result.data?.[0] as unknown as PersistedStoryRow | undefined;
@@ -311,7 +314,7 @@ export function createPersistedStoryRepository(loader: PersistedStoryLoader = lo
   };
   const getStoryFeed = () => load();
   const getLatestStories = async (limit = 60) => { const result = await load(); return { ...result, data: result.data?.slice(0, Math.max(0, limit)) ?? result.data }; };
-  const getStoryBySlug = async (slug: string): Promise<StoryRepositoryResult<StoryDetailPayload>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const recent = result.data.find((item) => item.slug === slug || item.legacySlugs.includes(slug)); const story = recent ?? await findBySlug(slug); return story ? { status: result.status === "stale" ? "stale" : "success", data: { story, relatedStories: relatedStories(result.data, story), articleContents: [] }, meta: { ...result.meta, canonicalSlug: story.slug } } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
+  const getStoryBySlug = async (slug: string): Promise<StoryRepositoryResult<StoryDetailPayload>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const recent = result.data.find((item) => item.slug === slug || item.id === slug || item.legacySlugs.includes(slug)); const story = recent ?? await findBySlug(slug); return story ? { status: result.status === "stale" ? "stale" : "success", data: { story, relatedStories: relatedStories(result.data, story), articleContents: [] }, meta: { ...result.meta, canonicalSlug: story.slug } } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
   const getStoryById = async (id: string): Promise<StoryRepositoryResult<StoryCluster>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const recent = result.data.find((item) => item.id === id); const story = recent ?? await findById(id); return story ? { ...result, data: story } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
   const getStorySources = async (id: string): Promise<StoryRepositoryResult<RawArticle[]>> => { const result = await getStoryById(id); return { ...result, data: result.data?.articles ?? null }; };
   const getRelatedStories = async (id: string, limit = 4): Promise<StoryRepositoryResult<StoryCluster[]>> => { const result = await load(); if (!result.data) return { ...result, data: null }; const story = result.data.find((item) => item.id === id); return story ? { ...result, data: relatedStories(result.data, story, limit) } : { status: "not_found", data: null, meta: result.meta, error: { code: "STORY_NOT_FOUND", message: "Không tìm thấy bài viết." } }; };
