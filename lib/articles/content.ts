@@ -235,8 +235,8 @@ export async function loadStoryArticleContents(
   }
 
   const rows = data as unknown as ArticleContentRow[];
-  const fetchMissing = options.fetchMissing ?? true;
-  const maxFetches = Math.min(4, Math.max(0, Math.floor(options.maxFetches ?? 2)));
+  const fetchMissing = options.fetchMissing ?? false;
+  const maxFetches = Math.min(4, Math.max(0, Math.floor(options.maxFetches ?? 0)));
   const hydrated = fetchMissing && maxFetches
     ? await Promise.all(
         rows
