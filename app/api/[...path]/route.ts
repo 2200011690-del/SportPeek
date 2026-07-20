@@ -122,7 +122,13 @@ export async function GET(request: NextRequest, { params }: Context) {
     const category = request.nextUrl.searchParams.get("category")?.trim().slice(0, 160) || undefined;
     const source = request.nextUrl.searchParams.get("source")?.trim().slice(0, 160) || undefined;
     const minHotness = Math.min(100, Math.max(0, Number.parseInt(request.nextUrl.searchParams.get("minHotness") ?? "0", 10) || 0));
-    const result = await storyService.getArchive(page, pageSize, { query, category, source, minHotness });
+    const dateFrom = request.nextUrl.searchParams.get("dateFrom")?.trim() || undefined;
+    const dateTo = request.nextUrl.searchParams.get("dateTo")?.trim() || undefined;
+    const language = request.nextUrl.searchParams.get("language")?.trim() || undefined;
+    const geography = request.nextUrl.searchParams.get("geography")?.trim() || undefined;
+    const sort = (request.nextUrl.searchParams.get("sort")?.trim() as "freshness" | "hotness" | "reliability") || undefined;
+
+    const result = await storyService.getArchive(page, pageSize, { query, category, source, minHotness, dateFrom, dateTo, language, geography, sort });
     const archive = result.data;
     return NextResponse.json({
       status: result.status,
@@ -176,15 +182,32 @@ export async function GET(request: NextRequest, { params }: Context) {
     const parsed = searchSchema.safeParse({ q: request.nextUrl.searchParams.get("q") ?? "", type: request.nextUrl.searchParams.get("type") ?? "all" });
     if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     try {
-      const [storyResult, sources] = await Promise.all([storyService.getFeed(), readNewsSourceCatalog()]);
-      const source = (storyResult.data ?? []).map(storyToNewsItem); const q = normalizeSearchText(parsed.data.q);
+      const q = parsed.data.q.trim();
       const include = (type: typeof parsed.data.type) => parsed.data.type === "all" || parsed.data.type === type;
+      const categoryFilter = request.nextUrl.searchParams.get("category")?.trim() || undefined;
+      const sourceFilter = request.nextUrl.searchParams.get("source")?.trim() || undefined;
+      const dateFrom = request.nextUrl.searchParams.get("dateFrom")?.trim() || undefined;
+      const dateTo = request.nextUrl.searchParams.get("dateTo")?.trim() || undefined;
+      const language = request.nextUrl.searchParams.get("language")?.trim() || undefined;
+      const geography = request.nextUrl.searchParams.get("geography")?.trim() || undefined;
+      const sort = (request.nextUrl.searchParams.get("sort")?.trim() as "freshness" | "hotness" | "reliability") || undefined;
+
+      const [archiveResult, catalogSources] = await Promise.all([
+        include("news") && q ? storyService.getArchive(1, 30, { query: q, category: categoryFilter, source: sourceFilter, dateFrom, dateTo, language, geography, sort }) : storyService.getFeed(),
+        include("sources") ? readNewsSourceCatalog() : Promise.resolve([]),
+      ]);
+
+      const newsItems = include("news")
+        ? (archiveResult.data && "stories" in archiveResult.data ? archiveResult.data.stories : (archiveResult.data as StoryCluster[] ?? [])).map(storyToNewsItem)
+        : [];
+      const normQ = normalizeSearchText(q);
+
       return NextResponse.json({
-        news: include("news") ? source.filter((item) => newsSearchText(item).includes(q)) : [],
-        categories: include("categories") ? NEWS_CATEGORIES.filter((item) => normalizeSearchText(item.label).includes(q)) : [],
-        sources: include("sources") ? sources.filter((item) => normalizeSearchText(item.name).includes(q)) : [],
-        demo: false, status: storyResult.status, meta: storyResult.meta, error: storyResult.error ?? null,
-      }, { status: repositoryHttpStatus(storyResult.status) });
+        news: newsItems,
+        categories: include("categories") ? NEWS_CATEGORIES.filter((item) => normalizeSearchText(item.label).includes(normQ)) : [],
+        sources: include("sources") ? catalogSources.filter((item) => normalizeSearchText(item.name).includes(normQ)) : [],
+        demo: false, status: archiveResult.status, meta: archiveResult.meta, error: archiveResult.error ?? null,
+      }, { status: repositoryHttpStatus(archiveResult.status) });
     } catch (error) {
       const safe = toSafeError(error); return NextResponse.json({ status: "error", error: safe }, { status: safe.status });
     }

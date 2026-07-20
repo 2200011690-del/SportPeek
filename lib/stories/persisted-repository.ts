@@ -11,7 +11,17 @@ import type { StoryRepositoryResult } from "./repository-types";
 export type PersistedStorySnapshot = { stories: StoryCluster[]; lastSyncAt: string | null; sources: string[]; aiStatus: NewsAIStatus };
 export type PersistedStoryLoader = () => Promise<PersistedStorySnapshot>;
 export type StoryArchivePage = { stories: StoryCluster[]; page: number; pageSize: number; total: number; totalPages: number };
-export type StoryArchiveFilters = { query?: string; category?: string; source?: string; minHotness?: number };
+export type StoryArchiveFilters = {
+  query?: string;
+  category?: string;
+  source?: string;
+  minHotness?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  language?: string;
+  geography?: string;
+  sort?: "freshness" | "hotness" | "reliability";
+};
 export type StorySitemapEntry = { slug: string; publishedAt: string; lastMaterialUpdateAt: string };
 type PersistedStoryAccess = {
   findBySlug?: (slug: string) => Promise<StoryCluster | null>;
@@ -201,13 +211,27 @@ export async function loadPersistedStoryArchive(page: number, pageSize: number, 
   let freshQuery = client.from("story_clusters").select(FRESH_STORY_COLUMNS, { count: "exact" });
   if (normalizedQueryTerm) freshQuery = freshQuery.ilike("search_text", `%${normalizedQueryTerm}%`);
   if (category) freshQuery = freshQuery.eq("category", category);
-  if (source) freshQuery = freshQuery.contains("source_names", [source]);
+  if (source) {
+    const normSource = normalizeSearchText(source);
+    freshQuery = freshQuery.ilike("search_text", `%${normSource}%`);
+  }
   if (minHotness > 0) freshQuery = freshQuery.gte("hotness_score", minHotness);
+  if (filters.language) freshQuery = freshQuery.eq("language", filters.language);
+  if (filters.geography) freshQuery = freshQuery.eq("geography", filters.geography);
+  if (filters.dateFrom) freshQuery = freshQuery.gte("first_published_at", filters.dateFrom);
+  if (filters.dateTo) freshQuery = freshQuery.lte("first_published_at", filters.dateTo);
+
+  if (filters.sort === "hotness") {
+    freshQuery = freshQuery.order("hotness_score", { ascending: false });
+  } else if (filters.sort === "reliability") {
+    freshQuery = freshQuery.order("reliability_score", { ascending: false });
+  } else {
+    freshQuery = freshQuery
+      .order("last_material_update_at", { ascending: false })
+      .order("first_published_at", { ascending: false });
+  }
   
-  const fresh = await freshQuery
-    .order("last_material_update_at", { ascending: false })
-    .order("first_published_at", { ascending: false })
-    .range(from, from + safePageSize - 1);
+  const fresh = await freshQuery.range(from, from + safePageSize - 1);
   let result = fresh as unknown as {
     data: unknown[] | null;
     error: { code?: string; message?: string; details?: string } | null;
