@@ -25,20 +25,44 @@ const loadStoryPageData = cache(async (slug: string) => {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const route = slug.join("/");
+  const retiredSportsRoutes = new Set(["live", "fixtures", "results", "standings", "transfers", "matches", "teams", "players", "competitions"]);
+  if (retiredSportsRoutes.has(slug[0])) {
+    return { title: "Chuyển hướng...", robots: { index: false, follow: false } };
+  }
+  const staticRoutes = new Set([
+    "for-you", "news", "search", "bookmarks",
+    "settings", "sources", "terms", "privacy", "copyright", "login", "register", "forgot-password", "reset-password",
+    "about", "methodology", "ai-policy", "correction-policy",
+  ]);
+  const dynamicRoutes = new Set(["news", "category"]);
+  const validRoute = slug.length === 1 ? staticRoutes.has(slug[0]) : slug.length === 2 && dynamicRoutes.has(slug[0]) && Boolean(slug[1]);
+  if (!validRoute) {
+    return { title: "Trang không tồn tại | NewsPeek", robots: { index: false, follow: false } };
+  }
+
   if (slug.length === 2 && slug[0] === "news") {
     const story = (await loadStoryPageData(slug[1]))?.story ?? null;
-    if (story) {
-      return {
-        ...buildStoryMetadata(story),
-        robots: isInternalMode() ? { index: false, follow: false, noarchive: true, nosnippet: true } : undefined,
-      };
+    if (!story) {
+      return { title: "Trang không tồn tại | NewsPeek", robots: { index: false, follow: false } };
+    }
+    return {
+      ...buildStoryMetadata(story),
+      robots: isInternalMode() ? { index: false, follow: false, noarchive: true, nosnippet: true } : undefined,
+    };
+  }
+  if (slug[0] === "category" && slug[1]) {
+    const cat = newsCategory(slug[1]);
+    if (!cat) {
+      return { title: "Trang không tồn tại | NewsPeek", robots: { index: false, follow: false } };
     }
   }
+
   const labels: Record<string, string> = {
     "for-you": "Dành cho bạn", news: "Tin mới nhất", search: "Tìm kiếm", bookmarks: "Tin đã lưu",
     settings: "Cài đặt", sources: "Nguồn tin & phương pháp", terms: "Điều khoản sử dụng",
     privacy: "Chính sách quyền riêng tư", copyright: "Bản quyền & nội dung", admin: "Quản trị",
     login: "Đăng nhập", register: "Đăng ký", "forgot-password": "Khôi phục mật khẩu", "reset-password": "Đặt lại mật khẩu",
+    about: "Giới thiệu", methodology: "Phương pháp tổng hợp", "ai-policy": "Chính sách AI", "correction-policy": "Chính sách đính chính",
   };
   const detailLabels: Record<string, string> = {
     news: "Chi tiết tin", category: "Chuyên mục",
@@ -63,6 +87,7 @@ export default async function CatchAllPage({ params }: PageProps) {
   const staticRoutes = new Set([
     "for-you", "news", "search", "bookmarks",
     "settings", "sources", "terms", "privacy", "copyright", "login", "register", "forgot-password", "reset-password",
+    "about", "methodology", "ai-policy", "correction-policy",
   ]);
   const dynamicRoutes = new Set(["news", "category"]);
   const validRoute = slug.length === 1 ? staticRoutes.has(slug[0]) : slug.length === 2 && dynamicRoutes.has(slug[0]) && Boolean(slug[1]);

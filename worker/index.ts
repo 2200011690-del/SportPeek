@@ -90,7 +90,18 @@ const worker = {
       );
     }
 
-    return handler.fetch(request, runtimeEnv, ctx);
+    const response = await handler.fetch(request, runtimeEnv, ctx);
+    const newHeaders = new Headers(response.headers);
+    newHeaders.set(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains; preload",
+    );
+    newHeaders.set("X-Content-Type-Options", "nosniff");
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: newHeaders,
+    });
   },
 
   async scheduled(
