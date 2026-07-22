@@ -172,11 +172,11 @@ export async function fetchPublisherArticleContent(
     if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) return null;
     const html = await readBoundedResponseText(response, options.maxBytes ?? DEFAULT_MAX_BYTES);
     if (!allowsReaderExtraction(html)) {
-      return { content: "", wordCount: 0, error: "Extraction blocked by robots noarchive directive." } as any;
+      return { content: "", wordCount: 0, error: "Extraction blocked by robots noarchive directive." };
     }
     const PAYWALL_PATTERN = /\b(dang nhap de doc tiep|đăng nhập để đọc tiếp|dang nhap de tiep tuc|đăng nhập để tiếp tục|danh cho thanh vien|dành cho thành viên|membership required|please log\s*in|subscription required|premium article|membership is required)\b/i;
     if (PAYWALL_PATTERN.test(html)) {
-      return { content: "", wordCount: 0, error: "Extraction blocked by paywall restriction." } as any;
+      return { content: "", wordCount: 0, error: "Extraction blocked by paywall restriction." };
     }
     return extractPublisherArticleContent(html);
   } finally {

@@ -4,13 +4,14 @@ import { readNewsSourceCatalog } from "@/lib/rss/repository";
 import { storyToNewsItem } from "@/lib/stories/presenter";
 import { newsCategory } from "@/lib/news/categories";
 import type { NewsAIStatus } from "@/lib/ingestion/official-feed";
+import type { NewsItem } from "@/lib/types";
 
 export async function getInitialData(route: string, categoryId?: string) {
   try {
     const health = await getHealthSnapshot();
     const sources = await readNewsSourceCatalog().catch(() => []);
     
-    let newsData: any[] = [];
+    let newsData: NewsItem[] = [];
     let aiStatus: NewsAIStatus = { provider: "off", state: "off", translatedCount: 0 };
     let aiTranslation = false;
     let sourcesList: string[] = [];

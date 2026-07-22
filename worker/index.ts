@@ -123,7 +123,7 @@ const worker = {
     const scheduledAt = controller.scheduledTime ?? Date.now();
     const task = scheduledPipelineTask(scheduledAt);
     const run = async () => {
-      let timerId: any;
+      let timerId: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
         timerId = setTimeout(() => {
           reject(new Error("Timeout: Cron task execution exceeded 50 seconds."));

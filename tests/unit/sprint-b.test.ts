@@ -157,8 +157,8 @@ test("fetch respects nosnippet and noarchive robots metadata with error return",
       </body>
     </html>
   `;
-  const mockFetch = async () => new Response(html, { headers: { "content-type": "text/html" } });
-  const res = await fetchPublisherArticleContent("http://example.com", { fetcher: mockFetch as any });
+  const mockFetch: typeof fetch = async () => new Response(html, { headers: { "content-type": "text/html" } });
+  const res = await fetchPublisherArticleContent("http://example.com", { fetcher: mockFetch });
   assert.equal(res?.content, "");
   assert.equal(res?.error, "Extraction blocked by robots noarchive directive.");
 });
@@ -171,8 +171,8 @@ test("fetch respects paywall restriction with error return", async () => {
       </body>
     </html>
   `;
-  const mockFetch = async () => new Response(html, { headers: { "content-type": "text/html" } });
-  const res = await fetchPublisherArticleContent("http://example.com", { fetcher: mockFetch as any });
+  const mockFetch: typeof fetch = async () => new Response(html, { headers: { "content-type": "text/html" } });
+  const res = await fetchPublisherArticleContent("http://example.com", { fetcher: mockFetch });
   assert.equal(res?.content, "");
   assert.equal(res?.error, "Extraction blocked by paywall restriction.");
 });

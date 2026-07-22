@@ -16,6 +16,13 @@ import {
 
 type RuntimeResponse<T> = { status?: string; data: T; demo?: boolean; personalized?: boolean; provider?: string; sources?: string[]; aiTranslation?: boolean; aiStatus?: NewsAIStatus; error?: { code: string; message: string } | null };
 
+type InitialRuntimeData = {
+  health: HealthSnapshot;
+  news: RuntimeResponse<NewsItem[]>;
+  forYou: RuntimeResponse<NewsItem[]>;
+  sources: NewsSourceCatalogItem[];
+};
+
 async function fetchRuntime<T>(url: string): Promise<RuntimeResponse<T>> {
   const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(12_000) });
   if (!response.ok) throw new Error(`${url} trả về HTTP ${response.status}`);
@@ -36,7 +43,7 @@ import { AppSidebar, Header, MobileNavigation, SystemStatusBanner, AppFooter } f
 import { SearchCommand } from "@/components/ui/Search";
 import { EmptyState } from "@/components/ui/badges";
 
-export default function SportPeekApp({ route, signupAllowed = false, initialStory = null, initialData = null }: { route: string; signupAllowed?: boolean; initialStory?: StoryDetailPayload | null; initialData?: any | null }) {
+export default function SportPeekApp({ route, signupAllowed = false, initialStory = null, initialData = null }: { route: string; signupAllowed?: boolean; initialStory?: StoryDetailPayload | null; initialData?: InitialRuntimeData | null }) {
   const [theme, setTheme] = useState("dark");
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
