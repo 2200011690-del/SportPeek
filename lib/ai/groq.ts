@@ -3,6 +3,8 @@ import { ConfigurationError, ProviderError } from "@/lib/core/errors";
 import { providerFetch } from "@/lib/core/provider-fetch";
 import { parseStructuredText, providerJsonSchema, RemoteAIProvider } from "./remote-base";
 
+export const GROQ_REQUEST_TIMEOUT_MS = 10_000;
+
 export class GroqAIProvider extends RemoteAIProvider {
   readonly name = "groq";
 
@@ -31,7 +33,7 @@ export class GroqAIProvider extends RemoteAIProvider {
         reasoning_effort: "low",
         temperature: 0.1,
       }),
-    }, { timeoutMs: 25_000, retries: 0, minimumIntervalMs: 250 });
+    }, { timeoutMs: GROQ_REQUEST_TIMEOUT_MS, retries: 0, minimumIntervalMs: 250 });
     const payload = await response.json() as { choices?: Array<{ finish_reason?: string | null; message?: { content?: string } }> };
     const choice = payload.choices?.[0];
     if (choice?.finish_reason === "length") throw new ProviderError("Groq đã dừng vì chạm giới hạn độ dài đầu ra.", this.name, true);

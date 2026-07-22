@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { processStories } from "@/lib/stories/processor";
+import { derivePublisherCountry } from "@/lib/stories/processor";
 
 test("geography detection correctly identifies international events from Vietnamese news sources", () => {
   // Test that geography keywords match countries and don't misclassify sports teams as geography
@@ -12,4 +12,17 @@ test("geography detection correctly identifies international events from Vietnam
   assert.ok(title1.includes("Iran"));
   assert.ok(title2.includes("Nga"));
   assert.ok(title3.includes("Ngoại hạng Anh"));
+});
+
+test("publisher country uses the source country instead of article language", () => {
+  assert.equal(derivePublisherCountry("GB", "en"), "Vương quốc Anh");
+  assert.equal(derivePublisherCountry("US", "en"), "Hoa Kỳ");
+  assert.equal(derivePublisherCountry("VN", "vi"), "Việt Nam");
+  assert.equal(derivePublisherCountry("br", "en"), "BR");
+});
+
+test("publisher country always has a safe fallback when source metadata is missing", () => {
+  assert.equal(derivePublisherCountry(null, "vi"), "Việt Nam");
+  assert.equal(derivePublisherCountry(undefined, "en"), "Quốc tế");
+  assert.equal(derivePublisherCountry("  ", "en"), "Quốc tế");
 });

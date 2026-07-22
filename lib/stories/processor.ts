@@ -15,6 +15,7 @@ import {
   ProviderError,
   toSafeError,
 } from "@/lib/core/errors";
+import { configuredRssSources } from "@/lib/rss/sources";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeSearchText } from "@/lib/ui-logic";
 import {
@@ -70,12 +71,14 @@ type SourceJoin =
   | {
       name: string;
       logo_url: string | null;
+      country: string | null;
       is_official: boolean;
       reliability_score: number;
     }
   | Array<{
       name: string;
       logo_url: string | null;
+      country: string | null;
       is_official: boolean;
       reliability_score: number;
     }>
@@ -116,6 +119,7 @@ type ArticleRecord = ClusterableArticle & {
   fullContent: string | null;
   contentWordCount: number;
   rawMetadata: Record<string, unknown>;
+  publisherCountry?: string;
 };
 type SummaryArticle = ClusterableArticle & {
   fullContent?: string | null;
@@ -167,33 +171,94 @@ const DEFAULT_STORY_BATCH_SIZE = 8;
 const DEFAULT_CANDIDATE_LIMIT = 96;
 const CANDIDATE_WINDOW_HOURS = 72;
 const RAW_ARTICLE_SELECT =
-  "id,source_id,external_id,original_url,canonical_url,title,normalized_title,excerpt,author,image_url,published_at,fetched_at,content_hash,full_content,content_word_count,language,processing_status,raw_metadata,news_sources!inner(name,logo_url,is_official,reliability_score,is_active)";
+  "id,source_id,external_id,original_url,canonical_url,title,normalized_title,excerpt,author,image_url,published_at,fetched_at,content_hash,full_content,content_word_count,language,processing_status,raw_metadata,news_sources!inner(name,logo_url,country,is_official,reliability_score,is_active)";
+
+const PUBLISHER_COUNTRY_LABELS: Readonly<Record<string, string>> = {
+  AU: "Úc",
+  DE: "Đức",
+  EU: "Liên minh châu Âu",
+  FR: "Pháp",
+  GB: "Vương quốc Anh",
+  INT: "Quốc tế",
+  QA: "Qatar",
+  UN: "Liên Hợp Quốc",
+  US: "Hoa Kỳ",
+  VN: "Việt Nam",
+};
+
+export function derivePublisherCountry(
+  sourceCountry: string | null | undefined,
+  language: "vi" | "en",
+): string {
+  const value = sourceCountry?.trim();
+  if (!value) return language === "vi" ? "Việt Nam" : "Quốc tế";
+  const code = value.toUpperCase();
+  return PUBLISHER_COUNTRY_LABELS[code] ?? (code.length === 2 ? code : value);
+}
 const CATEGORY_RULES: Array<[RegExp, string]> = [
-  [/\b(the thao|bong da|sports?|football|soccer|tennis|olympic)\b/, "Thể thao"],
   [
-    /\b(cong nghe|so hoa|technology|tech|artificial intelligence|tri tue nhan tao|internet|cyber)\b/,
+    /\b(the thao|bong da|doi tuyen|tran dau|giai dau|thi dau|vo dich|asean cup|world cup|sports?|football|soccer|tennis|olympic)\b/,
+    "Thể thao",
+  ],
+  [
+    /\b(ai|cong nghe|so hoa|ban dan|chip|phan mem|dien thoai thong minh|technology|tech|artificial intelligence|tri tue nhan tao|internet|cyber)\b/,
     "Công nghệ",
   ],
   [
-    /\b(suc khoe|y te|health|medical|medicine|benh vien|dich benh)\b/,
+    /\b(suc khoe|y te|hien mau|ung thu|phau thuat|soc tim|nhoi mau|van tim|vaccine|vac xin|health|medical|medicine|hospital|benh|benh vien|dich benh)\b/,
     "Sức khỏe",
   ],
   [
-    /\b(khoa hoc|moi truong|science|environment|climate|space|vu tru)\b/,
+    /\b(khoa hoc|moi truong|thoi tiet|nang nong|mua lon|lu quet|sat lo|he sinh thai|rung|ve tinh|nghien cuu|science|environment|climate|weather|satellite|space|vu tru)\b/,
     "Khoa học",
   ],
   [
-    /\b(kinh te|kinh doanh|tai chinh|thi truong|business|economy|finance|market)\b/,
+    /\b(kinh te|kinh doanh|tai chinh|thi truong|thuong mai(?: dien tu)?|xuat khau|nhap khau|thue|ngan hang|lai suat|chung khoan|co phieu|doanh nghiep|nha may|cong nghiep|nang luong|logistics|loi nhuan|tang truong|von dau tu|dong von|gia dien|viec lam|business|economy|finance|market|trade|commerce|tariffs?|banks?)\b/,
     "Kinh tế",
   ],
   [
-    /\b(van hoa|giai tri|am nhac|dien anh|culture|entertainment|film|music|arts?)\b/,
+    /\b(van hoa|giai tri|am nhac|dien anh|du lich|bao tang|di san|nghe si|culture|entertainment|film|music|tourism|museum|arts?)\b/,
     "Văn hóa & Giải trí",
   ],
-  [/\b(chinh tri|politics|quoc hoi|chinh phu|bau cu|election)\b/, "Chính trị"],
+  [
+    /\b(chinh tri|trung uong|lanh dao|thu tuong|quoc hoi|chinh phu|bo cong an|quoc phong|phong thu|chien dau|ngoai giao|politics|government|parliament|bau cu|election)\b/,
+    "Chính trị",
+  ],
   [/\b(the gioi|quoc te|world|global)\b/, "Thế giới"],
   [/\b(viet nam|thoi su|xa hoi|doi song|phap luat|giao duc)\b/, "Việt Nam"],
 ];
+
+const CONFIGURED_CATEGORY_BY_SOURCE = new Map(
+  configuredRssSources().flatMap((source) =>
+    source.defaultCategory
+      ? [[normalizeSearchText(source.name), source.defaultCategory] as const]
+      : [],
+  ),
+);
+
+/**
+ * Mixed homepage feeds can publish one incorrect category on every item. Only
+ * feed-level categories explicitly configured for a topical source are safe
+ * enough to use as a fallback when the article text has no category signal.
+ */
+export function trustedStoryCategoryCandidates(
+  articles: Array<{ sourceName?: string; rawMetadata?: Record<string, unknown> }>,
+): string[] {
+  return unique(
+    articles.flatMap((article) => {
+      const configured = CONFIGURED_CATEGORY_BY_SOURCE.get(
+        normalizeSearchText(article.sourceName ?? ""),
+      );
+      if (configured) return [configured];
+      if (article.rawMetadata?.publisherCategoriesDiscarded) return [];
+      return Array.isArray(article.rawMetadata?.categories)
+        ? article.rawMetadata.categories.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [];
+    }),
+  );
+}
 
 function admin() {
   const client = createAdminClient();
@@ -230,6 +295,7 @@ export function selectStoryCategory(
   content: string,
   declaredCategories: string[],
   language: "vi" | "en",
+  fallbackCategory?: string,
 ): string {
   const inferredText = normalizeSearchText(content);
   const declaredText = normalizeSearchText(declaredCategories.join(" "));
@@ -239,7 +305,10 @@ export function selectStoryCategory(
   const declared = CATEGORY_RULES.find(([pattern]) =>
     pattern.test(declaredText),
   )?.[1];
-  return inferred ?? declared ?? (language === "en" ? "Thế giới" : "Việt Nam");
+  return inferred
+    ?? declared
+    ?? fallbackCategory
+    ?? (language === "en" ? "Thế giới" : "Việt Nam");
 }
 
 /** Keep prompts small, source-diverse and free of syndicated copies. */
@@ -344,6 +413,7 @@ function toArticle(row: RawRow): ArticleRecord {
     fullContent: row.full_content,
     contentWordCount: row.content_word_count ?? 0,
     rawMetadata: row.raw_metadata ?? {},
+    publisherCountry: derivePublisherCountry(source?.country, row.language),
   };
 }
 
@@ -593,18 +663,6 @@ async function buildStory(
     verified: official || independence.independentSourceCount >= 2,
   });
   const title = generated ? generatedSummary.title : lead.title;
-  const categoryCandidates = articles.flatMap((article) =>
-    Array.isArray(article.rawMetadata.categories)
-      ? article.rawMetadata.categories.filter(
-          (value): value is string => typeof value === "string",
-        )
-      : [],
-  );
-  const categoryValue = selectStoryCategory(
-    articles.map((article) => `${article.title} ${article.excerpt}`).join(" "),
-    categoryCandidates,
-    lead.language,
-  );
   const publishedAt = new Date(
     Math.min(...articles.map((article) => Date.parse(article.publishedAt))),
   ).toISOString();
@@ -651,6 +709,13 @@ async function buildStory(
   const region = geography === "Việt Nam"
     ? "Việt Nam"
     : (geography ? "Thế giới" : "Quốc tế");
+  const categoryCandidates = trustedStoryCategoryCandidates(articles);
+  const categoryValue = selectStoryCategory(
+    [title, ...articles.map((article) => article.title)].join(" "),
+    categoryCandidates,
+    lead.language,
+    region === "Thế giới" ? "Thế giới" : undefined,
+  );
 
   const story = storyClusterSchema.parse({
     id: draft.id,
@@ -667,7 +732,10 @@ async function buildStory(
     region,
     geography,
     articleLanguage: lead.language,
-    publisherCountry: lead.language === "vi" ? "Việt Nam" : null,
+    publisherCountry: derivePublisherCountry(
+      lead.publisherCountry,
+      lead.language,
+    ),
     status:
       type === "correction"
         ? "correction"

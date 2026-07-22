@@ -42,6 +42,21 @@ test("international source filter survives Vietnamese AI summaries", async () =>
   assert.equal(card.translatedByAI, true);
 });
 
+test("feed adapter preserves event geography instead of publisher language", async () => {
+  const repository = createStoryRepository(async () => makeAggregatedNews(), { provider: "aggregated-rss" });
+  const feed = await repository.getStoryFeed();
+  const story = feed.data?.[0];
+  assert.ok(story);
+  const card = storyToNewsItem({
+    ...story,
+    language: "vi",
+    region: "Thế giới",
+    geography: "Trung Quốc",
+  });
+  assert.equal(card.region, "Thế giới");
+  assert.deepEqual(card.countries, ["Trung Quốc"]);
+});
+
 test("invalid story routes return not_found rather than an empty success", async () => {
   const repository = createStoryRepository(async () => makeAggregatedNews(), { provider: "aggregated-rss" });
   const result = await repository.getStoryBySlug("story-does-not-exist");

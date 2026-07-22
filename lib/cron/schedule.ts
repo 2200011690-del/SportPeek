@@ -20,8 +20,10 @@ export function scheduledPipelineTask(
 }
 
 /**
- * Keep batches below the Worker CPU ceiling. Three of every four story runs
- * prioritize breaking news; the fourth drains the oldest active-source backlog.
+ * Keep batches below the Worker CPU ceiling. Story creation is deliberately
+ * source-backed only; remote summaries are handled by the separate AI phase.
+ * Three of every four story runs prioritize breaking news; the fourth drains
+ * the oldest active-source backlog.
  */
 export function scheduledStoryProcessingOptions(timestampMs = Date.now()) {
   if (!Number.isFinite(timestampMs)) {
@@ -29,8 +31,8 @@ export function scheduledStoryProcessingOptions(timestampMs = Date.now()) {
   }
   const minute = new Date(timestampMs).getUTCMinutes();
   return {
-    useAi: true,
-    aiLimit: 1,
+    useAi: false,
+    aiLimit: 0,
     matchAiLimit: 0,
     limit: 8,
     candidateLimit: 96,

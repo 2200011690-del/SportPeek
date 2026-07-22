@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GeminiAIProvider } from "../../lib/ai/gemini";
-import { GroqAIProvider } from "../../lib/ai/groq";
+import {
+  GEMINI_REQUEST_TIMEOUT_MS,
+  GeminiAIProvider,
+} from "../../lib/ai/gemini";
+import { GROQ_REQUEST_TIMEOUT_MS, GroqAIProvider } from "../../lib/ai/groq";
 
 const classification = {
   category: "Công nghệ",
@@ -13,6 +16,13 @@ const classification = {
   articleType: "news",
   language: "vi",
 };
+
+test("remote HTTP failover leaves time for the Workers AI fallback", () => {
+  assert.ok(GEMINI_REQUEST_TIMEOUT_MS + GROQ_REQUEST_TIMEOUT_MS <= 20_000);
+  assert.ok(
+    50_000 - GEMINI_REQUEST_TIMEOUT_MS - GROQ_REQUEST_TIMEOUT_MS >= 30_000,
+  );
+});
 
 test("Gemini requests schema-constrained JSON with enough output capacity", async () => {
   const previousFetch = globalThis.fetch;

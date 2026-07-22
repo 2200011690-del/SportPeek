@@ -5,6 +5,7 @@ import {
   selectIndependentSummaryInput,
   selectStoryCategory,
   storyCandidateWindow,
+  trustedStoryCategoryCandidates,
 } from "../../lib/stories/processor";
 import type { ClusterableArticle } from "../../lib/stories/clustering";
 
@@ -77,4 +78,94 @@ test("content-inferred category wins over a broad source-declared category", () 
     "Công nghệ",
   );
   assert.equal(selectStoryCategory("Latest update", [], "en"), "Thế giới");
+});
+
+test("mixed homepage metadata cannot force every article into one category", () => {
+  assert.deepEqual(
+    trustedStoryCategoryCandidates([
+      {
+        sourceName: "VietnamPlus Trang chủ",
+        rawMetadata: {
+          categories: [],
+          publisherCategoriesDiscarded: "Y tế",
+        },
+      },
+    ]),
+    [],
+  );
+  assert.deepEqual(
+    trustedStoryCategoryCandidates([
+      { sourceName: "BBC Health", rawMetadata: { categories: [] } },
+    ]),
+    ["Sức khỏe"],
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Trung Quốc phản ứng về án phạt EU đối với sàn thương mại điện tử",
+      [],
+      "vi",
+    ),
+    "Kinh tế",
+  );
+  assert.equal(
+    selectStoryCategory("An Giang tổ chức chương trình hiến máu", [], "vi"),
+    "Sức khỏe",
+  );
+  assert.equal(
+    selectStoryCategory("Dự báo thời tiết: Trung Bộ nắng nóng gay gắt", [], "vi"),
+    "Khoa học",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Nhà máy nhiệt điện hợp tác với doanh nghiệp Hàn Quốc",
+      [],
+      "vi",
+    ),
+    "Kinh tế",
+  );
+  assert.equal(
+    selectStoryCategory("Tăng cường năng lực sẵn sàng chiến đấu quốc phòng", [], "vi"),
+    "Chính trị",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Khánh Hòa tổ chức hoạt động tri ân các anh hùng liệt sỹ",
+      [],
+      "vi",
+    ),
+    "Việt Nam",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Nguy cơ căng thẳng trên Biển Đỏ",
+      [],
+      "vi",
+      "Thế giới",
+    ),
+    "Thế giới",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Kinh tế Việt Nam ghi nhận mức tăng trưởng ấn tượng",
+      [],
+      "vi",
+    ),
+    "Kinh tế",
+  );
+  assert.equal(
+    selectStoryCategory("AI định hình lại hạ tầng số quốc gia", [], "vi"),
+    "Công nghệ",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Diễn tập nâng cao năng lực sẵn sàng chiến đấu từ cơ sở",
+      [],
+      "vi",
+    ),
+    "Chính trị",
+  );
+  assert.equal(
+    selectStoryCategory("Hà Tĩnh đón các dòng vốn đầu tư mới", [], "vi"),
+    "Kinh tế",
+  );
 });

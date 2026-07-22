@@ -95,7 +95,7 @@ export default async function CatchAllPage({ params }: PageProps) {
   if (slug[0] === "category" && !newsCategory(slug[1])) notFound();
   if (slug[0] === "register" && isInternalMode()) redirect("/login?error=invitation_only");
   const storyData = slug.length === 2 && slug[0] === "news" ? await loadStoryPageData(slug[1]) : null;
-  if (slug[0] === "news" && !storyData?.story) notFound();
+  if (slug.length === 2 && slug[0] === "news" && !storyData?.story) notFound();
   const story = storyData?.story ?? null;
   if (story && story.slug !== slug[1]) redirect(`/news/${story.slug}`);
   const initialStory = storyData && story

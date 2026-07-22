@@ -16,15 +16,15 @@ test("scheduled pipeline rejects an invalid timestamp", () => {
   assert.throws(() => scheduledPipelineTask(Number.NaN), /finite/);
 });
 
-test("scheduled story batches preserve AI quota and alternate freshness with backlog fairness", () => {
+test("scheduled story batches never invoke remote AI and alternate freshness with backlog fairness", () => {
   const newest = scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, 22));
   const oldest = scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, 31));
   assert.equal(newest.limit, 8);
   assert.equal(newest.candidateLimit, 96);
   assert.equal(newest.leaseSeconds, 240);
-  assert.equal(newest.aiLimit, 1);
+  assert.equal(newest.aiLimit, 0);
   assert.equal(newest.matchAiLimit, 0);
   assert.equal(newest.oldestFirst, false);
   assert.equal(oldest.oldestFirst, true);
-  assert.equal(newest.useAi, true);
+  assert.equal(newest.useAi, false);
 });
