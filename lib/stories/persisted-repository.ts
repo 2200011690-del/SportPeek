@@ -183,15 +183,39 @@ function storyFromRow(row: PersistedStoryRow): StoryCluster | null {
   return parsed.success ? refreshStoryHotness(restoreOriginalStoryLanguage(hydratePersistenceMetadata(parsed.data, row))) : null;
 }
 
+const PERSISTED_STORY_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isPersistedStoryId(value: string): boolean {
+  return PERSISTED_STORY_ID_PATTERN.test(value);
+}
+
 async function findPersistedStory(column: "slug" | "id", value: string): Promise<StoryCluster | null> {
   const client = persistedClient();
   let fresh = await client.from("story_clusters").select(FRESH_STORY_COLUMNS).eq(column, value).limit(1);
-  if (!fresh.data?.length && column === "slug") {
+  if (!fresh.error && !fresh.data?.length && column === "slug" && isPersistedStoryId(value)) {
     fresh = await client.from("story_clusters").select(FRESH_STORY_COLUMNS).eq("id", value).limit(1);
   }
-  const result = fresh.error && isFreshnessSchemaMissing(fresh.error)
-    ? await client.from("story_clusters").select(LEGACY_STORY_COLUMNS).or(`slug.eq.${value},id.eq.${value}`).limit(1)
-    : fresh;
+  if (!fresh.error && !fresh.data?.length && column === "slug") {
+    fresh = await client.from("story_clusters").select(FRESH_STORY_COLUMNS)
+      .contains("payload", { legacySlugs: [value] })
+      .limit(1);
+  }
+  let result = fresh as unknown as {
+    data: PersistedStoryRow[] | null;
+    error: { code?: string; message?: string; details?: string } | null;
+  };
+  if (fresh.error && isFreshnessSchemaMissing(fresh.error)) {
+    result = await client.from("story_clusters").select(LEGACY_STORY_COLUMNS).eq(column, value).limit(1) as unknown as typeof result;
+    if (!result.error && !result.data?.length && column === "slug" && isPersistedStoryId(value)) {
+      result = await client.from("story_clusters").select(LEGACY_STORY_COLUMNS).eq("id", value).limit(1) as unknown as typeof result;
+    }
+    if (!result.error && !result.data?.length && column === "slug") {
+      result = await client.from("story_clusters").select(LEGACY_STORY_COLUMNS)
+        .contains("payload", { legacySlugs: [value] })
+        .limit(1) as unknown as typeof result;
+    }
+  }
   if (result.error) throw new ProviderError("Không thể đọc bài viết trong kho lưu trữ.", "supabase");
   const row = result.data?.[0] as unknown as PersistedStoryRow | undefined;
   return row ? storyFromRow(row) : null;

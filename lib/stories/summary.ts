@@ -4,7 +4,7 @@ import type { StoryCluster } from "./schema";
 const technicalSummarySentences = [
   /^Bản tin (?:này )?chưa được xử lý bởi AI\b/i,
   /^Nội dung đang hiển thị từ metadata nguồn\b/i,
-  /^SportPeek ghi nhận thông tin này từ(?:\s|$)/i,
+  /^(?:SportPeek|NewsPeek) ghi nhận thông tin này từ(?:\s|$)/i,
   /^Bản tổng hợp chỉ dựa trên tiêu đề(?: và mô tả ngắn)?(?:\s|$)/i,
   /^Có \d+ nhà xuất bản cùng đề cập\b/i,
   /^Hiện mới có một nhà xuất bản trong cụm\b/i,

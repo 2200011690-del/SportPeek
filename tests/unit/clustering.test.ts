@@ -96,6 +96,12 @@ test("event classification distinguishes Vietnamese month from a win", () => {
   assert.equal(storyEventType("Arsenal thắng Chelsea 2-1"), "result");
 });
 
+test("event classification only marks an actual correction, not words containing dinh chinh", () => {
+  assert.equal(storyEventType("Xác định chính thức ba kênh phân phối"), "news");
+  assert.equal(storyEventType("Chăm lo gia đình chính sách"), "news");
+  assert.equal(storyEventType("Đính chính thông tin trong bản tin tối"), "correction");
+});
+
 test("event classification covers general-news events without treating every win as sport", () => {
   assert.equal(
     storyEventType("Động đất 7,2 độ làm rung chuyển Nhật Bản"),

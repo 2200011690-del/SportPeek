@@ -24,7 +24,7 @@ import {
   deriveEventImportance,
   eventHalfLifeHours,
 } from "@/lib/scoring";
-import { createStorySlug } from "./slug";
+import { createLegacyStorySlug, createStorySlug } from "./slug";
 import {
   analyzeSourceIndependence,
   CLUSTER_THRESHOLDS,
@@ -197,7 +197,7 @@ export function derivePublisherCountry(
 }
 const CATEGORY_RULES: Array<[RegExp, string]> = [
   [
-    /\b(the thao|bong da|doi tuyen|tran dau|giai dau|thi dau|vo dich|asean cup|world cup|sports?|football|soccer|tennis|olympic)\b/,
+    /\b(the thao|bong da|doi bong|doi tuyen|cau thu|huan luyen vien|tran dau|giai dau|thi dau|ty so|ghi ban|ban thang|vo dich|asean cup|world cup|sports?|football|soccer|tennis|olympic)\b/,
     "Thể thao",
   ],
   [
@@ -209,7 +209,7 @@ const CATEGORY_RULES: Array<[RegExp, string]> = [
     "Sức khỏe",
   ],
   [
-    /\b(khoa hoc|moi truong|thoi tiet|nang nong|mua lon|lu quet|sat lo|he sinh thai|rung|ve tinh|nghien cuu|science|environment|climate|weather|satellite|space|vu tru)\b/,
+    /\b(khoa hoc|moi truong|thoi tiet|nang nong|mua lon|lu quet|sat lo|he sinh thai|rung|ve tinh|nghien cuu khoa hoc|science|environment|climate|weather|satellite|space|vu tru)\b/,
     "Khoa học",
   ],
   [
@@ -687,9 +687,20 @@ async function buildStory(
   }));
   const fullSummary = buildLongSummary(generatedSummary.summary);
   const summary = fullSummary.slice(0, 2_000);
-  const nextSlug =
-    draft.previousStory?.slug ?? createStorySlug(title, draft.id);
-  const legacySlugs = draft.previousStory?.legacySlugs ?? [];
+  const generatedSlug = createStorySlug(title, draft.id);
+  const previousSlug = draft.previousStory?.slug;
+  const promoteLegacySlug = Boolean(
+    previousSlug &&
+      previousSlug === createLegacyStorySlug(draft.id) &&
+      previousSlug !== generatedSlug,
+  );
+  const nextSlug = promoteLegacySlug
+    ? generatedSlug
+    : previousSlug ?? generatedSlug;
+  const legacySlugs = unique([
+    ...(draft.previousStory?.legacySlugs ?? []),
+    ...(promoteLegacySlug && previousSlug ? [previousSlug] : []),
+  ]);
 
   const geoCounts: Record<string, number> = {};
   for (const article of rawArticles) {
@@ -706,9 +717,17 @@ async function buildStory(
       geography = geo;
     }
   }
+  const publisherCountry = derivePublisherCountry(
+    lead.publisherCountry,
+    lead.language,
+  );
   const region = geography === "Việt Nam"
     ? "Việt Nam"
-    : (geography ? "Thế giới" : "Quốc tế");
+    : geography
+      ? "Thế giới"
+      : publisherCountry === "Việt Nam"
+        ? "Việt Nam"
+        : "Thế giới";
   const categoryCandidates = trustedStoryCategoryCandidates(articles);
   const categoryValue = selectStoryCategory(
     [title, ...articles.map((article) => article.title)].join(" "),
@@ -732,10 +751,7 @@ async function buildStory(
     region,
     geography,
     articleLanguage: lead.language,
-    publisherCountry: derivePublisherCountry(
-      lead.publisherCountry,
-      lead.language,
-    ),
+    publisherCountry,
     status:
       type === "correction"
         ? "correction"
@@ -779,10 +795,14 @@ async function buildStory(
     reviewStatus: remoteGenerated
       ? "auto"
       : preservedSummaryIsStale
-        ? "pending"
+        ? independence.independentSourceCount >= 2
+          ? "pending"
+          : "reviewed"
         : preservedAI && draft.previousStory
           ? draft.previousStory.reviewStatus
-          : "pending",
+          : independence.independentSourceCount >= 2
+            ? "pending"
+            : "reviewed",
   });
   return { story, materialFingerprint: currentEvidenceHash, lastSourceSeenAt };
 }
@@ -1047,12 +1067,26 @@ export async function processStories(
   let claimedIds: string[] = [];
 
   if (!summary.dryRun) {
+    const staleBefore = new Date(Date.now() - 2 * 60_000).toISOString();
+    const staleJobs = await client
+      .from("ingestion_jobs")
+      .update({
+        status: "failed",
+        error_code: "LEASE_EXPIRED",
+        error_message: "Story processing exceeded its execution lease.",
+        completed_at: new Date().toISOString(),
+      })
+      .eq("job_type", "stories:process")
+      .eq("status", "processing")
+      .lt("started_at", staleBefore);
+    if (staleJobs.error)
+      throw new ProviderError("Không thể giải phóng story job quá hạn.", "supabase");
     const { data: activeJobs, error: activeCheckError } = await client
       .from("ingestion_jobs")
       .select("id")
       .eq("job_type", "stories:process")
       .eq("status", "processing")
-      .gt("started_at", new Date(Date.now() - 10 * 60_000).toISOString())
+      .gt("started_at", staleBefore)
       .limit(1);
     if (activeCheckError)
       throw new ProviderError("Không thể kiểm tra trạng thái job.", "supabase");

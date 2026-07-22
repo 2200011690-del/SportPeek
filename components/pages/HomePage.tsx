@@ -23,18 +23,18 @@ import { NEWS_CATEGORIES } from "@/lib/news/categories";
 import {
   conciseNewsSummary,
   independentSourceCount,
-  newsHasSourceLanguage,
   newsStatusLabel,
   newsTimeLabel,
   rankFeaturedNews,
   sortLatestNews,
 } from "@/components/news/news-presenter";
 import type { NewsItem } from "@/lib/types";
+import { newsIsInternational, newsIsVietnamese } from "@/lib/news/region";
 
 function matchesSourceFilter(item: NewsItem, filter: SourceFilter): boolean {
   if (filter === "all" || filter === "rss") return true;
-  if (filter === "vi") return newsHasSourceLanguage(item, "vi");
-  if (filter === "international") return newsHasSourceLanguage(item, "en");
+  if (filter === "vi") return newsIsVietnamese(item);
+  if (filter === "international") return newsIsInternational(item);
   if (filter === "official")
     return Boolean(item.sourceDetails?.some((source) => source.isOfficialSource));
   return true;

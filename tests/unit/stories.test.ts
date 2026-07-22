@@ -2,18 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { fetchStoryDetail, mapStoryEnvelopeToState, requestStoryAISummary } from "../../lib/stories/client";
 import { createStoryRepository } from "../../lib/stories/repository";
+import { isPersistedStoryId } from "../../lib/stories/persisted-repository";
 import { isSafeExternalUrl, rawArticleSchema, storyDetailEnvelopeSchema } from "../../lib/stories/schema";
-import { createStorySlug, storySlugSchema } from "../../lib/stories/slug";
+import { createLegacyStorySlug, createStorySlug, storySlugSchema } from "../../lib/stories/slug";
 import { makeAggregatedNews, makeStoryNewsItem } from "../fixtures/story-news";
 
-test("story slugs are stable, safe and independent of duplicate titles", () => {
-  const first = createStorySlug("Cùng một tiêu đề", "rss-one-123");
-  const second = createStorySlug("Cùng một tiêu đề", "rss-two-456");
-  assert.equal(first, "story-one-123");
+test("story slugs combine searchable titles with a stable collision-resistant ID", () => {
+  const firstId = "11111111-1111-4111-8111-111111111111";
+  const secondId = "22222222-2222-4222-8222-222222222222";
+  const first = createStorySlug("Cùng một tiêu đề", firstId);
+  const second = createStorySlug("Cùng một tiêu đề", secondId);
+  assert.equal(first, `cung-mot-tieu-de-${firstId}`);
   assert.notEqual(first, second);
-  assert.equal(createStorySlug("Tiêu đề đã đổi", "rss-one-123"), first);
+  assert.equal(createLegacyStorySlug("rss-one-123"), "story-one-123");
+  assert.equal(createStorySlug("Tiêu đề fixture", "rss-one-123"), "story-one-123");
   assert.equal(storySlugSchema.safeParse(first).success, true);
   assert.equal(storySlugSchema.safeParse("../bad slug").success, false);
+});
+
+test("persisted story lookup only sends real UUIDs to the database ID column", () => {
+  assert.equal(isPersistedStoryId("story-does-not-exist"), false);
+  assert.equal(isPersistedStoryId("11111111-1111-4111-8111-111111111111"), true);
 });
 
 test("article schema rejects unsafe source links", () => {

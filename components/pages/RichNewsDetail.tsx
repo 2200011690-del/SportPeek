@@ -87,8 +87,11 @@ function contentOriginLabel(source: StoryArticleContent["source"]): string {
 function sourceOnlyTitle(status: StoryArticleContent["status"] | undefined): string {
   if (status === "pending" || status === "processing") return "Đang lấy nội dung đầy đủ.";
   if (status === "failed") return "Chưa lấy được nội dung đầy đủ.";
-  return "Nguồn này chưa có toàn văn trong SportPeek.";
+  return "Nguồn này chưa có toàn văn trong NewsPeek.";
 }
+
+const articleContentResolved = (article: StoryArticleContent) =>
+  article.status !== "pending" && article.status !== "processing";
 
 export default function RichNewsDetail({
   slug,
@@ -101,6 +104,7 @@ export default function RichNewsDetail({
 }) {
   const router = useRouter();
   const [reloadToken, setReloadToken] = useState(0);
+  const [contentRetry, setContentRetry] = useState({ slug, count: 0 });
   const [failedImageUrl, setFailedImageUrl] = useState<string>();
   const [readingPreference, setReadingPreference] = useState<{
     slug: string;
@@ -144,12 +148,14 @@ export default function RichNewsDetail({
   const readingMode = readingPreference.slug === slug ? readingPreference.mode : "full";
   const aiStory = aiResult.slug === slug ? aiResult.story : null;
   const aiRequestState = aiRequest.slug === slug ? aiRequest.state : "idle";
+  const contentRetryCount = contentRetry.slug === slug ? contentRetry.count : 0;
 
   useEffect(() => {
     if (
       reloadToken === 0 &&
       initialData?.story.slug === slug &&
-      initialData.articleContents.length === initialData.story.articles.length
+      initialData.articleContents.length === initialData.story.articles.length &&
+      initialData.articleContents.every(articleContentResolved)
     ) return;
     let active = true;
     void fetchStoryDetail(slug).then((next) => {
@@ -159,6 +165,23 @@ export default function RichNewsDetail({
       active = false;
     };
   }, [initialData, slug, reloadToken]);
+
+  const unresolvedArticleContent = Boolean(
+    readerState.data &&
+      (readerState.data.articleContents.length < readerState.data.story.articles.length ||
+        readerState.data.articleContents.some(
+          (article) => !articleContentResolved(article),
+        )),
+  );
+  useEffect(() => {
+    if (!unresolvedArticleContent || contentRetryCount >= 3) return;
+    const delays = [5_000, 15_000, 30_000];
+    const timer = window.setTimeout(() => {
+      setContentRetry({ slug, count: contentRetryCount + 1 });
+      setReloadToken((value) => value + 1);
+    }, delays[contentRetryCount]);
+    return () => window.clearTimeout(timer);
+  }, [contentRetryCount, slug, unresolvedArticleContent]);
 
   useEffect(() => {
     const canonicalSlug = readerState.meta?.canonicalSlug;
@@ -441,7 +464,7 @@ export default function RichNewsDetail({
                     <ExternalLink size={16} aria-hidden="true" />
                   </a>
                 ) : null}
-                <small>SportPeek ưu tiên hiển thị nội dung công khai và luôn giữ link bài gốc để đối chiếu.</small>
+                <small>NewsPeek ưu tiên hiển thị nội dung công khai và luôn giữ link bài gốc để đối chiếu.</small>
               </div>
             )}
           </section>

@@ -320,9 +320,10 @@ export async function syncRss(options: { source?: string; force?: boolean; dryRu
   const jobId = randomUUID(); const summary: RssSyncSummary = { jobId, sources: selected.length, succeeded: 0, failed: 0, notModified: 0, fetched: 0, inserted: 0, skipped: 0, errors: [] };
   if (options.dryRun) return summary;
   const client = admin();
-  const staleJobs = await client.from("ingestion_jobs").update({ status: "failed", error_code: "LEASE_EXPIRED", error_message: "RSS sync exceeded its execution lease.", completed_at: new Date().toISOString() }).eq("job_type", "rss:sync").eq("status", "processing").lt("started_at", new Date(Date.now() - 10 * 60_000).toISOString());
+  const activeWindowStart = new Date(Date.now() - 2 * 60_000).toISOString();
+  const staleJobs = await client.from("ingestion_jobs").update({ status: "failed", error_code: "LEASE_EXPIRED", error_message: "RSS sync exceeded its execution lease.", completed_at: new Date().toISOString() }).eq("job_type", "rss:sync").eq("status", "processing").lt("started_at", activeWindowStart);
   if (staleJobs.error) throw new ProviderError("Không thể giải phóng RSS job quá hạn.", "supabase");
-  const { data: activeJobs, error: activeCheckError } = await client.from("ingestion_jobs").select("id").eq("job_type", "rss:sync").eq("status", "processing").gt("started_at", new Date(Date.now() - 10 * 60_000).toISOString()).limit(1);
+  const { data: activeJobs, error: activeCheckError } = await client.from("ingestion_jobs").select("id").eq("job_type", "rss:sync").eq("status", "processing").gt("started_at", activeWindowStart).limit(1);
   if (activeCheckError) throw new ProviderError("Không thể kiểm tra trạng thái job.", "supabase");
   if (activeJobs && activeJobs.length > 0) {
     console.log("[RSS Sync] Another sync job is already processing. Skipping execution.");

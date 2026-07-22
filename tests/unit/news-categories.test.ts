@@ -63,3 +63,17 @@ test("a declared topic is not reclassified from an incidental headline phrase", 
   assert.equal(matchesNewsCategory(musicMarket, "kinh-te"), false);
   assert.equal(matchesNewsCategory(musicMarket, "van-hoa-giai-tri"), true);
 });
+
+test("generic policy research is not mistaken for science and sports terms remain discoverable", () => {
+  const housingPolicy = newsItem({
+    title: "Nghiên cứu phương án phát triển nhà ở xã hội tại thủ đô",
+    category: "Việt Nam",
+  });
+  assert.equal(matchesNewsCategory(housingPolicy, "khoa-hoc"), false);
+
+  const nationalTeam = newsItem({
+    title: "Đội tuyển Indonesia giành vé vào chung kết",
+    category: "Thể thao",
+  });
+  assert.equal(matchesNewsCategory(nationalTeam, "the-thao"), true);
+});

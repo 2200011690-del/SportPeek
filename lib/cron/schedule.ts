@@ -30,13 +30,15 @@ export function scheduledStoryProcessingOptions(timestampMs = Date.now()) {
     throw new TypeError("Scheduled timestamp must be finite");
   }
   const minute = new Date(timestampMs).getUTCMinutes();
+  const drainBacklog = minute % 8 === 7;
   return {
     useAi: false,
     aiLimit: 0,
     matchAiLimit: 0,
-    limit: 8,
-    candidateLimit: 96,
-    leaseSeconds: 240,
-    oldestFirst: minute % 8 === 7,
+    limit: 16,
+    candidateLimit: 128,
+    leaseSeconds: 120,
+    oldestFirst: drainBacklog,
+    includeFailed: drainBacklog,
   } as const;
 }

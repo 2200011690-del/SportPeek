@@ -26,6 +26,24 @@ test("news API reports the real AI state", { skip: !base && "Set E2E_BASE_URL to
   if (payload.aiTranslation) assert.ok(payload.data.some((item) => item.translatedByAI));
 });
 
+test("public feed honors a bounded limit and ships hardened headers", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => {
+  const response = await fetch(`${base}/api/news?limit=5`);
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.ok(payload.data.length > 0 && payload.data.length <= 5);
+  const csp = response.headers.get("content-security-policy") ?? "";
+  assert.match(csp, /object-src 'none'/);
+  assert.doesNotMatch(csp, /unsafe-eval/);
+});
+
+test("robots advertises both standard and Google News sitemaps", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => {
+  const response = await fetch(`${base}/robots.txt`);
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /\/sitemap\.xml/);
+  assert.match(body, /\/sitemap-news/);
+});
+
 test("news API exposes publisher images and a richer reading body", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => {
   const response = await fetch(`${base}/api/news`);
   assert.equal(response.status, 200);
@@ -42,12 +60,18 @@ test("feed story opens through the shared detail API", { skip: !base && "Set E2E
   assert.ok(["success", "stale"].includes(feed.status));
   assert.ok(Array.isArray(feed.data) && feed.data.length > 0);
   const expected = feed.data[0];
-  const detailResponse = await fetch(`${base}/api/stories/${expected.slug}`);
+  let detailResponse = await fetch(`${base}/api/stories/${expected.slug}`);
   assert.equal(detailResponse.status, 200);
-  const detail = await detailResponse.json();
+  let detail = await detailResponse.json();
+  for (let attempt = 0; attempt < 3 && detail.data.articleContents.some((article) => ["pending", "processing"].includes(article.status)); attempt += 1) {
+    detailResponse = await fetch(`${base}/api/stories/${expected.slug}`);
+    detail = await detailResponse.json();
+  }
   assert.equal(detail.data.story.id, expected.id);
   assert.equal(detail.data.story.title, expected.title);
   assert.ok(detail.data.story.articles.length >= 1);
+  assert.equal(detail.data.articleContents.length, detail.data.story.articles.length);
+  assert.ok(detail.data.articleContents.every((article) => !["pending", "processing"].includes(article.status)));
   assert.ok(detail.data.story.articles.every((article) => /^https?:\/\//.test(article.originalUrl)));
   const pageResponse = await fetch(`${base}/news/${expected.slug}`);
   assert.equal(pageResponse.status, 200);

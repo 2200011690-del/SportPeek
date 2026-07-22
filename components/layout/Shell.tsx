@@ -25,6 +25,7 @@ import {
 } from "@/components/runtime/RuntimeDataContext";
 import { NEWS_CATEGORIES } from "@/lib/news/categories";
 import type { HealthState } from "@/lib/health";
+import { newsIsInternational, newsIsVietnamese } from "@/lib/news/region";
 
 const getInitials = (name: string) =>
   (name?.trim() || "TBD")
@@ -71,13 +72,13 @@ export function AppSidebar({
       id: "vi" as const,
       label: "Tin Việt Nam",
       icon: Newspaper,
-      count: newsItems.filter((item) => item.originalLanguage !== "en").length,
+      count: newsItems.filter(newsIsVietnamese).length,
     },
     {
       id: "international" as const,
       label: "Tin quốc tế",
       icon: Globe2,
-      count: newsItems.filter((item) => item.originalLanguage === "en").length,
+      count: newsItems.filter(newsIsInternational).length,
     },
     {
       id: "official" as const,

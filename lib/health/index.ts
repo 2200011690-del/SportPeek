@@ -62,8 +62,22 @@ export type AIHealthEvaluation = {
   latestStatus: string | null;
 };
 
+export type PipelineJobHealthRecord = {
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  error_code?: string | null;
+};
+
+export type PipelineHealthEvaluation = {
+  state: HealthState;
+  lastUpdatedAt: string | null;
+  latestStatus: string | null;
+};
+
 export const AI_HEALTH_SUCCESS_MAX_AGE_MS = 30 * 60_000;
 const AI_JOB_STALL_AFTER_MS = 10 * 60_000;
+export const PIPELINE_JOB_STALL_AFTER_MS = 2 * 60_000;
 
 const service = (
   state: HealthState,
@@ -201,6 +215,82 @@ export function evaluateAIHealth(input: {
   return result("degraded");
 }
 
+export function evaluatePipelineHealth(input: {
+  jobs: readonly PipelineJobHealthRecord[];
+  successMaxAgeMs: number;
+  queryFailed?: boolean;
+  stallAfterMs?: number;
+  now?: number;
+}): PipelineHealthEvaluation {
+  const {
+    jobs,
+    successMaxAgeMs,
+    queryFailed = false,
+    stallAfterMs = PIPELINE_JOB_STALL_AFTER_MS,
+  } = input;
+  const now = input.now ?? Date.now();
+  if (queryFailed) {
+    return { state: "unavailable", lastUpdatedAt: null, latestStatus: null };
+  }
+
+  const ordered = jobs
+    .map((job) => ({
+      job,
+      startedAt: parsedTimestamp(job.started_at),
+      completedAt: parsedTimestamp(job.completed_at),
+    }))
+    .filter(
+      (entry): entry is typeof entry & { startedAt: number } =>
+        entry.startedAt !== null,
+    )
+    .sort((left, right) => right.startedAt - left.startedAt);
+  const latest = ordered[0] ?? null;
+  const latestSuccess = ordered.find(
+    (entry) => entry.job.status === "completed" && entry.completedAt !== null,
+  ) ?? null;
+  const latestFailure = ordered.find(
+    (entry) => entry.job.status === "failed",
+  ) ?? null;
+  const latestActive = ordered.find((entry) =>
+    ["pending", "processing"].includes(entry.job.status),
+  ) ?? null;
+  const result = (
+    state: HealthState,
+    lastUpdatedAt: string | null =
+      latestSuccess?.job.completed_at ?? latest?.job.started_at ?? null,
+  ): PipelineHealthEvaluation => ({
+    state,
+    lastUpdatedAt,
+    latestStatus: latest?.job.status ?? null,
+  });
+
+  if (
+    latestFailure &&
+    (!latestSuccess || latestFailure.startedAt >= latestSuccess.startedAt)
+  ) {
+    return result(
+      "degraded",
+      latestFailure.job.completed_at ?? latestFailure.job.started_at,
+    );
+  }
+  if (
+    latestActive &&
+    now - latestActive.startedAt > stallAfterMs &&
+    (!latestSuccess || latestActive.startedAt >= latestSuccess.startedAt)
+  ) {
+    return result("degraded", latestActive.job.started_at);
+  }
+  if (
+    latestSuccess?.completedAt !== null &&
+    latestSuccess?.completedAt !== undefined &&
+    now - latestSuccess.completedAt <= successMaxAgeMs
+  ) {
+    return result("operational", latestSuccess.job.completed_at);
+  }
+  if (latestSuccess) return result("stale", latestSuccess.job.completed_at);
+  return result("degraded", latestActive?.job.started_at ?? null);
+}
+
 function aiHealthMessage(
   evaluation: AIHealthEvaluation,
   backlogCount: number,
@@ -289,18 +379,16 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
       .eq("is_active", true),
     client
       .from("ingestion_jobs")
-      .select("status,completed_at,error_code")
+      .select("status,started_at,completed_at,error_code")
       .eq("job_type", "rss:sync")
       .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .limit(20),
     client
       .from("ingestion_jobs")
-      .select("status,completed_at,error_code")
+      .select("status,started_at,completed_at,error_code")
       .eq("job_type", "stories:process")
       .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .limit(20),
     client
       .from("story_clusters")
       .select("id,last_updated_at", { count: "exact" })
@@ -374,20 +462,27 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
   const sourceErrors = (sources.data ?? []).filter(
     (item) => item.last_error,
   ).length;
-  const rssUpdated = rssJob.data?.completed_at ?? null;
-  let rssState = ageState(rssUpdated, 60 * 60_000);
-  if (rssJob.error || sources.error) rssState = "unavailable";
-  else if (rssJob.data?.status === "failed" || sourceErrors > 0)
-    rssState = "degraded";
+  const rssEvaluation = evaluatePipelineHealth({
+    jobs: (rssJob.data ?? []) as PipelineJobHealthRecord[],
+    successMaxAgeMs: 60 * 60_000,
+    queryFailed: Boolean(rssJob.error || sources.error),
+  });
+  const rssUpdated = rssEvaluation.lastUpdatedAt;
+  const rssState = sourceErrors > 0 && rssEvaluation.state === "operational"
+    ? "degraded"
+    : rssEvaluation.state;
 
-  const storyUpdated = storyJob.data?.completed_at ?? null;
+  const storyEvaluation = evaluatePipelineHealth({
+    jobs: (storyJob.data ?? []) as PipelineJobHealthRecord[],
+    successMaxAgeMs: 15 * 60_000,
+    queryFailed: Boolean(storyJob.error || clusters.error),
+  });
+  const storyUpdated = storyEvaluation.lastUpdatedAt;
   const newestStoryAt = clusters.data?.last_updated_at ?? null;
-  let storyState = overallHealthState([
-    ageState(storyUpdated, 15 * 60_000),
-    ageState(newestStoryAt, 24 * 60 * 60_000),
+  const storyState = overallHealthState([
+    storyEvaluation.state,
+    newestStoryAt ? ageState(newestStoryAt, 24 * 60 * 60_000) : "degraded",
   ]);
-  if (storyJob.error || clusters.error) storyState = "unavailable";
-  else if (storyJob.data?.status === "failed") storyState = "degraded";
 
   const ai = getAIProvider();
   const aiCount = aiClusters.count ?? 0;

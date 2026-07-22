@@ -32,7 +32,7 @@ type AdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
 const ARTICLE_CONTENT_COLUMNS =
   "id,title,original_url,language,full_content,content_status,content_source,content_fetched_at,content_word_count,content_error,content_lease_expires_at,news_sources(name)";
 const PUBLISHER_RETRY_MS = 12 * 60 * 60_000;
-const CONTENT_LEASE_MS = 2 * 60_000;
+const CONTENT_LEASE_MS = 30_000;
 
 function sourceName(value: SourceJoin, fallback: string): string {
   const source = Array.isArray(value) ? value[0] : value;

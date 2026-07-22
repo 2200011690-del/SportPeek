@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   AI_HEALTH_SUCCESS_MAX_AGE_MS,
   evaluateAIHealth,
+  evaluatePipelineHealth,
   overallHealthState,
   type AIJobHealthRecord,
+  type PipelineJobHealthRecord,
 } from "../../lib/health";
 
 test("unified health never reports operational while a required service is stale or broken", () => {
@@ -96,6 +98,85 @@ test("AI health distinguishes missing configuration and unreadable queue state",
       providerName: "failover",
       jobs: [],
       backlogCount: 0,
+      queryFailed: true,
+      now,
+    }).state,
+    "unavailable",
+  );
+});
+
+const pipelineJob = (
+  status: string,
+  startedAt: string,
+  completedAt: string | null,
+): PipelineJobHealthRecord => ({
+  status,
+  started_at: startedAt,
+  completed_at: completedAt,
+  error_code: status === "failed" ? "TEST_FAILURE" : null,
+});
+
+test("an active pipeline job keeps the last recent success operational", () => {
+  const activeAt = new Date(now - 30_000).toISOString();
+  const successAt = new Date(now - 2 * 60_000).toISOString();
+  const result = evaluatePipelineHealth({
+    jobs: [
+      pipelineJob("processing", activeAt, null),
+      pipelineJob("completed", successAt, successAt),
+    ],
+    successMaxAgeMs: 15 * 60_000,
+    now,
+  });
+
+  assert.equal(result.state, "operational");
+  assert.equal(result.latestStatus, "processing");
+  assert.equal(result.lastUpdatedAt, successAt);
+});
+
+test("pipeline health degrades stalled and failed jobs newer than the last success", () => {
+  const successAt = new Date(now - 7 * 60_000).toISOString();
+  const stalledAt = new Date(now - 6 * 60_000).toISOString();
+  const failedAt = new Date(now - 60_000).toISOString();
+
+  assert.equal(
+    evaluatePipelineHealth({
+      jobs: [
+        pipelineJob("processing", stalledAt, null),
+        pipelineJob("completed", successAt, successAt),
+      ],
+      successMaxAgeMs: 15 * 60_000,
+      stallAfterMs: 5 * 60_000,
+      now,
+    }).state,
+    "degraded",
+  );
+  assert.equal(
+    evaluatePipelineHealth({
+      jobs: [
+        pipelineJob("failed", failedAt, failedAt),
+        pipelineJob("completed", successAt, successAt),
+      ],
+      successMaxAgeMs: 15 * 60_000,
+      now,
+    }).state,
+    "degraded",
+  );
+});
+
+test("pipeline health is stale only when its last success exceeds the freshness window", () => {
+  const oldSuccess = new Date(now - 16 * 60_000).toISOString();
+  assert.equal(
+    evaluatePipelineHealth({
+      jobs: [pipelineJob("completed", oldSuccess, oldSuccess)],
+      successMaxAgeMs: 15 * 60_000,
+      now,
+    }).state,
+    "stale",
+  );
+  assert.equal(
+    evaluatePipelineHealth({
+      jobs: [],
+      successMaxAgeMs: 15 * 60_000,
       queryFailed: true,
       now,
     }).state,

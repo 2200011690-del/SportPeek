@@ -101,7 +101,7 @@ export const NEWS_CATEGORIES = [
     kind: "topic",
     keywords: [
       "khoa hoc",
-      "nghien cuu",
+      "nghien cuu khoa hoc",
       "moi truong",
       "khong gian",
       "vu tru",
@@ -135,6 +135,10 @@ export const NEWS_CATEGORIES = [
     keywords: [
       "the thao",
       "bong da",
+      "doi tuyen",
+      "cau thu",
+      "tran dau",
+      "giai dau",
       "sports",
       "football",
       "soccer",

@@ -168,4 +168,12 @@ test("mixed homepage metadata cannot force every article into one category", () 
     selectStoryCategory("Hà Tĩnh đón các dòng vốn đầu tư mới", [], "vi"),
     "Kinh tế",
   );
+  assert.equal(
+    selectStoryCategory("Indonesia thắng đậm, đội tuyển giành vé vào chung kết", [], "vi"),
+    "Thể thao",
+  );
+  assert.equal(
+    selectStoryCategory("Nghiên cứu phương án phát triển nhà ở xã hội tại thủ đô", [], "vi"),
+    "Việt Nam",
+  );
 });

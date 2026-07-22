@@ -14,7 +14,7 @@ import type { StoryRepositoryResult } from "@/lib/stories/repository";
 import { storyDetailEnvelopeSchema, storyFeedEnvelopeSchema, type StoryCluster } from "@/lib/stories/schema";
 import { storySlugSchema } from "@/lib/stories/slug";
 import { bookmarkSchema, followSchema, profileSchema, readingHistorySchema, searchSchema } from "@/lib/validation";
-import { newsSearchText, normalizeSearchText } from "@/lib/ui-logic";
+import { normalizeSearchText } from "@/lib/ui-logic";
 import { NEWS_CATEGORIES } from "@/lib/news/categories";
 import { loadStoryArticleContents } from "@/lib/articles/content";
 
@@ -37,6 +37,11 @@ export function cronAuthorizationState(
 
 export function routeRequiresCronAuthorization(path: string[]): boolean {
   return ["cron/ingest", "admin/ingest", "ai/process"].includes(path.join("/"));
+}
+
+export function boundedNewsLimit(value: string | null, fallback = 40): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Math.min(100, Math.max(1, Number.isFinite(parsed) ? parsed : fallback));
 }
 
 function cronAuthorizationError(request: NextRequest): NextResponse | null {
@@ -106,7 +111,10 @@ export async function GET(request: NextRequest, { params }: Context) {
           ...result,
           data: {
             ...result.data,
-            articleContents: await loadStoryArticleContents(result.data.story).catch(() => []),
+            articleContents: await loadStoryArticleContents(result.data.story, {
+              fetchMissing: true,
+              maxFetches: 4,
+            }).catch(() => []),
           },
         }
       : result;
@@ -139,7 +147,8 @@ export async function GET(request: NextRequest, { params }: Context) {
     }, { status: repositoryHttpStatus(result.status), headers: { "cache-control": "public, s-maxage=60, stale-while-revalidate=180" } });
   }
   if (route === "news") {
-    const result = await storyService.getFeed();
+    const limit = boundedNewsLimit(request.nextUrl.searchParams.get("limit"));
+    const result = await storyService.getLatest(limit);
     const data = (result.data ?? []).map(storyToNewsItem);
     const aiStatus = result.diagnostics?.aiStatus ?? { provider: "off" as const, state: "off" as const, translatedCount: 0 };
     return NextResponse.json({

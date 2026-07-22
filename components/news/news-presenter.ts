@@ -3,7 +3,7 @@ import type { NewsItem } from "@/lib/types";
 const technicalSummaryPrefixes = [
   /^Bản tin (?:này )?chưa được xử lý bởi AI\b/i,
   /^Nội dung đang hiển thị từ metadata nguồn\b/i,
-  /^SportPeek ghi nhận thông tin này từ(?:\s|$)/i,
+  /^(?:SportPeek|NewsPeek) ghi nhận thông tin này từ(?:\s|$)/i,
   /^Bản tổng hợp chỉ dựa trên tiêu đề(?: và mô tả ngắn)?(?:\s|$)/i,
   /^Có \d+ nhà xuất bản cùng đề cập\b/i,
 ];

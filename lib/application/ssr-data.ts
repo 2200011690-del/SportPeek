@@ -21,7 +21,7 @@ export async function getInitialData(route: string, categoryId?: string) {
       const archiveResult = await storyService.getArchive(1, 12, { category: cat?.label });
       newsData = (archiveResult.data?.stories ?? []).map(storyToNewsItem);
     } else {
-      const result = await storyService.getFeed();
+      const result = await storyService.getLatest(40);
       newsData = (result.data ?? []).map(storyToNewsItem);
       aiStatus = result.diagnostics?.aiStatus ?? { provider: "off" as const, state: "off" as const, translatedCount: 0 };
       aiTranslation = result.diagnostics?.aiTranslation ?? false;

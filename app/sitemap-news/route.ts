@@ -38,7 +38,7 @@ export async function GET() {
     <loc>${safeUrl}</loc>
     <news:news>
       <news:publication>
-        <news:name>SportPeek</news:name>
+        <news:name>NewsPeek</news:name>
         <news:language>vi</news:language>
       </news:publication>
       <news:publication_date>${safeDate}</news:publication_date>

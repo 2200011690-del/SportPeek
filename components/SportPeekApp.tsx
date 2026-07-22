@@ -129,7 +129,7 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
     }
     const refreshTimer = window.setInterval(() => { void load(); }, 120_000);
     return () => { active = false; window.clearInterval(refreshTimer); };
-  }, []);
+  }, [initialData]);
   const toggleBookmark = (id: string) => {
     const remove = bookmarks.has(id);
     setBookmarks((current) => { const next = new Set(current); if (remove) next.delete(id); else next.add(id); return next; });

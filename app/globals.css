@@ -1075,7 +1075,7 @@ h3 {
   background: var(--accent);
   color: #0c1408;
   border-radius: 8px;
-  min-height: 39px;
+  min-height: 44px;
   padding: 0 16px;
   display: inline-flex;
   align-items: center;
@@ -2949,10 +2949,10 @@ h3 {
     display: grid;
     place-items: center;
     position: absolute;
-    right: 12px;
-    top: 17px;
-    width: 34px;
-    height: 34px;
+    right: 8px;
+    top: 12px;
+    width: 44px;
+    height: 44px;
     border: 1px solid var(--line);
     background: var(--surface);
     border-radius: 8px;
@@ -2960,6 +2960,8 @@ h3 {
   .menu-button {
     display: grid;
     place-items: center;
+    min-width: 44px;
+    min-height: 44px;
   }
   .app-header {
     padding-inline: 18px;
@@ -3030,9 +3032,14 @@ h3 {
     display: none;
   }
   .login-button {
-    width: 38px;
+    width: 44px;
+    height: 44px;
     padding: 0;
     justify-content: center;
+  }
+  .icon-button {
+    width: 44px;
+    height: 44px;
   }
   .content-wrap {
     overflow: hidden;
@@ -4978,6 +4985,8 @@ h3 {
 }
 .simple-news-back {
   display: inline-flex;
+  min-height: 44px;
+  align-items: center;
   margin-bottom: 25px;
   color: var(--muted);
   font-size: 10px;

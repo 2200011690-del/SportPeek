@@ -318,7 +318,12 @@ function normalizedEventText(value: string): string {
 
 export function storyEventType(value: string): StoryEventType {
   const text = normalizedEventText(value);
-  if (/\b(dinh chinh|correction|corrects?|clarification)\b/.test(text))
+  if (
+    /^(?:(?:tin|bai|thong bao) )?dinh chinh\b/.test(text) ||
+    /\b(?:xin|ra|co|dang|ban|thong bao|yeu cau) dinh chinh\b/.test(text) ||
+    /\bdinh chinh (?:thong tin|noi dung|so lieu|tieu de|tin bai|phat ngon)\b/.test(text) ||
+    /\b(correction|corrects?|clarification)\b/.test(text)
+  )
     return "correction";
   if (
     /\b(earthquake|tsunami|flood|wildfire|bao lon|sieu bao|storm|hurricane|typhoon|tornado|landslide|sat lo|volcan(?:o|ic)|phun trao|tham hoa|disaster)\b/.test(

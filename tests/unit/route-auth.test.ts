@@ -3,6 +3,7 @@ import test from "node:test";
 import { NextRequest } from "next/server";
 import {
   POST,
+  boundedNewsLimit,
   cronAuthorizationState,
   routeRequiresCronAuthorization,
 } from "../../app/api/[...path]/route";
@@ -35,6 +36,14 @@ test("story summarize is public while operational endpoints stay protected", () 
   assert.equal(routeRequiresCronAuthorization(["cron", "ingest"]), true);
   assert.equal(routeRequiresCronAuthorization(["admin", "ingest"]), true);
   assert.equal(routeRequiresCronAuthorization(["ai", "process"]), true);
+});
+
+test("public news limits are bounded and default to a compact feed", () => {
+  assert.equal(boundedNewsLimit(null), 40);
+  assert.equal(boundedNewsLimit("5"), 5);
+  assert.equal(boundedNewsLimit("0"), 1);
+  assert.equal(boundedNewsLimit("999"), 100);
+  assert.equal(boundedNewsLimit("invalid"), 40);
 });
 
 const protectedRequest = (authorization?: string) =>
