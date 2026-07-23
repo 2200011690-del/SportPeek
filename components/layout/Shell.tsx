@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Bell,
   Bookmark,
+  BookOpen,
   CircleUserRound,
   Command,
   Globe2,
@@ -204,8 +205,13 @@ export function Header({
         <kbd><Command size={12} />K</kbd>
       </button>
       <div className="header-actions">
-        <button className="icon-button" onClick={onTheme} aria-label="Đổi giao diện">
-          {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
+        <button
+          className="icon-button"
+          onClick={onTheme}
+          aria-label={`Đổi giao diện: ${theme === "dark" ? "Chuyển sang Sáng" : theme === "light" ? "Chuyển sang Giấy ấm" : "Chuyển sang Tối"}`}
+          title={`Giao diện: ${theme === "dark" ? "Tối" : theme === "light" ? "Sáng" : "Giấy ấm"}`}
+        >
+          {theme === "dark" ? <Sun size={19} /> : theme === "light" ? <BookOpen size={19} /> : <Moon size={19} />}
         </button>
         <Link className="icon-button notification-button" href="/settings" aria-label="Mở cài đặt thông báo">
           <Bell size={19} /><i />

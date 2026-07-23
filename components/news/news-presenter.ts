@@ -167,3 +167,30 @@ export function rankFeaturedNews(items: NewsItem[]): NewsItem[] {
 
   return [...selected, ...deferred];
 }
+
+const publisherDomains: Record<string, string> = {
+  vnexpress: "https://vnexpress.net/favicon.ico",
+  "tuổi trẻ": "https://tuoitre.vn/favicon.ico",
+  "thanh niên": "https://thanhnien.vn/favicon.ico",
+  "dân trí": "https://dantri.com.vn/favicon.ico",
+  vietnamnet: "https://vietnamnet.vn/favicon.ico",
+  vtv: "https://vtv.vn/favicon.ico",
+  vov: "https://vov.vn/favicon.ico",
+  bbc: "https://www.bbc.com/favicon.ico",
+  reuters: "https://www.reuters.com/favicon.ico",
+  "the guardian": "https://www.theguardian.com/favicon.ico",
+  "al jazeera": "https://www.aljazeera.com/favicon.ico",
+  dw: "https://www.dw.com/favicon.ico",
+  npr: "https://www.npr.org/favicon.ico",
+  "un news": "https://news.un.org/favicon.ico",
+  vietnamplus: "https://www.vietnamplus.vn/favicon.ico",
+};
+
+export function publisherFaviconUrl(sourceName?: string): string | null {
+  if (!sourceName) return null;
+  const key = sourceName.trim().toLowerCase();
+  for (const [name, url] of Object.entries(publisherDomains)) {
+    if (key.includes(name)) return url;
+  }
+  return null;
+}

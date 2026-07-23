@@ -22,6 +22,7 @@ import {
   independentSourceCount,
   newsStatusLabel,
   newsTimeLabel,
+  publisherFaviconUrl,
   rankFeaturedNews,
   sortLatestNews,
 } from "@/components/news/news-presenter";
@@ -51,6 +52,8 @@ export function NewsCard({
   const articleCount = item.sourceDetails?.length ?? sourceCount;
   const officialCount =
     item.sourceDetails?.filter((source) => source.isOfficialSource).length ?? 0;
+  const primarySource = item.sources[0] ?? "";
+  const favicon = publisherFaviconUrl(primarySource);
   return (
     <article className={`news-card ${featured ? "featured" : ""}`}>
       <Link
@@ -81,7 +84,14 @@ export function NewsCard({
         ) : null}
         <div className="news-card-footer">
           <span className="source-line">
-            <span className="source-avatar">NP</span>
+            <span className="source-avatar">
+              {favicon ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={favicon} alt="" width="16" height="16" className="publisher-favicon" />
+              ) : (
+                "NP"
+              )}
+            </span>
             {articleCount} bài · {sourceCount} nguồn độc lập
             {officialCount ? ` · ${officialCount} chính thức` : ""}
           </span>

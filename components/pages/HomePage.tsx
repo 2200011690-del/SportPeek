@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
   Bookmark,
   Clock3,
+  Flame,
   LayoutGrid,
   Newspaper,
   Rss,
@@ -38,6 +39,72 @@ function matchesSourceFilter(item: NewsItem, filter: SourceFilter): boolean {
   if (filter === "official")
     return Boolean(item.sourceDetails?.some((source) => source.isOfficialSource));
   return true;
+}
+
+function BreakingNewsTicker({ items }: { items: NewsItem[] }) {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (items.length <= 1) return;
+    const timer = setInterval(() => setIndex((prev) => (prev + 1) % items.length), 5000);
+    return () => clearInterval(timer);
+  }, [items.length]);
+
+  if (!items.length) return null;
+  const current = items[index];
+
+  return (
+    <div className="breaking-news-ticker" role="region" aria-label="Tin nóng mới nhất">
+      <div className="ticker-badge">
+        <Flame size={13} aria-hidden />
+        <span>TIN NÓNG</span>
+      </div>
+      <Link href={`/news/${current.slug}`} className="ticker-content">
+        <span className="ticker-category">{current.category}</span>
+        <strong className="ticker-title">{current.title}</strong>
+        <small className="ticker-time">{newsTimeLabel(current)}</small>
+      </Link>
+      {items.length > 1 && (
+        <div className="ticker-controls">
+          <button
+            type="button"
+            onClick={() => setIndex((prev) => (prev - 1 + items.length) % items.length)}
+            aria-label="Tin nóng trước"
+          >
+            ‹
+          </button>
+          <span>{index + 1}/{items.length}</span>
+          <button
+            type="button"
+            onClick={() => setIndex((prev) => (prev + 1) % items.length)}
+            aria-label="Tin nóng kế tiếp"
+          >
+            ›
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SubLeadHeroNews({ item }: { item: NewsItem }) {
+  return (
+    <article className="sublead-news-card">
+      <NewsVisual item={item} compact />
+      <div className="sublead-news-copy">
+        <div className="meta-row">
+          <span className="category-label">{item.category}</span>
+          <span>{newsTimeLabel(item)}</span>
+        </div>
+        <Link href={`/news/${item.slug}`}>
+          <h3>{item.title}</h3>
+        </Link>
+        <div className="sublead-meta">
+          <span>{independentSourceCount(item)} nguồn độc lập</span>
+          <span className="hero-status">{newsStatusLabel(item)}</span>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 function HomeHeroNews({
@@ -185,8 +252,9 @@ export default function HomePage({
   );
   const hotNews = rankFeaturedNews(filteredNews);
   const hero = hotNews[0];
+  const subLeads = hotNews.slice(1, 3);
   const feedItems = sortLatestNews(filteredNews)
-    .filter((item) => item.id !== hero?.id)
+    .filter((item) => item.id !== hero?.id && !subLeads.some((s) => s.id === item.id))
     .slice(0, 12);
   const overallHot = rankFeaturedNews(newsItems)
     .filter((item) => item.id !== hero?.id)
@@ -216,6 +284,7 @@ export default function HomePage({
   return (
     <div className="home-grid">
       <div className="main-feed home-main-feed">
+        <BreakingNewsTicker items={overallHot.slice(0, 5)} />
         <div className="home-feed-heading">
           <div>
             <span>{today}</span>
@@ -229,11 +298,20 @@ export default function HomePage({
         {loading ? (
           <DataLoadingState />
         ) : hero ? (
-          <HomeHeroNews
-            item={hero}
-            bookmarked={bookmarks.has(hero.id)}
-            onBookmark={onBookmark}
-          />
+          <div className="editorial-magazine-grid">
+            <HomeHeroNews
+              item={hero}
+              bookmarked={bookmarks.has(hero.id)}
+              onBookmark={onBookmark}
+            />
+            {subLeads.length > 0 && (
+              <div className="sublead-column">
+                {subLeads.map((subItem) => (
+                  <SubLeadHeroNews item={subItem} key={subItem.id} />
+                ))}
+              </div>
+            )}
+          </div>
         ) : (
           <div className="home-filter-empty">
             <Rss size={26} />

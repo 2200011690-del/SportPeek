@@ -80,7 +80,7 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
     queueMicrotask(() => {
       try {
         const storedTheme = localStorage.getItem(STORAGE_KEYS.theme) ?? localStorage.getItem(STORAGE_KEYS.legacyTheme);
-        if (storedTheme === "dark" || storedTheme === "light") setTheme(storedTheme);
+        if (storedTheme === "dark" || storedTheme === "light" || storedTheme === "sepia") setTheme(storedTheme);
       } catch { /* ignore invalid device-local data */ }
       setPreferencesLoaded(true);
     });
@@ -165,7 +165,7 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
         <a href="#main-content" className="skip-link">Bỏ qua nội dung điều hướng</a>
         <AppSidebar route={route} open={menuOpen} onClose={() => setMenuOpen(false)} sourceFilter={homeSourceFilter} onSourceFilter={setHomeSourceFilter} />
         <div className="app-column">
-          <Header onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} theme={theme} onTheme={() => setTheme(theme === "dark" ? "light" : "dark")} />
+          <Header onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} theme={theme} onTheme={() => setTheme(theme === "dark" ? "light" : theme === "light" ? "sepia" : "dark")} />
           <SystemStatusBanner />
           <main id="main-content" className="content-wrap" tabIndex={-1}>
             {page}

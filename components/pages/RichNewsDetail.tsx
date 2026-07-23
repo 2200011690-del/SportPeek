@@ -110,7 +110,20 @@ export default function RichNewsDetail({
     slug: string;
     mode: "full" | "summary";
   }>({ slug, mode: "full" });
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [readerFontSize, setReaderFontSize] = useState<"sm" | "md" | "lg">("md");
   const [articleSelection, setArticleSelection] = useState({ slug, articleId: "" });
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
+      if (totalHeight > 0) {
+        setScrollProgress(Math.min(100, Math.max(0, (window.scrollY / totalHeight) * 100)));
+      }
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
   const [aiResult, setAiResult] = useState<{ slug: string; story: StoryCluster | null }>({
     slug,
     story: null,
@@ -311,6 +324,11 @@ export default function RichNewsDetail({
 
   return (
     <main className="article-page simple-news-detail">
+      <div
+        className="reading-progress-bar"
+        style={{ width: `${scrollProgress}%` }}
+        aria-hidden="true"
+      />
       <Link className="simple-news-back" href="/news">
         ← Quay lại tin tức
       </Link>
@@ -371,41 +389,70 @@ export default function RichNewsDetail({
             )}
           </figure>
         )}
-        <nav className="article-reading-modes" aria-label="Chọn cách đọc bài viết">
-          <button
-            type="button"
-            className={readingMode === "full" ? "active" : ""}
-            aria-pressed={readingMode === "full"}
-            onClick={() => setReadingPreference({ slug, mode: "full" })}
-          >
-            <BookOpen size={19} aria-hidden="true" />
-            <span>
-              <strong>Đọc đầy đủ</strong>
-              <small>Nội dung nguồn cung cấp</small>
-            </span>
-          </button>
-          <button
-            type="button"
-            className={readingMode === "summary" ? "active" : ""}
-            aria-pressed={readingMode === "summary"}
-            disabled={aiRequestState === "loading"}
-            onClick={() => void openAISummary()}
-          >
-            {aiRequestState === "loading" ? (
-              <LoaderCircle className="spin" size={19} aria-hidden="true" />
-            ) : (
-              <Sparkles size={19} aria-hidden="true" />
-            )}
-            <span>
-              <strong>Tóm tắt bằng AI</strong>
-              <small>{summaryStory.aiGenerated ? "Đã sẵn sàng" : "Tạo khi bạn yêu cầu"}</small>
-            </span>
-          </button>
-        </nav>
+        <div className="reader-toolbar">
+          <nav className="article-reading-modes" aria-label="Chọn cách đọc bài viết">
+            <button
+              type="button"
+              className={readingMode === "full" ? "active" : ""}
+              aria-pressed={readingMode === "full"}
+              onClick={() => setReadingPreference({ slug, mode: "full" })}
+            >
+              <BookOpen size={19} aria-hidden="true" />
+              <span>
+                <strong>Đọc đầy đủ</strong>
+                <small>Nội dung nguồn cung cấp</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              className={readingMode === "summary" ? "active" : ""}
+              aria-pressed={readingMode === "summary"}
+              disabled={aiRequestState === "loading"}
+              onClick={() => void openAISummary()}
+            >
+              {aiRequestState === "loading" ? (
+                <LoaderCircle className="spin" size={19} aria-hidden="true" />
+              ) : (
+                <Sparkles size={19} aria-hidden="true" />
+              )}
+              <span>
+                <strong>Tóm tắt bằng AI</strong>
+                <small>{summaryStory.aiGenerated ? "Đã sẵn sàng" : "Tạo khi bạn yêu cầu"}</small>
+              </span>
+            </button>
+          </nav>
+          <div className="font-size-adjuster" role="group" aria-label="Cỡ chữ đọc bài">
+            <span className="adjuster-label">Cỡ chữ:</span>
+            <button
+              type="button"
+              className={readerFontSize === "sm" ? "active" : ""}
+              onClick={() => setReaderFontSize("sm")}
+              aria-label="Cỡ chữ nhỏ"
+            >
+              A-
+            </button>
+            <button
+              type="button"
+              className={readerFontSize === "md" ? "active" : ""}
+              onClick={() => setReaderFontSize("md")}
+              aria-label="Cỡ chữ vừa"
+            >
+              A
+            </button>
+            <button
+              type="button"
+              className={readerFontSize === "lg" ? "active" : ""}
+              onClick={() => setReaderFontSize("lg")}
+              aria-label="Cỡ chữ lớn"
+            >
+              A+
+            </button>
+          </div>
+        </div>
 
         {readingMode === "full" ? (
           <section
-            className="simple-news-summary article-full-reader"
+            className={`simple-news-summary article-full-reader font-size-${readerFontSize}`}
             aria-labelledby="full-article-heading"
           >
             <div className="simple-news-summary-heading">
@@ -470,7 +517,7 @@ export default function RichNewsDetail({
           </section>
         ) : (
           <section
-            className="simple-news-summary article-ai-summary"
+            className={`simple-news-summary article-ai-summary font-size-${readerFontSize}`}
             aria-labelledby="ai-summary-heading"
           >
             <div className="simple-news-summary-heading">
