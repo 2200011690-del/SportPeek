@@ -84,6 +84,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function CatchAllPage({ params }: PageProps) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   const { slug } = await params;
+  const route = `/${slug.join("/")}`;
   const retiredSportsRoutes = new Set(["live", "fixtures", "results", "standings", "transfers", "matches", "teams", "players", "competitions"]);
   if (retiredSportsRoutes.has(slug[0])) redirect("/category/the-thao");
   const staticRoutes = new Set([
@@ -96,17 +97,24 @@ export default async function CatchAllPage({ params }: PageProps) {
   if (!validRoute) notFound();
   if (slug[0] === "category" && !newsCategory(slug[1])) notFound();
   if (slug[0] === "register" && isInternalMode()) redirect("/login?error=invitation_only");
+  const authRoutes = new Set(["login", "register", "forgot-password", "reset-password"]);
+  const initialDataPromise = authRoutes.has(slug[0])
+    ? Promise.resolve(null)
+    : getInitialData(route, slug[0] === "category" ? slug[1] : undefined);
   const storyData = slug.length === 2 && slug[0] === "news" ? await loadStoryPageData(slug[1]) : null;
   if (slug.length === 2 && slug[0] === "news" && !storyData?.story) notFound();
   const story = storyData?.story ?? null;
   if (story && story.slug !== slug[1]) redirect(`/news/${story.slug}`);
+  const [initialData, articleContents] = await Promise.all([
+    initialDataPromise,
+    story ? loadStoryArticleContents(story).catch(() => []) : Promise.resolve(null),
+  ]);
   const initialStory = storyData && story
-    ? { ...storyData, articleContents: await loadStoryArticleContents(story).catch(() => []) }
+    ? { ...storyData, articleContents: articleContents ?? [] }
     : storyData;
-  const initialData = await getInitialData(`/${slug.join("/")}`, slug[0] === "category" ? slug[1] : undefined);
   const jsonLd = story ? serializeJsonLd(buildNewsArticleJsonLd(story)) : null;
   return <>
     {jsonLd ? <script nonce={nonce} id="newspeek-newsarticle" type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} /> : null}
-    <SportPeekApp route={`/${slug.join("/")}`} signupAllowed={isPublicSignupAllowed()} initialStory={initialStory} initialData={initialData} />
+    <SportPeekApp route={route} signupAllowed={isPublicSignupAllowed()} initialStory={initialStory} initialData={initialData} />
   </>;
 }

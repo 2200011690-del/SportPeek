@@ -8,6 +8,7 @@ import { storyEventType } from "./clustering";
 import { storyClusterSchema, type RawArticle, type StoryCluster, type StoryDetailPayload } from "./schema";
 import { balanceStoryRegions } from "./feed-balance";
 import type { StoryRepositoryResult } from "./repository-types";
+import { createAsyncTtlCache } from "@/lib/cache/async-ttl";
 
 export type PersistedStorySnapshot = { stories: StoryCluster[]; lastSyncAt: string | null; sources: string[]; aiStatus: NewsAIStatus };
 export type PersistedStoryLoader = () => Promise<PersistedStorySnapshot>;
@@ -152,7 +153,9 @@ function relatedStories(stories: StoryCluster[], current: StoryCluster, limit = 
   return stories.filter((story) => story.id !== current.id).map((story) => ({ story, score: [...terms].filter((term) => `${story.title} ${story.summary} ${story.category} ${story.sourceNames.join(" ")}`.toLowerCase().includes(term)).length })).filter((item) => item.score > 0).sort((left, right) => right.score - left.score || (right.story.hotnessScore ?? 0) - (left.story.hotnessScore ?? 0)).slice(0, limit).map((item) => item.story);
 }
 
-export const loadPersistedStories: PersistedStoryLoader = async () => {
+const persistedStorySnapshotCache = createAsyncTtlCache<PersistedStorySnapshot>(20_000);
+
+async function readPersistedStorySnapshot(): Promise<PersistedStorySnapshot> {
   const client = createAdminClient();
   if (!client) throw new ConfigurationError("Supabase story cache chưa được cấu hình.", "supabase");
   const [clusters, job] = await Promise.all([
@@ -171,7 +174,10 @@ export const loadPersistedStories: PersistedStoryLoader = async () => {
     sources: [...new Set(stories.flatMap((story) => story.sourceNames))],
     aiStatus: derivePersistedAIStatus(stories, (clusters.data ?? []).map((row) => row.ai_provider)),
   };
-};
+}
+
+export const loadPersistedStories: PersistedStoryLoader = () =>
+  persistedStorySnapshotCache.get(readPersistedStorySnapshot);
 
 function persistedClient() {
   const client = createAdminClient();

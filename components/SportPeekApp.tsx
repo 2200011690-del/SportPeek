@@ -106,30 +106,52 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
       if (loading) return;
       loading = true;
       try {
+        const loadForYou = route === "/for-you";
+        const loadSources = route === "/sources";
         const requests = await Promise.allSettled([
           fetchRuntime<NewsItem[]>("/api/news"),
           fetchRuntime<HealthSnapshot>("/api/health"),
-          fetchRuntime<NewsItem[]>("/api/feed/for-you"),
-          fetchRuntime<NewsSourceCatalogItem[]>("/api/sources"),
+          loadForYou ? fetchRuntime<NewsItem[]>("/api/feed/for-you") : Promise.resolve(null),
+          loadSources ? fetchRuntime<NewsSourceCatalogItem[]>("/api/sources") : Promise.resolve(null),
         ]);
         if (!active) return;
         const newsResponse = requests[0].status === "fulfilled" ? requests[0].value : null;
         const healthResponse = requests[1].status === "fulfilled" ? requests[1].value : null;
         const forYouResponse = requests[2].status === "fulfilled" ? requests[2].value : null;
         const sourceCatalogResponse = requests[3].status === "fulfilled" ? requests[3].value : null;
-        const health = healthResponse?.data ?? emptyRuntimeData.health;
-        const rssActive = newsResponse?.demo === false && Boolean(newsResponse.data?.length) && !["unavailable", "configuration_required", "development_mock"].includes(health.services.rss.state);
-        const aiStatus = newsResponse?.aiStatus ?? { provider: "off" as const, state: "off" as const, translatedCount: 0 };
-        const aiActive = newsResponse?.aiTranslation === true;
-        setRuntimeData({ newsItems: newsResponse?.data ?? [], forYouItems: forYouResponse?.data ?? [], personalized: forYouResponse?.personalized === true, sourceCatalog: sourceCatalogResponse?.data ?? [], newsReal: rssActive, newsSources: newsResponse?.sources ?? [], aiTranslation: aiActive, aiStatus, loading: false, lastUpdated: health.generatedAt, health });
+        setRuntimeData((current) => {
+          const health = healthResponse?.data ?? current.health;
+          const newsItems = newsResponse?.data ?? current.newsItems;
+          const rssActive = newsResponse
+            ? newsResponse.demo === false
+              && Boolean(newsItems.length)
+              && !["unavailable", "configuration_required", "development_mock"].includes(health.services.rss.state)
+            : current.newsReal;
+          return {
+            ...current,
+            newsItems,
+            forYouItems: forYouResponse?.data ?? current.forYouItems,
+            personalized: forYouResponse?.personalized ?? current.personalized,
+            sourceCatalog: sourceCatalogResponse?.data ?? current.sourceCatalog,
+            newsReal: rssActive,
+            newsSources: newsResponse?.sources ?? current.newsSources,
+            aiTranslation: newsResponse?.aiTranslation ?? current.aiTranslation,
+            aiStatus: newsResponse?.aiStatus ?? current.aiStatus,
+            loading: false,
+            lastUpdated: health.generatedAt,
+            health,
+          };
+        });
       } finally { loading = false; }
     };
     if (!initialData) {
       void load();
     }
-    const refreshTimer = window.setInterval(() => { void load(); }, 120_000);
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 120_000);
     return () => { active = false; window.clearInterval(refreshTimer); };
-  }, [initialData]);
+  }, [initialData, route]);
   const toggleBookmark = (id: string) => {
     const remove = bookmarks.has(id);
     setBookmarks((current) => { const next = new Set(current); if (remove) next.delete(id); else next.add(id); return next; });

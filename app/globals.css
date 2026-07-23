@@ -21,6 +21,50 @@
   --sidebar: 246px;
   --header: 60px;
 }
+
+.route-loading {
+  min-height: 45vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.route-loading strong {
+  color: var(--text-primary);
+}
+
+.route-loading-bar {
+  width: min(280px, 60vw);
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-elevated);
+}
+
+.route-loading-bar::after {
+  content: "";
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: route-loading-slide 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes route-loading-slide {
+  from { transform: translateX(0); }
+  to { transform: translateX(140%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-loading-bar::after {
+    animation: none;
+    width: 100%;
+  }
+}
 [data-theme="light"] {
   --bg: #f8fafc;
   --bg-soft: #f1f5f9;

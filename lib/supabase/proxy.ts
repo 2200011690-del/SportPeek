@@ -4,6 +4,10 @@ import { isAllowedEmail, isInternalMode } from "@/lib/config";
 
 const PUBLIC_AUTH_PATHS = new Set(["/login", "/forgot-password", "/reset-password", "/auth/callback"]);
 
+export function hasSupabaseSessionCookie(cookieNames: string[]): boolean {
+  return cookieNames.some((name) => /^sb-.+-auth-token(?:\.\d+)?$/.test(name));
+}
+
 function continueRequest(request: NextRequest): NextResponse {
   return NextResponse.next({ request: { headers: request.headers } });
 }
@@ -33,6 +37,13 @@ export async function updateSession(request: NextRequest) {
     : continueRequest(request);
 
   let response = continueRequest(request);
+  const internalMode = isInternalMode();
+  if (
+    !internalMode
+    && !hasSupabaseSessionCookie(request.cookies.getAll().map((cookie) => cookie.name))
+  ) {
+    return response;
+  }
   const supabase = createServerClient(url, key, {
     cookies: {
       getAll() {
@@ -51,7 +62,7 @@ export async function updateSession(request: NextRequest) {
   });
 
   await supabase.auth.getClaims();
-  if (!isInternalMode()) return response;
+  if (!internalMode) return response;
 
   const pathname = request.nextUrl.pathname;
   if (pathname === "/register") return loginRedirect(request, response, "invitation_only");
