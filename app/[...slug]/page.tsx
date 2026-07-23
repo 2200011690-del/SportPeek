@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import SportPeekApp from "@/components/SportPeekApp";
@@ -81,6 +82,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function CatchAllPage({ params }: PageProps) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   const { slug } = await params;
   const retiredSportsRoutes = new Set(["live", "fixtures", "results", "standings", "transfers", "matches", "teams", "players", "competitions"]);
   if (retiredSportsRoutes.has(slug[0])) redirect("/category/the-thao");
@@ -104,7 +106,7 @@ export default async function CatchAllPage({ params }: PageProps) {
   const initialData = await getInitialData(`/${slug.join("/")}`, slug[0] === "category" ? slug[1] : undefined);
   const jsonLd = story ? serializeJsonLd(buildNewsArticleJsonLd(story)) : null;
   return <>
-    {jsonLd ? <script id="newspeek-newsarticle" type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} /> : null}
+    {jsonLd ? <script nonce={nonce} id="newspeek-newsarticle" type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} /> : null}
     <SportPeekApp route={`/${slug.join("/")}`} signupAllowed={isPublicSignupAllowed()} initialStory={initialStory} initialData={initialData} />
   </>;
 }

@@ -4,6 +4,10 @@ import { isAllowedEmail, isInternalMode } from "@/lib/config";
 
 const PUBLIC_AUTH_PATHS = new Set(["/login", "/forgot-password", "/reset-password", "/auth/callback"]);
 
+function continueRequest(request: NextRequest): NextResponse {
+  return NextResponse.next({ request: { headers: request.headers } });
+}
+
 function withSessionCookies(target: NextResponse, source: NextResponse): NextResponse {
   source.cookies.getAll().forEach((cookie) => target.cookies.set(cookie));
   return target;
@@ -25,10 +29,10 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !key) return isInternalMode() && !PUBLIC_AUTH_PATHS.has(request.nextUrl.pathname)
-    ? loginRedirect(request, NextResponse.next({ request }), "configuration_required")
-    : NextResponse.next({ request });
+    ? loginRedirect(request, continueRequest(request), "configuration_required")
+    : continueRequest(request);
 
-  let response = NextResponse.next({ request });
+  let response = continueRequest(request);
   const supabase = createServerClient(url, key, {
     cookies: {
       getAll() {
@@ -38,7 +42,7 @@ export async function updateSession(request: NextRequest) {
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value),
         );
-        response = NextResponse.next({ request });
+        response = continueRequest(request);
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options),
         );

@@ -164,7 +164,7 @@ export function normalizePublishedDate(value?: string, now = new Date(), assumeV
 
 async function fetchFeed(feed: FeedConfig): Promise<RawArticle[]> {
   const response = await fetch(feed.url, {
-    headers: { accept: "application/rss+xml, application/xml;q=0.9", "user-agent": "NewsPeek/1.0 (+https://sportpeek.2200011690.workers.dev/sources)" },
+    headers: { accept: "application/rss+xml, application/xml;q=0.9", "user-agent": "NewsPeek/1.0 (+https://newspeek.2200011690.workers.dev/sources)" },
     signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`${feed.name}: HTTP ${response.status}`);
@@ -210,7 +210,7 @@ async function fetchArticleImage(article: RawArticle): Promise<void> {
   if (article.imageUrl) return;
   try {
     const response = await fetch(article.url, {
-      headers: { accept: "text/html", "user-agent": "NewsPeek/1.0 (+https://sportpeek.2200011690.workers.dev/sources)" },
+      headers: { accept: "text/html", "user-agent": "NewsPeek/1.0 (+https://newspeek.2200011690.workers.dev/sources)" },
       redirect: "follow",
       signal: AbortSignal.timeout(7_000),
     });

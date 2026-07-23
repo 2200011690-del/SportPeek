@@ -3,6 +3,7 @@ import { ConfigurationError, ProviderError, toSafeError } from "@/lib/core/error
 import { logger } from "@/lib/core/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { providerFetch } from "@/lib/core/provider-fetch";
+import { SCHEDULED_PIPELINE_STALL_MS } from "@/lib/cron/schedule";
 import { parseRssXml, readResponseText } from "./parser";
 import { configuredRssSources, RETIRED_RSS_SOURCE_NAMES } from "./sources";
 import { rssSourceSchema, type ParsedRssArticle, type RssSource } from "./types";
@@ -320,7 +321,7 @@ export async function syncRss(options: { source?: string; force?: boolean; dryRu
   const jobId = randomUUID(); const summary: RssSyncSummary = { jobId, sources: selected.length, succeeded: 0, failed: 0, notModified: 0, fetched: 0, inserted: 0, skipped: 0, errors: [] };
   if (options.dryRun) return summary;
   const client = admin();
-  const activeWindowStart = new Date(Date.now() - 2 * 60_000).toISOString();
+  const activeWindowStart = new Date(Date.now() - SCHEDULED_PIPELINE_STALL_MS).toISOString();
   const staleJobs = await client.from("ingestion_jobs").update({ status: "failed", error_code: "LEASE_EXPIRED", error_message: "RSS sync exceeded its execution lease.", completed_at: new Date().toISOString() }).eq("job_type", "rss:sync").eq("status", "processing").lt("started_at", activeWindowStart);
   if (staleJobs.error) throw new ProviderError("Không thể giải phóng RSS job quá hạn.", "supabase");
   const { data: activeJobs, error: activeCheckError } = await client.from("ingestion_jobs").select("id").eq("job_type", "rss:sync").eq("status", "processing").gt("started_at", activeWindowStart).limit(1);
@@ -331,29 +332,48 @@ export async function syncRss(options: { source?: string; force?: boolean; dryRu
   }
   const started = await client.from("ingestion_jobs").insert({ id: jobId, job_type: "rss:sync", provider: "rss", status: "processing", metadata: { source: options.source ?? null, force: Boolean(options.force), maxSources } });
   if (started.error) throw new ProviderError("Không thể tạo RSS sync job.", "supabase");
-  const outcomes = await runConcurrentRssTasks(selected, async (source) => {
-    try {
-      return { source, result: await syncSource(source), errorMessage: null };
-    } catch (error) {
-      const safe = toSafeError(error);
-      await client.from("news_sources").update({ last_fetched_at: new Date().toISOString(), last_error: safe.message.slice(0, 500) }).eq("id", source.id);
-      return { source, result: null, errorMessage: safe.message };
+  try {
+    const outcomes = await runConcurrentRssTasks(selected, async (source) => {
+      try {
+        return { source, result: await syncSource(source), errorMessage: null };
+      } catch (error) {
+        const safe = toSafeError(error);
+        await client.from("news_sources").update({ last_fetched_at: new Date().toISOString(), last_error: safe.message.slice(0, 500) }).eq("id", source.id);
+        return { source, result: null, errorMessage: safe.message };
+      }
+    });
+    for (const outcome of outcomes) {
+      if (outcome.errorMessage || !outcome.result) {
+        summary.failed += 1;
+        summary.errors.push({ source: outcome.source.name, message: outcome.errorMessage ?? "RSS sync failed." });
+        continue;
+      }
+      summary.succeeded += 1;
+      summary.notModified += outcome.result.status === "not_modified" ? 1 : 0;
+      summary.fetched += outcome.result.fetched;
+      summary.inserted += outcome.result.inserted;
+      summary.skipped += outcome.result.skipped;
     }
-  });
-  for (const outcome of outcomes) {
-    if (outcome.errorMessage || !outcome.result) {
-      summary.failed += 1;
-      summary.errors.push({ source: outcome.source.name, message: outcome.errorMessage ?? "RSS sync failed." });
-      continue;
-    }
-    summary.succeeded += 1;
-    summary.notModified += outcome.result.status === "not_modified" ? 1 : 0;
-    summary.fetched += outcome.result.fetched;
-    summary.inserted += outcome.result.inserted;
-    summary.skipped += outcome.result.skipped;
+    const finished = await client.from("ingestion_jobs").update({ status: summary.failed === selected.length && selected.length ? "failed" : "completed", fetched_count: summary.fetched, inserted_count: summary.inserted, skipped_count: summary.skipped, error_code: summary.failed ? "PARTIAL_FAILURE" : null, error_message: summary.errors.map((item) => `${item.source}: ${item.message}`).join("; ").slice(0, 1000) || null, metadata: { sources: summary.sources, succeeded: summary.succeeded, failed: summary.failed, notModified: summary.notModified }, completed_at: new Date().toISOString() }).eq("id", jobId);
+    if (finished.error) throw finished.error;
+    return summary;
+  } catch (error) {
+    const safe = toSafeError(error);
+    await client.from("ingestion_jobs").update({
+      status: "failed",
+      error_code: safe.code,
+      error_message: safe.message.slice(0, 1000),
+      completed_at: new Date().toISOString(),
+      metadata: {
+        sources: summary.sources,
+        succeeded: summary.succeeded,
+        failed: summary.failed,
+        notModified: summary.notModified,
+        phase: "failed",
+      },
+    }).eq("id", jobId);
+    throw error;
   }
-  await client.from("ingestion_jobs").update({ status: summary.failed === selected.length && selected.length ? "failed" : "completed", fetched_count: summary.fetched, inserted_count: summary.inserted, skipped_count: summary.skipped, error_code: summary.failed ? "PARTIAL_FAILURE" : null, error_message: summary.errors.map((item) => `${item.source}: ${item.message}`).join("; ").slice(0, 1000) || null, metadata: { sources: summary.sources, succeeded: summary.succeeded, failed: summary.failed, notModified: summary.notModified }, completed_at: new Date().toISOString() }).eq("id", jobId);
-  return summary;
 }
 
 export async function rssReport() {

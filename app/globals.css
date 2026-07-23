@@ -2869,6 +2869,57 @@ h3 {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  padding: 2rem;
+  background: radial-gradient(circle at center, #111317 0%, #090b0d 100%);
+  color: #f3f4f6;
+  font-family: var(--font-vietnam, sans-serif);
+  text-align: center;
+}
+.fatal-state-card {
+  width: min(100%, 480px);
+  padding: 2.5rem;
+  border-radius: 16px;
+  background: rgba(18, 22, 28, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+.fatal-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  margin-bottom: 1.5rem;
+}
+.fatal-state h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-family: var(--font-display, sans-serif);
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.025em;
+}
+.fatal-state p {
+  color: #9ca3af;
+  font-size: 0.925rem;
+  line-height: 1.5;
+  margin-bottom: 2rem;
+}
+.fatal-state-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+.fatal-state-actions :is(button, a) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.fatal-state-actions button {
+  cursor: pointer;
 }
 .fatal-state button {
   background: var(--accent);

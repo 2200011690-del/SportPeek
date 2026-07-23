@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "newspeek",
+  "compatibility_date": "2026-05-22",
+  "main": "./worker/public-proxy.ts",
+  "services": [
+    {
+      "binding": "UPSTREAM",
+      "service": "sportpeek",
+    },
+  ],
+  "triggers": {
+    "crons": [],
+  },
+}

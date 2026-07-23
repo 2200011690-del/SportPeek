@@ -6,6 +6,7 @@ import {
 } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import {
+  runScheduledPipelineTask,
   scheduledPipelineTask,
   scheduledStoryProcessingOptions,
 } from "../lib/cron/schedule";
@@ -67,6 +68,22 @@ const worker = {
     globalThis.__SPORTPEEK_WORKERS_AI__ = runtimeEnv.AI;
 
     const url = new URL(request.url);
+    if (
+      url.hostname === "sportpeek.2200011690.workers.dev" &&
+      request.headers.get("x-newspeek-proxy") !== "1"
+    ) {
+      url.hostname = "newspeek.2200011690.workers.dev";
+      return new Response(null, {
+        status: 308,
+        headers: {
+          location: url.toString(),
+          "cache-control": "public, max-age=3600",
+          "strict-transport-security":
+            "max-age=31536000; includeSubDomains; preload",
+          "x-content-type-options": "nosniff",
+        },
+      });
+    }
 
     if (
       url.pathname === "/_vinext/image" &&
@@ -107,7 +124,6 @@ const worker = {
   async scheduled(
     controller: ScheduledController,
     env?: Env,
-    ctx?: ExecutionContext,
   ): Promise<void> {
     const runtimeEnv = env ?? ({} as Env);
     for (const [key, value] of Object.entries(
@@ -122,54 +138,37 @@ const worker = {
     // the AI summary backlog.
     const scheduledAt = controller.scheduledTime ?? Date.now();
     const task = scheduledPipelineTask(scheduledAt);
-    const run = async () => {
-      let timerId: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timerId = setTimeout(() => {
-          reject(new Error("Timeout: Cron task execution exceeded 50 seconds."));
-        }, 50000);
+    try {
+      // A scheduled handler's returned promise is already awaited by
+      // Cloudflare for up to 15 minutes. Do not race it against a short timer:
+      // that would abandon the database job in "processing" with no chance to
+      // run its own failure finalizer.
+      await runScheduledPipelineTask(task, {
+        rss: async () => {
+          console.log("[Cron] Running RSS sync...");
+          const rssSummary = await syncRss({ maxSources: 6 });
+          console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
+        },
+        stories: async () => {
+          console.log("[Cron] Running story processing...");
+          const storySummary = await processStories(
+            scheduledStoryProcessingOptions(scheduledAt),
+          );
+          console.log(
+            "[Cron] Story processing result:",
+            JSON.stringify(storySummary),
+          );
+        },
+        ai: async () => {
+          console.log("[Cron] Running AI summary backfill...");
+          const aiBackfill = await summarizePersistedStories({ limit: 1 });
+          console.log("[Cron] AI backfill result:", JSON.stringify(aiBackfill));
+        },
       });
-
-      try {
-        await Promise.race([
-          (async () => {
-            if (task === "rss") {
-              // Even invocation: sync RSS feeds
-              console.log("[Cron] Running RSS sync...");
-              const rssSummary = await syncRss({ maxSources: 6 });
-              console.log("[Cron] RSS sync result:", JSON.stringify(rssSummary));
-            } else if (task === "stories") {
-              // Odd invocation: process one small, atomically-leased story batch.
-              console.log("[Cron] Running story processing...");
-              const storySummary = await processStories(
-                scheduledStoryProcessingOptions(scheduledAt),
-              );
-              console.log(
-                "[Cron] Story processing result:",
-                JSON.stringify(storySummary),
-              );
-            } else {
-              // Dedicated backfill phase: keep pending stories receiving remote AI
-              // summaries even when fresh RSS never fully drains.
-              console.log("[Cron] Running AI summary backfill...");
-              const aiBackfill = await summarizePersistedStories({ limit: 1 });
-              console.log(
-                "[Cron] AI backfill result:",
-                JSON.stringify(aiBackfill),
-              );
-            }
-          })(),
-          timeoutPromise
-        ]);
-      } catch (error) {
-        console.error("[Cron] Error running scheduled task:", error);
-        throw error;
-      } finally {
-        if (timerId) clearTimeout(timerId);
-      }
-    };
-    if (ctx) ctx.waitUntil(run());
-    else await run();
+    } catch (error) {
+      console.error("[Cron] Error running scheduled task:", error);
+      throw error;
+    }
   },
 };
 

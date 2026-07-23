@@ -5,6 +5,7 @@ import {
   DEFAULT_CLOUDFLARE_AI_MODEL,
   enrichInternationalNewsWithCloudflare,
   setWorkersAIBinding,
+  withWorkersAITimeout,
 } from "../../lib/ai/cloudflare";
 
 test("Cloudflare AI enriches international news with validated Vietnamese output", async () => {
@@ -101,4 +102,17 @@ test("Cloudflare AI rejects enrichment for unknown article ids", async () => {
   } finally {
     setWorkersAIBinding(undefined);
   }
+});
+
+test("Cloudflare AI rejects a hung binding within the configured deadline", async () => {
+  await assert.rejects(
+    () =>
+      withWorkersAITimeout(
+        new Promise<never>(() => {
+          // Intentionally unresolved to model a stalled Workers AI binding.
+        }),
+        20,
+      ),
+    /quá thời gian phản hồi/,
+  );
 });

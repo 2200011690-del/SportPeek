@@ -19,7 +19,7 @@
     "binding": "AI",
   },
   "vars": {
-    "NEXT_PUBLIC_APP_URL": "https://sportpeek.2200011690.workers.dev",
+    "NEXT_PUBLIC_APP_URL": "https://newspeek.2200011690.workers.dev",
     "NEXT_PUBLIC_SUPABASE_URL": "https://atlvqdryzgsohbjglxng.supabase.co",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_r5Ul01CZq9gJ-NhtbBP6DA_YmfNGYJg",
     "AI_PROVIDER": "failover",

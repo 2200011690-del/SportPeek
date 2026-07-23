@@ -17,6 +17,7 @@ import {
 } from "@/lib/core/errors";
 import { configuredRssSources } from "@/lib/rss/sources";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { SCHEDULED_PIPELINE_STALL_MS } from "@/lib/cron/schedule";
 import { normalizeSearchText } from "@/lib/ui-logic";
 import {
   calculateHotness,
@@ -1067,7 +1068,9 @@ export async function processStories(
   let claimedIds: string[] = [];
 
   if (!summary.dryRun) {
-    const staleBefore = new Date(Date.now() - 2 * 60_000).toISOString();
+    const staleBefore = new Date(
+      Date.now() - SCHEDULED_PIPELINE_STALL_MS,
+    ).toISOString();
     const staleJobs = await client
       .from("ingestion_jobs")
       .update({
@@ -1390,6 +1393,86 @@ export async function summarizePersistedStoryById(
   )
     return story;
 
+  const aiJobLeaseCutoff = new Date(Date.now() - 45_000).toISOString();
+  const released = await client
+    .from("ai_jobs")
+    .update({
+      status: "failed",
+      error_message: "AI job lease expired before an on-demand request.",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("job_type", "summarize_cluster")
+    .eq("input_reference", story.id)
+    .in("status", ["pending", "processing"])
+    .lt("created_at", aiJobLeaseCutoff);
+  if (released.error)
+    throw new ProviderError(
+      "Không thể giải phóng tác vụ AI quá hạn.",
+      "supabase",
+    );
+
+  const waitForActiveSummary = async (): Promise<StoryCluster | null> => {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const current = await client
+        .from("story_clusters")
+        .select("payload,ai_generated,review_status")
+        .eq("id", story.id)
+        .limit(1);
+      if (current.error)
+        throw new ProviderError(
+          "Không thể kiểm tra bản tóm tắt AI đang xử lý.",
+          "supabase",
+        );
+      const currentRow = current.data?.[0];
+      const currentStory = storyClusterSchema.safeParse(currentRow?.payload);
+      if (
+        currentRow?.ai_generated &&
+        currentRow.review_status !== "pending" &&
+        currentStory.success
+      )
+        return currentStory.data;
+
+      const active = await client
+        .from("ai_jobs")
+        .select("id")
+        .eq("job_type", "summarize_cluster")
+        .eq("input_reference", story.id)
+        .in("status", ["pending", "processing"])
+        .limit(1);
+      if (active.error)
+        throw new ProviderError(
+          "Không thể kiểm tra tác vụ AI đang xử lý.",
+          "supabase",
+        );
+      if (!active.data?.length) return null;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    return null;
+  };
+
+  const active = await client
+    .from("ai_jobs")
+    .select("id")
+    .eq("job_type", "summarize_cluster")
+    .eq("input_reference", story.id)
+    .in("status", ["pending", "processing"])
+    .limit(1);
+  if (active.error)
+    throw new ProviderError(
+      "Không thể kiểm tra tác vụ AI đang xử lý.",
+      "supabase",
+    );
+  if (active.data?.length) {
+    const completedStory = await waitForActiveSummary();
+    if (completedStory) return completedStory;
+    throw new ProviderError(
+      "Tác vụ AI cho bài này vẫn đang được xử lý. Vui lòng thử lại sau.",
+      "ai",
+      true,
+    );
+  }
+
   const selectedInput = selectIndependentSummaryInput(
     story.articles.map((article) => ({
       id: article.id,
@@ -1442,6 +1525,15 @@ export async function summarizePersistedStoryById(
     model,
     status: "processing",
   });
+  if (inserted.error?.code === "23505") {
+    const completedStory = await waitForActiveSummary();
+    if (completedStory) return completedStory;
+    throw new ProviderError(
+      "Tác vụ AI cho bài này vẫn đang được xử lý. Vui lòng thử lại sau.",
+      "ai",
+      true,
+    );
+  }
   if (inserted.error)
     throw new ProviderError("Không thể tạo tác vụ AI.", "supabase");
 

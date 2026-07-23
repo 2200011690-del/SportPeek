@@ -6,6 +6,7 @@ import type { NewsAIStatus } from "@/lib/ingestion/official-feed";
 import { deriveEventImportance, dynamicStoryHotness, eventHalfLifeHours } from "@/lib/scoring";
 import { storyEventType } from "./clustering";
 import { storyClusterSchema, type RawArticle, type StoryCluster, type StoryDetailPayload } from "./schema";
+import { balanceStoryRegions } from "./feed-balance";
 import type { StoryRepositoryResult } from "./repository-types";
 
 export type PersistedStorySnapshot = { stories: StoryCluster[]; lastSyncAt: string | null; sources: string[]; aiStatus: NewsAIStatus };
@@ -155,7 +156,7 @@ export const loadPersistedStories: PersistedStoryLoader = async () => {
   const client = createAdminClient();
   if (!client) throw new ConfigurationError("Supabase story cache chưa được cấu hình.", "supabase");
   const [clusters, job] = await Promise.all([
-    readLatestStoryRows(100),
+    readLatestStoryRows(240),
     client.from("ingestion_jobs").select("completed_at").eq("job_type", "stories:process").eq("status", "completed").order("completed_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (clusters.error || job.error) throw new ProviderError("Không thể đọc story cache.", "supabase");
@@ -329,7 +330,13 @@ export function createPersistedStoryRepository(loader: PersistedStoryLoader = lo
     try {
       const snapshot = await loader(); const stale = Boolean(snapshot.lastSyncAt && Date.now() - Date.parse(snapshot.lastSyncAt) > 60 * 60_000);
       const now = Date.now();
-      const stories = sortStoriesByMaterialFreshness(snapshot.stories.map(restoreOriginalStoryLanguage).map((story) => refreshStoryHotness(story, now)));
+      const stories = balanceStoryRegions(
+        sortStoriesByMaterialFreshness(
+          snapshot.stories
+            .map(restoreOriginalStoryLanguage)
+            .map((story) => refreshStoryHotness(story, now)),
+        ),
+      );
       return { status: stories.length ? stale ? "stale" : "success" : "empty", data: stories, meta: { source: "supabase", cached: true, stale, lastUpdatedAt: snapshot.lastSyncAt }, diagnostics: { sources: snapshot.sources, aiTranslation: stories.some((story) => story.aiGenerated), aiStatus: snapshot.aiStatus } };
     } catch (error) {
       if (error instanceof ConfigurationError) return { status: "configuration_required", data: null, meta: { source: "supabase", cached: false, stale: false, lastUpdatedAt: null }, error: { code: error.code, message: error.message } };

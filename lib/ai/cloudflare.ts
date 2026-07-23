@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { ProviderError } from "@/lib/core/errors";
 import type { AIProvider, ClassifiedArticle, ClusterSummary } from "./types";
 import type { NewsEnrichment } from "./openai";
 import { agreementsSchema, answerSchema, CLUSTER_SUMMARY_TASK, disputesSchema, matchEvaluationSchema, timelineSchema } from "./remote-base";
 import type { ClusterArticleInput } from "./types";
 
 export const DEFAULT_CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+export const CLOUDFLARE_AI_REQUEST_TIMEOUT_MS = 12_000;
 
 const NATIVE_JSON_SCHEMA_MODELS = new Set([
   "@cf/meta/llama-3.1-8b-instruct-fast",
@@ -71,20 +73,49 @@ function parseModelPayload(payload: unknown): unknown {
   return JSON.parse(cleaned);
 }
 
+export async function withWorkersAITimeout<T>(
+  operation: Promise<T>,
+  timeoutMs = CLOUDFLARE_AI_REQUEST_TIMEOUT_MS,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new ProviderError(
+                "Cloudflare Workers AI quá thời gian phản hồi.",
+                "cloudflare",
+                true,
+              ),
+            ),
+          Math.max(1, timeoutMs),
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function runStructured<T>(schema: z.ZodType<T>, jsonSchema: Record<string, unknown>, system: string, input: unknown, maxTokens = 3500): Promise<T> {
   const ai = globalThis.__SPORTPEEK_WORKERS_AI__;
   if (!ai) throw new Error("Cloudflare Workers AI binding chưa khả dụng");
   const model = modelName();
   const nativeSchema = supportsNativeJsonSchema(model);
-  const payload = await ai.run(model, {
-    messages: [
-      { role: "system", content: nativeSchema ? system : `${system}\nTrả về duy nhất JSON hợp lệ, không markdown, theo JSON Schema sau: ${JSON.stringify(jsonSchema)}` },
-      { role: "user", content: JSON.stringify(input) },
-    ],
-    ...(nativeSchema ? { response_format: { type: "json_schema" as const, json_schema: jsonSchema } } : {}),
-    max_tokens: maxTokens,
-    temperature: 0.1,
-  });
+  const payload = await withWorkersAITimeout(
+    ai.run(model, {
+      messages: [
+        { role: "system", content: nativeSchema ? system : `${system}\nTrả về duy nhất JSON hợp lệ, không markdown, theo JSON Schema sau: ${JSON.stringify(jsonSchema)}` },
+        { role: "user", content: JSON.stringify(input) },
+      ],
+      ...(nativeSchema ? { response_format: { type: "json_schema" as const, json_schema: jsonSchema } } : {}),
+      max_tokens: maxTokens,
+      temperature: 0.1,
+    }),
+  );
   return schema.parse(parseModelPayload(payload));
 }
 

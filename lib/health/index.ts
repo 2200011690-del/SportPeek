@@ -1,5 +1,6 @@
 import { getAIProvider } from "@/lib/ai";
 import { developmentFixturesEnabled } from "@/lib/config";
+import { SCHEDULED_PIPELINE_STALL_MS } from "@/lib/cron/schedule";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type HealthState =
@@ -77,7 +78,7 @@ export type PipelineHealthEvaluation = {
 
 export const AI_HEALTH_SUCCESS_MAX_AGE_MS = 30 * 60_000;
 const AI_JOB_STALL_AFTER_MS = 10 * 60_000;
-export const PIPELINE_JOB_STALL_AFTER_MS = 2 * 60_000;
+export const PIPELINE_JOB_STALL_AFTER_MS = SCHEDULED_PIPELINE_STALL_MS;
 
 const service = (
   state: HealthState,
