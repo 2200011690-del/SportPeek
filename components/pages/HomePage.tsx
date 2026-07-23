@@ -80,7 +80,8 @@ function HomeHeroNews({
       )}
       <div className="home-hero-content">
         <div className="home-hero-kicker">
-          <span>{newsStatusLabel(item)}</span>
+          <span className="hero-category">{item.category}</span>
+          <span className="hero-status">{newsStatusLabel(item)}</span>
         </div>
         <h1>{item.title}</h1>
         <p>{conciseNewsSummary(item, 310)}</p>

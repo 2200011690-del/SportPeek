@@ -150,8 +150,8 @@ export function NewsVisual({
       )}
       {!hasImage && (
         <>
-          <div className="field-lines" />
-          <span className="visual-team">{getInitials(item.primaryTopic ?? item.category)}</span>
+          <div className="newsroom-pattern" />
+          <span className="visual-category-mark">{getInitials(item.primaryTopic ?? item.category)}</span>
         </>
       )}
       <span className="visual-label">

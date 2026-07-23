@@ -57,6 +57,14 @@ export function AppSidebar({
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
+  React.useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
   const primaryItems = [navItems[0], navItems[1], navItems[2]];
   const sourceCounts = useMemo(() => {
     const counts = new Map<string, number>();
