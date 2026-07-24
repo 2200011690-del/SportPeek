@@ -472,6 +472,24 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
   const rssState = sourceErrors > 0 && rssEvaluation.state === "operational"
     ? "degraded"
     : rssEvaluation.state;
+  const rssLabel = rssState === "operational"
+    ? `RSS · ${sources.count ?? 0} nguồn`
+    : rssState === "degraded" && sourceErrors > 0
+      ? `RSS lỗi ${sourceErrors} nguồn`
+      : rssState === "degraded"
+        ? "RSS pipeline đang tự phục hồi"
+        : "RSS chưa mới";
+  const rssMessage = sourceErrors > 0
+    ? `${sourceErrors} nguồn có lỗi gần nhất.`
+    : rssState === "degraded"
+      ? rssEvaluation.latestStatus === "failed"
+        ? "Tác vụ RSS gần nhất bị gián đoạn; cron sẽ tự thử lại trong tối đa ba phút."
+        : "Tác vụ RSS vượt thời gian dự kiến và đang được thu hồi lease tự động."
+      : rssState === "stale"
+        ? "Chưa có lần đồng bộ RSS thành công trong 60 phút."
+        : rssState === "unavailable"
+          ? "Không đọc được trạng thái RSS từ Supabase."
+          : "Raw article được đồng bộ vào Supabase.";
 
   const storyEvaluation = evaluatePipelineHealth({
     jobs: (storyJob.data ?? []) as PipelineJobHealthRecord[],
@@ -500,14 +518,8 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
   const services = {
     rss: service(
       rssState,
-      rssState === "operational"
-        ? `RSS · ${sources.count ?? 0} nguồn`
-        : rssState === "degraded"
-          ? `RSS lỗi ${sourceErrors} nguồn`
-          : "RSS chưa mới",
-      sourceErrors
-        ? `${sourceErrors} nguồn có lỗi gần nhất.`
-        : "Raw article được đồng bộ vào Supabase.",
+      rssLabel,
+      rssMessage,
       "rss",
       rssUpdated,
       sources.count ?? 0,

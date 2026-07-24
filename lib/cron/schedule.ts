@@ -5,11 +5,12 @@ export type ScheduledPipelineRunners = Record<
 >;
 
 /**
- * Cloudflare Cron Triggers allow up to 15 minutes of wall time. Treat a job as
- * abandoned just before that platform ceiling so healthy I/O-heavy work is not
- * reclaimed by the next three-minute phase.
+ * RSS and story phases normally finish in seconds and recur every three
+ * minutes. A five-minute lease lets one overlapping invocation finish while
+ * ensuring a deploy, isolate eviction, or platform interruption can block at
+ * most one subsequent phase instead of freezing ingestion for 15 minutes.
  */
-export const SCHEDULED_PIPELINE_STALL_MS = 14 * 60_000;
+export const SCHEDULED_PIPELINE_STALL_MS = 5 * 60_000;
 
 /**
  * The Worker is triggered once per minute. Keeping the phase selection pure
@@ -48,14 +49,16 @@ export function scheduledStoryProcessingOptions(timestampMs = Date.now()) {
     throw new TypeError("Scheduled timestamp must be finite");
   }
   const minute = new Date(timestampMs).getUTCMinutes();
-  const drainBacklog = minute % 8 === 7;
+  // Story phases occur every three minutes. Minute 7 in each 12-minute window
+  // is therefore exactly one of every four story runs.
+  const drainBacklog = minute % 12 === 7;
   return {
     useAi: false,
     aiLimit: 0,
     matchAiLimit: 0,
     limit: 12,
     candidateLimit: 96,
-    leaseSeconds: 600,
+    leaseSeconds: 240,
     oldestFirst: drainBacklog,
     includeFailed: drainBacklog,
   } as const;
