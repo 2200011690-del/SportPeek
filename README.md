@@ -1,37 +1,22 @@
-# SportPeek
+# NewsPeek
 
-> **Tin thể thao quan trọng, được tổng hợp thông minh.**
-
-SportPeek là nền tảng tổng hợp tin thể thao tiếng Việt, tập trung vào bóng đá trong MVP. Ứng dụng gom các bài cùng sự kiện, tạo tóm tắt trung lập, chấm độ nóng/độ tin cậy và kết hợp tin tức với lịch thi đấu, kết quả, live score, bảng xếp hạng và cá nhân hóa.
-
-Toàn bộ tin và trận trong bản mặc định được ghi rõ **Dữ liệu minh họa**. Không có nội dung báo chí toàn văn, logo thương mại hoặc video highlights được sao chép.
-
-## Kiến trúc
-
-- **Web:** Next.js App Router tương thích Vinext, React 19, TypeScript strict, Tailwind CSS 4 và CSS design system riêng.
-- **Dữ liệu:** Supabase PostgreSQL/Auth; migration đầy đủ, full-text search, trigger, index và Row Level Security. Giao diện tự chuyển sang dữ liệu demo nếu chưa cấu hình Supabase.
-- **AI:** `AIProvider` có mock fallback; cấu hình `openai`, `gemini` qua biến môi trường mà không làm hỏng build khi thiếu key.
-- **Ingestion:** 12 RSS công khai từ Việt Nam và quốc tế chạy mặc định, có cache 5 phút, chuẩn hóa, gom cụm, content hash, link nguồn gốc và fallback an toàn.
-- **Thể thao:** `SportsDataProvider` có adapter football-data.org v4 và API-Football cho live score, fixtures, results, standings và teams; tự fallback khi thiếu key.
-- **Thông báo:** `NotificationProvider` và Telegram adapter tự vô hiệu hóa an toàn khi thiếu token.
-- **Triển khai:** build ESM tương thích Cloudflare/Sites; cũng có thể chạy Next.js trên Vercel và Supabase ở backend.
-
-Các quyết định chính: giao diện được xây dựng mobile-first nhưng desktop dùng bố cục 3 cột; dark mode mặc định; dữ liệu công khai render được không cần đăng nhập; mọi hành động sở hữu dữ liệu được kiểm tra server/RLS; service-role chỉ tồn tại phía server; MVP dùng heuristic trước embedding để luôn chạy offline.
+NewsPeek là website tổng hợp tin tức Việt Nam và quốc tế. Hệ thống đọc RSS công khai, gom các bài nói về cùng một sự kiện, loại bỏ dữ kiện trùng, tạo bản tóm tắt tiếng Việt và giữ liên kết về từng bài gốc.
 
 ## Tính năng
 
-- Trang chủ dashboard 3 cột, ticker, tin nổi bật/mới nhất, live, lịch đấu, BXH, chủ đề và đội phổ biến.
-- `/for-you`, `/news`, chi tiết tin, `/live`, `/fixtures`, `/results`, chi tiết trận, `/standings`, `/transfers`.
-- Trang giải đấu, đội bóng, cầu thủ, tìm kiếm hợp nhất, bookmarks, settings và auth UI.
-- Admin dashboard có 8 KPI, biểu đồ, ingestion jobs và AI jobs.
-- Dark/light theme, sidebar drawer, mobile bottom navigation, keyboard search `Ctrl/Cmd + K`, optimistic bookmark/follow.
-- Metadata động, canonical, sitemap, robots, reduced-motion, focus state, semantic labels và no-index cho trang riêng tư.
-- Trang pháp lý: `/terms`, `/privacy`, `/copyright`, `/sources`.
-- API đã validate bằng Zod, rate limit cho search/cron, secret protection cho cron/AI và URL validation chống SSRF.
+- Bảng tin mới nhất, nổi bật và cá nhân hóa theo nguồn người đọc theo dõi.
+- Chuyên mục Việt Nam, Thế giới, Kinh tế, Công nghệ, Chính trị, Sức khỏe, Khoa học, Văn hóa & Giải trí và Thể thao.
+- 25 feed mặc định từ các nhà xuất bản Việt Nam và quốc tế.
+- AI failover theo chuỗi Gemini → Groq → Cloudflare Workers AI; OpenAI vẫn được hỗ trợ khi cấu hình.
+- Chi tiết tin chỉ tập trung vào ảnh, bản tóm tắt đầy đủ và liên kết nguồn.
+- Supabase lưu nguồn, bài thô, story cluster, bookmark, follow và lịch sử xử lý.
+- Worker chạy lịch RSS/story/AI mỗi phút trên Cloudflare.
 
-## Bắt đầu nhanh
+Các API và giao diện dữ liệu bóng đá riêng (trận đấu, kết quả, bảng xếp hạng, đội và cầu thủ) đã được gỡ khỏi luồng sản phẩm. Các bảng cũ trong migration chưa bị xóa để có thể rollback an toàn.
 
-Yêu cầu Node.js 22.13+ và npm 11+.
+## Chạy cục bộ
+
+Yêu cầu Node.js 22.13+.
 
 ```bash
 npm install
@@ -39,118 +24,70 @@ npm run setup
 npm run dev
 ```
 
-Mở `http://localhost:3000`. `npm run setup` tạo `.env.local` từ `.env.example` nếu chưa có. Không cần dịch vụ bên thứ ba để chạy chế độ demo.
+Mở `http://localhost:3000`.
 
-## Scripts
-
-```bash
-npm run dev          # development server
-npm run build        # production build
-npm run start        # production preview
-npm run lint         # ESLint
-npm run typecheck    # TypeScript strict
-npm test             # unit + integration tests
-npm run test:e2e     # route smoke E2E; đặt E2E_BASE_URL
-npm run format       # Prettier
-npm run db:migrate   # push migration lên Supabase
-npm run db:seed      # reset local Supabase và nạp seed
-npm run ingest:mock  # chạy ingestion mock không cần server
-npm run cron:demo    # gọi cron endpoint của server đang chạy
-```
-
-Chạy E2E với server đang hoạt động:
+## Kiểm thử
 
 ```bash
-E2E_BASE_URL=http://localhost:3000 npm run test:e2e
+npm run typecheck
+npm test
+npm run lint
+npm run build
 ```
 
-Trên PowerShell: `$env:E2E_BASE_URL='http://localhost:3000'; npm run test:e2e`.
+E2E với một server đang chạy:
 
-## Supabase
+```powershell
+$env:E2E_BASE_URL='http://localhost:3000'
+npm run test:e2e
+```
 
-1. Tạo project Supabase và điền URL/anon key vào `.env.local`.
-2. Cài Supabase CLI, sau đó `npx supabase link --project-ref <ref>`.
-3. Chạy `npm run db:migrate`.
-4. Seed local bằng `npm run db:seed`, hoặc chạy [`supabase/seed/seed.sql`](./supabase/seed/seed.sql) trong SQL Editor cho môi trường demo.
-5. Cấu hình Site URL và redirect URL `/auth/callback` trong Supabase Auth; bật Email/Password, Magic Link và Google nếu cần.
-6. Thêm email admin vào `ADMIN_EMAILS`, sau đó nâng `profiles.role='admin'` bằng SQL/service process an toàn. Không nhận role từ client.
+## Đồng bộ và xử lý tin
 
-Migration chính: [`supabase/migrations/202607130001_sportpeek_schema.sql`](./supabase/migrations/202607130001_sportpeek_schema.sql). Migration tạo 24 bảng, enum, FK, unique constraint chống trùng, search vector/GIN index, audit log, trigger và policy RLS.
+```bash
+npm run rss:test
+npm run rss:sync
+npm run rss:report
+npm run stories:process
+npm run stories:summarize
+npm run stories:report
+npm run ops:health
+```
 
-## Biến môi trường
+## Biến môi trường chính
 
-| Biến                                          | Phạm vi                         | Bắt buộc              |
-| --------------------------------------------- | ------------------------------- | --------------------- |
-| `NEXT_PUBLIC_APP_URL`                         | URL canonical                   | Có khi deploy         |
-| `NEXT_PUBLIC_SUPABASE_URL`                    | Supabase public URL             | Chỉ khi dùng Supabase |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`        | Publishable key + RLS           | Chỉ khi dùng Supabase |
-| `SUPABASE_SECRET_KEY`                         | Server-only admin/worker        | Chỉ cho worker/admin  |
-| `SUPABASE_SERVICE_ROLE_KEY`                   | Legacy server-only admin/worker | Chỉ cho project cũ    |
-| `AI_PROVIDER`                                 | `mock`, `openai`, `gemini`      | Không, mặc định mock  |
-| `OPENAI_API_KEY`, `OPENAI_MODEL`              | OpenAI adapter                  | Không                 |
-| `GEMINI_API_KEY`, `GEMINI_MODEL`              | Gemini adapter                  | Không                 |
-| `TELEGRAM_BOT_TOKEN`                          | Telegram bot                    | Không                 |
-| `CRON_SECRET`                                 | Bảo vệ cron/AI endpoint         | Có khi bật cron       |
-| `ADMIN_EMAILS`                                | Allowlist khởi tạo admin        | Có cho production     |
-| `SPORTS_DATA_PROVIDER`, `SPORTS_DATA_API_KEY` | Live sports provider            | Không, mặc định mock  |
+| Biến | Mục đích |
+| --- | --- |
+| `NEXT_PUBLIC_APP_URL` | URL canonical |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase public URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key |
+| `SUPABASE_SECRET_KEY` | Quyền worker/server, không đưa ra client |
+| `AI_PROVIDER` | `failover`, `gemini`, `groq`, `cloudflare`, `openai` hoặc `off` |
+| `AI_PROVIDER_CHAIN` | Thứ tự failover, mặc định `gemini,groq,cloudflare` |
+| `GEMINI_API_KEY` | Gemini API key |
+| `GROQ_API_KEY` | Groq API key |
+| `OPENAI_API_KEY` | OpenAI API key tùy chọn |
+| `NEWS_RSS_FEEDS` | JSON danh sách feed tùy chỉnh; bỏ trống để dùng nguồn mặc định |
+| `CRON_SECRET` | Bảo vệ endpoint vận hành |
 
-Không commit `.env.local`. Tuyệt đối không đặt `SUPABASE_SERVICE_ROLE_KEY` trong biến `NEXT_PUBLIC_*`.
+Không commit `.env.local` hoặc bất kỳ secret nào.
 
 ## API chính
 
-- `GET /api/news`, `/api/feed/for-you`, `/api/search?q=...`
-- `GET /api/matches/live`, `/api/fixtures`, `/api/results`, `/api/standings`
-- `GET /api/teams/[slug]`, `/api/players/[id]`
+- `GET /api/news`, `/api/stories`, `/api/stories/[slug]`
+- `GET /api/feed/for-you`, `/api/search?q=...`, `/api/sources`
 - `POST /api/bookmarks`, `/api/follows`, `/api/profile`
-- `POST /api/cron/ingest`, `/api/ai/process` với `Authorization: Bearer $CRON_SECRET`
+- `POST /api/cron/ingest`, `/api/ai/process` với Bearer secret
 
-Các API sở hữu dữ liệu trong demo trả mock response; migration/RLS là nguồn sự thật khi nối Supabase.
-
-## Dữ liệu production và fallback
-
-- AI classify/summary/entity/preview/recap.
-- Tin tức mặc định tổng hợp từ VFF, VPF, VnExpress, Tuổi Trẻ, Thanh Niên, VietNamNet, Dân trí, VOV, BBC Sport, The Guardian, ESPN và Sky Sports.
-- Tin quốc tế được dịch và tóm tắt sang tiếng Việt qua OpenAI khi cấu hình `AI_PROVIDER=openai` và `OPENAI_API_KEY`; nếu thiếu khóa, bài gốc tiếng Anh vẫn hiển thị minh bạch.
-- Điểm nóng dùng độ mới, số nguồn độc lập, độ uy tín nguồn và tầm quan trọng chủ đề. Đây là chỉ số quan tâm ước tính, không phải lượt xem của báo gốc.
-- Live score, fixtures, results và standings chuyển sang football-data.org khi đặt `SPORTS_DATA_PROVIDER=football-data` và `SPORTS_DATA_API_KEY`; khóa chỉ nằm trong biến bí mật của môi trường chạy. Gói Free có tỉ số bị trễ theo chính sách nhà cung cấp.
-- Authentication interaction trên giao diện demo; Supabase client/schema đã cấu hình sẵn.
-- Bookmark/follow optimistic state trong phiên demo; production lưu bằng Supabase/RLS.
-- Telegram không gửi khi thiếu token.
-
-## Telegram
-
-Module hỗ trợ sinh mã liên kết, gửi breaking news, match alert và daily digest. Bot production có thể ánh xạ `/start`, `/link CODE`, `/today`, `/live`, `/following`, `/stop` vào service layer. Khi `TELEGRAM_BOT_TOKEN` trống, tất cả send method trả `false` an toàn.
-
-## Triển khai Vercel + Supabase
-
-1. Push repository lên GitHub và import vào Vercel.
-2. Đặt toàn bộ biến môi trường trong Project Settings; chỉ ba biến `NEXT_PUBLIC_*` được phép ra client.
-3. Chạy migration/seed trên Supabase trước lần deploy đầu.
-4. Build command `npm run build`; cài đặt `npm install`.
-5. Cập nhật `NEXT_PUBLIC_APP_URL`, Supabase Site URL, redirect URL và Google OAuth callback theo domain production.
-6. Tạo Vercel Cron gọi `POST /api/cron/ingest` với Bearer secret. Worker dài hạn có thể chuyển sang Railway/Render và dùng service-role server-side.
-
-## Cấu trúc chính
+## Cấu trúc
 
 ```text
-app/                 routes, API, SEO, error/loading states
-components/          SportPeek UI shell và reusable components
-lib/ai/              AI provider abstraction + mock
-lib/ingestion/       RSS/JSON/mock providers, normalization, dedupe
-lib/scoring/         hotness, reliability, personalization
-lib/sports-data/     sports provider abstraction
-lib/supabase/        public/admin clients
-lib/telegram/        notification provider
-supabase/migrations/ schema + RLS
-supabase/seed/        demo dataset
-tests/               unit, integration, E2E smoke
+app/                 route, API, SEO và trạng thái lỗi
+components/          giao diện NewsPeek
+lib/ai/              AI providers, grounding và failover
+lib/rss/             nguồn, parser và đồng bộ RSS
+lib/stories/         gom cụm, tóm tắt, lưu và trình bày story
+lib/supabase/        Supabase clients và quyền truy cập
+worker/              Cloudflare Worker + cron
+tests/               unit, integration và E2E smoke
 ```
-
-## Hạn chế và hướng tiếp theo
-
-- Adapter OpenAI/Gemini và sports API hiện dùng mock fallback; cần chọn vendor và hoàn thiện request/response mapping sau khi có tài khoản.
-- Auth form là UI/configuration-ready; cần nối hành động form với Supabase Auth và hoàn thiện email templates/OAuth redirect trong project thật.
-- Feed demo giữ bookmark/follow trong React state; production cần đổi API route sang Supabase server client.
-- RSS parser MVP chỉ xử lý cấu trúc phổ biến; production nên dùng parser XML chuẩn và kiểm tra robots/điều khoản theo từng nguồn.
-- E2E mặc định là smoke test HTTP để chạy nhẹ. Nên bổ sung Playwright project riêng cho tương tác đăng nhập/bookmark/admin trong CI có test Supabase.
-- Bước tiếp theo nên là: nối Supabase thật → chọn sports provider → thêm queue/Redis → embedding clustering → web push/Telegram webhook → observability/Sentry.

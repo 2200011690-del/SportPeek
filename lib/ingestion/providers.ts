@@ -11,7 +11,7 @@ export class MockNewsProvider implements NewsProvider {
 async function fetchWithRetry(url: string, attempts = 2): Promise<Response> {
   let error: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try { const response = await fetch(url, { signal: AbortSignal.timeout(8_000), headers: { "user-agent": "SportPeek/1.0 (+https://sportpeek.local/sources)" } }); if (!response.ok) throw new Error(`HTTP ${response.status}`); return response; } catch (caught) { error = caught; }
+    try { const response = await fetch(url, { signal: AbortSignal.timeout(8_000), headers: { "user-agent": "NewsPeek/1.0 (+https://newspeek.2200011690.workers.dev/sources)" } }); if (!response.ok) throw new Error(`HTTP ${response.status}`); return response; } catch (caught) { error = caught; }
   }
   throw error instanceof Error ? error : new Error("Không thể tải nguồn tin");
 }

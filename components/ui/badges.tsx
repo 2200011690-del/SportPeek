@@ -1,0 +1,242 @@
+"use client";
+
+import React, { useState } from "react";
+import Link from "next/link";
+import {
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  Flame,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
+import { hotnessLabel } from "@/lib/scoring";
+import type { NewsItem } from "@/lib/types";
+
+const getInitials = (name: string) =>
+  (name?.trim() || "TBD")
+    .split(" ")
+    .map((word) => word[0])
+    .slice(-2)
+    .join("")
+    .toUpperCase();
+
+export function HotnessBadge({ score }: { score: number }) {
+  return (
+    <span
+      className={`hotness hotness-${score >= 70 ? "high" : score >= 50 ? "mid" : "low"}`}
+    >
+      <Flame size={13} aria-hidden />
+      {hotnessLabel(score)} · {score}
+    </span>
+  );
+}
+
+export function ReliabilityBadge({ score }: { score: number }) {
+  return (
+    <span className="reliability">
+      <ShieldCheck size={13} aria-hidden />
+      Tin cậy {score}%
+    </span>
+  );
+}
+
+export function SectionHeading({
+  eyebrow,
+  title,
+  action,
+  href = "/news",
+}: {
+  eyebrow?: string;
+  title: string;
+  action?: string;
+  href?: string;
+}) {
+  return (
+    <div className="section-heading">
+      <div>
+        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
+        <h2>{title}</h2>
+      </div>
+      {action && (
+        <Link className="text-link" href={href}>
+          {action}
+          <ArrowRight size={15} />
+        </Link>
+      )}
+    </div>
+  );
+}
+
+export function DataLoadingState({
+  label = "Đang tải dữ liệu thật",
+}: {
+  label?: string;
+}) {
+  return (
+    <div className="data-loading" role="status">
+      <span />
+      <div>
+        <strong>{label}</strong>
+        <small>
+          NewsPeek đang kết nối các nguồn, vui lòng chờ trong giây lát.
+        </small>
+      </div>
+    </div>
+  );
+}
+
+export function EmptyState({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="empty-state">
+      <Search size={28} />
+      <strong>{title}</strong>
+      <p>{description}</p>
+    </div>
+  );
+}
+
+export function ContentNotFound({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="large-empty">
+      <EmptyState title={title} description={description} />
+      <Link href="/" className="primary-button">
+        Về trang chủ
+      </Link>
+    </div>
+  );
+}
+
+export function NewsVisual({
+  item,
+  compact = false,
+  priority = false,
+}: {
+  item: NewsItem;
+  compact?: boolean;
+  priority?: boolean;
+}) {
+  const [failedImageUrl, setFailedImageUrl] = useState<string>();
+  const hasImage = Boolean(item.imageUrl && item.imageUrl !== failedImageUrl);
+  return (
+    <div
+      className={`news-visual tone-${item.imageTone} ${compact ? "compact" : ""} ${hasImage ? "has-real-image" : "image-fallback"}`}
+    >
+      {hasImage && (
+        <>
+          {/* Publisher images are intentionally unproxied to keep this internal, free deployment within quota. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={item.imageUrl}
+            alt={item.imageAlt ?? item.title}
+            loading={priority ? "eager" : "lazy"}
+            fetchPriority={priority ? "high" : "auto"}
+            referrerPolicy="no-referrer"
+            onError={() => setFailedImageUrl(item.imageUrl)}
+          />
+        </>
+      )}
+      {!hasImage && (
+        <>
+          <div className="newsroom-pattern" />
+          <span className="visual-category-mark">{getInitials(item.primaryTopic ?? item.category)}</span>
+        </>
+      )}
+      <span className="visual-label">
+        {hasImage
+          ? `ẢNH · ${item.imageSource ?? item.sources[0] ?? "Nguồn bài viết"}`
+          : item.category}
+      </span>
+    </div>
+  );
+}
+
+export function FormField({
+  label,
+  value,
+  disabled,
+  name,
+  type = "text",
+  required = false,
+}: {
+  label: string;
+  value: string;
+  disabled?: boolean;
+  name?: string;
+  type?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="form-field">
+      <span>{label}</span>
+      <input
+        name={name}
+        type={type}
+        defaultValue={value}
+        disabled={disabled}
+        required={required}
+      />
+    </label>
+  );
+}
+
+export function Pagination({
+  page,
+  totalPages,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  const pages = Array.from(
+    { length: totalPages },
+    (_, index) => index + 1,
+  ).filter(
+    (value) =>
+      value === 1 || value === totalPages || Math.abs(value - page) <= 1,
+  );
+  return (
+    <nav className="pagination" aria-label="Phân trang">
+      <button
+        disabled={page === 1}
+        onClick={() => onPageChange(page - 1)}
+        aria-label="Trang trước"
+      >
+        <ChevronLeft size={16} />
+      </button>
+      {pages.map((value, index) => (
+        <span className="pagination-item" key={value}>
+          {index > 0 && value - pages[index - 1] > 1 && <em>…</em>}
+          <button
+            className={value === page ? "active" : ""}
+            onClick={() => onPageChange(value)}
+            aria-current={value === page ? "page" : undefined}
+          >
+            {value}
+          </button>
+        </span>
+      ))}
+      <button
+        disabled={page === totalPages}
+        onClick={() => onPageChange(page + 1)}
+        aria-label="Trang sau"
+      >
+        <ChevronRight size={16} />
+      </button>
+    </nav>
+  );
+}

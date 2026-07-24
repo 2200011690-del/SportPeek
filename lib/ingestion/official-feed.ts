@@ -2,18 +2,27 @@ import { formatDistanceToNowStrict } from "date-fns";
 import { vi } from "date-fns/locale";
 import { XMLParser } from "fast-xml-parser";
 import { decode } from "html-entities";
-import { enrichInternationalNews } from "@/lib/ai/openai";
+import { getAIProvider } from "@/lib/ai";
+import { configuredRssSources } from "@/lib/rss/sources";
 import { calculateHotness, calculateReliability } from "@/lib/scoring";
 import type { NewsItem, NewsSourceDetail } from "@/lib/types";
 import { contentHash } from "./utils";
 
 export type NewsLanguage = "vi" | "en";
-type FeedConfig = { name: string; url: string; reliability: number; language: NewsLanguage; official?: boolean };
+type FeedConfig = { name: string; url: string; reliability: number; language: NewsLanguage; official?: boolean; defaultCategory?: string };
+type RssMediaValue = string | number | { "#text"?: unknown; "@_url"?: unknown; "@_href"?: unknown; "@_src"?: unknown; "@_type"?: unknown } | RssMediaValue[];
 type RssItem = {
   title?: string;
   link?: string | { "#text"?: string; "@_href"?: string };
   guid?: string | { "#text"?: string };
-  description?: string;
+  description?: unknown;
+  summary?: unknown;
+  content?: unknown;
+  "content:encoded"?: unknown;
+  "media:content"?: RssMediaValue;
+  "media:thumbnail"?: RssMediaValue;
+  enclosure?: RssMediaValue;
+  image?: RssMediaValue;
   pubDate?: string;
   published?: string;
   updated?: string;
@@ -31,26 +40,21 @@ type RawArticle = {
   importance?: number;
   keyPoints?: string[];
   topic?: string;
+  imageUrl?: string;
 };
 
-// RSS feeds deliberately exposed by each publisher for syndication. SportPeek only
-// stores metadata, short excerpts and outbound links; it never republishes full text.
-const DEFAULT_FEEDS: FeedConfig[] = [
-  { name: "VFF", url: "https://vff.org.vn/feed/", reliability: 98, language: "vi", official: true },
-  { name: "VPF", url: "https://vpf.vn/feed/", reliability: 98, language: "vi", official: true },
-  { name: "VnExpress Thể thao", url: "https://vnexpress.net/rss/the-thao.rss", reliability: 92, language: "vi" },
-  { name: "Tuổi Trẻ Thể thao", url: "https://tuoitre.vn/rss/the-thao.rss", reliability: 91, language: "vi" },
-  { name: "Thanh Niên Thể thao", url: "https://thanhnien.vn/rss/the-thao.rss", reliability: 90, language: "vi" },
-  { name: "VietNamNet Thể thao", url: "https://vietnamnet.vn/rss/the-thao.rss", reliability: 89, language: "vi" },
-  { name: "Dân trí Thể thao", url: "https://dantri.com.vn/rss/the-thao.rss", reliability: 89, language: "vi" },
-  { name: "VOV Thể thao", url: "https://vov.vn/rss/the-thao.rss", reliability: 91, language: "vi" },
-  { name: "BBC Sport Football", url: "https://feeds.bbci.co.uk/sport/football/rss.xml", reliability: 94, language: "en" },
-  { name: "The Guardian Football", url: "https://www.theguardian.com/football/rss", reliability: 92, language: "en" },
-  { name: "ESPN Soccer", url: "https://www.espn.com/espn/rss/soccer/news", reliability: 90, language: "en" },
-  { name: "Sky Sports Football", url: "https://www.skysports.com/rss/12040", reliability: 90, language: "en" },
-];
-
-const cache = new Map<string, { expiresAt: number; data: NewsItem[]; sources: string[]; aiTranslation: boolean }>();
+export type NewsAIStatus = { provider: string; state: "ok" | "off" | "error"; translatedCount: number };
+export type AggregatedNews = {
+  data: NewsItem[];
+  sources: string[];
+  aiTranslation: boolean;
+  aiStatus: NewsAIStatus;
+  cached: boolean;
+  stale: boolean;
+  lastUpdatedAt: string;
+};
+type CachedAggregatedNews = Omit<AggregatedNews, "cached" | "stale"> & { expiresAt: number };
+const cache = new Map<string, CachedAggregatedNews>();
 const parser = new XMLParser({ ignoreAttributes: false, processEntities: true, trimValues: true });
 const STOP_WORDS = new Set("cua và với trong trên cho sau trước khi là đã sẽ một những các được từ về tại theo vào ra qua do this that with from after before over into says said for the and but are was were has have had not new latest more than its their his her của những các được trong trên với một khi sau trước theo cho tại từ về đã đang sẽ không".split(/\s+/));
 
@@ -59,15 +63,71 @@ function cleanText(value: unknown): string {
   return decode(raw).replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function feedsFromEnvironment(): FeedConfig[] {
-  const configured = process.env.NEWS_RSS_FEEDS?.trim();
-  if (!configured) return DEFAULT_FEEDS;
+function rawMarkup(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (value && typeof value === "object" && "#text" in value) return String((value as { "#text"?: unknown })["#text"] ?? "");
+  return "";
+}
+
+export function normalizeNewsImageUrl(value: unknown, baseUrl?: string): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const decoded = decode(value).trim().replace(/^['"]|['"]$/g, "");
+  if (!decoded || /^(?:data|javascript|blob):/i.test(decoded)) return undefined;
   try {
-    const parsed = JSON.parse(configured) as FeedConfig[];
-    return parsed.filter((feed) => feed.name && feed.url?.startsWith("https://") && ["vi", "en"].includes(feed.language));
+    const url = new URL(decoded.startsWith("//") ? `https:${decoded}` : decoded, baseUrl);
+    if (url.protocol === "http:") url.protocol = "https:";
+    if (url.protocol !== "https:") return undefined;
+    return url.toString();
   } catch {
-    return configured.split(",").map((url, index) => ({ name: `Nguồn tùy chỉnh ${index + 1}`, url: url.trim(), reliability: 85, language: "vi" as const })).filter((feed) => feed.url.startsWith("https://"));
+    return undefined;
   }
+}
+
+function mediaUrl(value: RssMediaValue | undefined, baseUrl: string): string | undefined {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = mediaUrl(entry, baseUrl);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (value && typeof value === "object") {
+    const type = typeof value["@_type"] === "string" ? value["@_type"] : "";
+    if (type && !type.startsWith("image/")) return undefined;
+    return normalizeNewsImageUrl(value["@_url"] ?? value["@_href"] ?? value["@_src"] ?? value["#text"], baseUrl);
+  }
+  return normalizeNewsImageUrl(typeof value === "number" ? String(value) : value, baseUrl);
+}
+
+export function extractImageFromMarkup(markup: string, baseUrl?: string): string | undefined {
+  for (const attribute of ["data-original", "data-src", "src"]) {
+    const match = markup.match(new RegExp(`<img\\b[^>]*?\\b${attribute}=["']([^"']+)["']`, "i"));
+    const image = normalizeNewsImageUrl(match?.[1], baseUrl);
+    if (image) return image;
+  }
+  return undefined;
+}
+
+function extractMetaImage(markup: string, baseUrl: string): string | undefined {
+  const metaTags = markup.match(/<meta\b[^>]*>/gi) ?? [];
+  for (const tag of metaTags) {
+    if (!/(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image|twitter:image:src)["']/i.test(tag)) continue;
+    const content = tag.match(/content=["']([^"']+)["']/i)?.[1];
+    const image = normalizeNewsImageUrl(content, baseUrl);
+    if (image) return image;
+  }
+  return undefined;
+}
+
+function feedsFromEnvironment(): FeedConfig[] {
+  return configuredRssSources().map((source) => ({
+    name: source.name,
+    url: source.feedUrl,
+    reliability: source.reliability,
+    language: source.language,
+    official: source.official,
+    defaultCategory: source.defaultCategory,
+  }));
 }
 
 function valueOfLink(link: RssItem["link"], fallback: string): string {
@@ -104,7 +164,7 @@ export function normalizePublishedDate(value?: string, now = new Date(), assumeV
 
 async function fetchFeed(feed: FeedConfig): Promise<RawArticle[]> {
   const response = await fetch(feed.url, {
-    headers: { accept: "application/rss+xml, application/xml;q=0.9", "user-agent": "SportPeek/1.0 (+https://sportpeek-vn-demo.dangkhoa1546.chatgpt.site/sources)" },
+    headers: { accept: "application/rss+xml, application/xml;q=0.9", "user-agent": "NewsPeek/1.0 (+https://newspeek.2200011690.workers.dev/sources)" },
     signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`${feed.name}: HTTP ${response.status}`);
@@ -121,17 +181,54 @@ async function fetchFeed(feed: FeedConfig): Promise<RawArticle[]> {
     const guid = typeof item.guid === "string" ? item.guid : item.guid?.["#text"];
     const published = normalizePublishedDate(item.pubDate ?? item.published ?? item.updated, new Date(), feed.language === "vi");
     if (!published) return [];
+    const descriptionMarkup = rawMarkup(item.description ?? item.summary);
+    const contentMarkup = rawMarkup(item["content:encoded"] ?? item.content);
+    const description = cleanText(descriptionMarkup);
+    const encodedContent = cleanText(contentMarkup);
+    const excerpt = (encodedContent.length > description.length ? encodedContent : description).slice(0, 800);
+    const imageUrl = mediaUrl(item["media:content"], url)
+      ?? mediaUrl(item["media:thumbnail"], url)
+      ?? mediaUrl(item.enclosure, url)
+      ?? mediaUrl(item.image, url)
+      ?? extractImageFromMarkup(contentMarkup, url)
+      ?? extractImageFromMarkup(descriptionMarkup, url);
     return [{
       id: contentHash({ title, url: guid ?? url }),
       title,
-      excerpt: cleanText(item.description).slice(0, 520) || "Đọc nội dung đầy đủ tại nguồn gốc.",
+      excerpt: excerpt || `${feed.name} vừa phát hành bản tin này qua RSS. Mở nguồn gốc để đọc toàn bộ nội dung.`,
       url,
       published,
-      category: cleanText(Array.isArray(item.category) ? item.category[0] : item.category) || "Thể thao",
+      category: feed.defaultCategory ?? (cleanText(Array.isArray(item.category) ? item.category[0] : item.category) || (feed.language === "en" ? "Thế giới" : "Việt Nam")),
       source: feed,
       translatedByAI: false,
+      imageUrl,
     }];
   });
+}
+
+async function fetchArticleImage(article: RawArticle): Promise<void> {
+  if (article.imageUrl) return;
+  try {
+    const response = await fetch(article.url, {
+      headers: { accept: "text/html", "user-agent": "NewsPeek/1.0 (+https://newspeek.2200011690.workers.dev/sources)" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(7_000),
+    });
+    if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) return;
+    const markup = await response.text();
+    article.imageUrl = extractMetaImage(markup, response.url || article.url) ?? extractImageFromMarkup(markup, response.url || article.url);
+  } catch {
+    // A publisher may block metadata requests. The UI then shows an explicit,
+    // branded fallback instead of pretending that a generic image is real.
+  }
+}
+
+async function enrichMissingImages(articles: RawArticle[]): Promise<void> {
+  const candidates = [...articles]
+    .filter((article) => !article.imageUrl)
+    .sort((a, b) => b.published.getTime() - a.published.getTime() || b.source.reliability - a.source.reliability)
+    .slice(0, 10);
+  await Promise.allSettled(candidates.map(fetchArticleImage));
 }
 
 function tokens(value: string): Set<string> {
@@ -158,9 +255,51 @@ function clusterArticles(articles: RawArticle[]): RawArticle[][] {
 function importanceFromText(article: RawArticle): number {
   if (article.importance) return article.importance;
   const text = `${article.title} ${article.category}`.toLowerCase();
-  if (/chung kết|final|vô địch|champion|world cup|đội tuyển việt nam|vietnam/.test(text)) return 88;
-  if (/champions league|premier league|la liga|serie a|v.league|chuyển nhượng|transfer/.test(text)) return 76;
+  if (/khẩn cấp|breaking|thiên tai|động đất|bão|xung đột|chiến sự|bầu cử|quốc hội|chính phủ|lãi suất|dịch bệnh/.test(text)) return 88;
+  if (/trí tuệ nhân tạo|công nghệ|kinh tế|thị trường|sức khỏe|khoa học|quốc tế|thế giới/.test(text)) return 76;
   return 58;
+}
+
+function paragraphize(value: string): string[] {
+  const sentences = value
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}"“])/u)
+    .filter(Boolean);
+  if (sentences.length <= 1) return value.trim() ? [value.trim()] : [];
+  const paragraphs: string[] = [];
+  let current = "";
+  for (const sentence of sentences) {
+    if (current && `${current} ${sentence}`.length > 380) {
+      paragraphs.push(current);
+      current = sentence;
+    } else {
+      current = current ? `${current} ${sentence}` : sentence;
+    }
+  }
+  if (current) paragraphs.push(current);
+  return paragraphs;
+}
+
+function buildReadingBody(cluster: RawArticle[], lead: RawArticle): string[] {
+  const paragraphs: string[] = [];
+  const signatures = new Set<string>();
+  const add = (value: string) => {
+    const cleaned = value.replace(/\s+/g, " ").trim();
+    const signature = cleanText(cleaned).toLowerCase().slice(0, 120);
+    if (!cleaned || signatures.has(signature)) return;
+    signatures.add(signature);
+    paragraphs.push(cleaned);
+  };
+  const ordered = [lead, ...cluster.filter((article) => article.id !== lead.id)];
+  for (const article of ordered) {
+    for (const paragraph of paragraphize(article.excerpt)) add(paragraph);
+    if (paragraphs.length >= 5) break;
+  }
+  if (lead.translatedByAI) {
+    for (const point of lead.keyPoints ?? []) add(point);
+  }
+  return paragraphs.slice(0, 8);
 }
 
 function toNewsItem(cluster: RawArticle[], index: number): NewsItem {
@@ -173,71 +312,113 @@ function toNewsItem(cluster: RawArticle[], index: number): NewsItem {
   const reliability = calculateReliability({ sourceScores: sources.map((source) => source.reliability), independentSources: sources.length, official, speculativeLanguage: speculative });
   const importance = Math.max(...cluster.map(importanceFromText));
   const hotness = calculateHotness({ ageHours, sourceCount: sources.length, averageSourceReliability: averageReliability, entityPopularity: importance, readVelocity: Math.min(100, 28 + sources.length * 17 + Math.max(0, 24 - ageHours)), eventImportance: importance, verified: official || sources.length >= 2 });
-  const details: NewsSourceDetail[] = cluster.map((article) => ({ name: article.source.name, url: article.url, reliability: article.source.reliability, language: article.source.language }));
+  const details: NewsSourceDetail[] = cluster.map((article) => ({
+    name: article.source.name,
+    url: article.url,
+    reliability: article.source.reliability,
+    language: article.source.language,
+    excerpt: article.excerpt.slice(0, 420),
+    articleId: article.id,
+    title: article.title,
+    publishedAt: article.published.toISOString(),
+    fetchedAt: new Date().toISOString(),
+    isOfficialSource: Boolean(article.source.official),
+    imageUrl: article.imageUrl,
+    canonicalUrl: article.url,
+  }));
   const keyPoints = lead.keyPoints?.length ? lead.keyPoints : [lead.excerpt, ...cluster.filter((article) => article.id !== lead.id).slice(0, 2).map((article) => article.title)].map((value) => value.slice(0, 190));
   const international = lead.source.language === "en";
+  const category = lead.topic ?? lead.source.defaultCategory ?? lead.category ?? (international ? "Thế giới" : "Việt Nam");
+  const imageArticle = [lead, ...cluster.filter((article) => article.id !== lead.id)].find((article) => article.imageUrl);
   return {
     id: `rss-${lead.id}`,
     title: lead.title,
     slug: `rss-${lead.id}`,
     summary: lead.excerpt.slice(0, 420),
     keyPoints: keyPoints.slice(0, 3),
-    category: international ? `${lead.topic ?? lead.category} · Quốc tế` : `${lead.category} · Việt Nam`,
-    competition: lead.topic ?? (international ? "Bóng đá quốc tế" : "Thể thao Việt Nam"),
-    team: international ? "Bóng đá quốc tế" : "Thể thao Việt Nam",
+    category,
+    primaryTopic: category,
+    region: international ? "Quốc tế" : "Việt Nam",
     publishedAt: formatDistanceToNowStrict(lead.published, { addSuffix: true, locale: vi }),
     publishedTimestamp: lead.published.toISOString(),
     hotness,
     reliability,
     sources: sources.map((source) => source.name),
     sourceDetails: details,
+    imageUrl: imageArticle?.imageUrl,
+    imageAlt: imageArticle ? `Ảnh minh họa cho tin “${lead.title}” từ ${imageArticle.source.name}` : undefined,
+    imageSource: imageArticle?.source.name,
+    readingBody: buildReadingBody(cluster, lead),
     originalUrl: lead.url,
     originalLanguage: lead.source.language,
     translatedByAI: lead.translatedByAI,
     trendingReasons: [
       sources.length >= 2 ? `${sources.length} nguồn độc lập cùng đưa tin` : "Mới xuất hiện trên một nguồn",
       ageHours <= 6 ? "Được đăng trong 6 giờ gần đây" : "Độ mới đang giảm theo thời gian",
-      importance >= 76 ? "Liên quan đội tuyển, giải đấu hoặc sự kiện lớn" : "Mức quan tâm được ước tính từ chủ đề",
+      importance >= 76 ? "Chủ đề có mức ảnh hưởng hoặc quan tâm cao" : "Mức quan tâm được ước tính từ chủ đề",
     ],
     imageTone: ["red", "green", "blue", "amber", "cyan"][index % 5],
     featured: index < 2,
   };
 }
 
-async function translateInternational(articles: RawArticle[]): Promise<boolean> {
-  if (!process.env.OPENAI_API_KEY || process.env.AI_PROVIDER?.toLowerCase() !== "openai") return false;
-  const candidates = articles.filter((article) => article.source.language === "en").sort((a, b) => b.published.getTime() - a.published.getTime()).slice(0, 20);
-  if (!candidates.length) return false;
-  const enriched = await enrichInternationalNews(candidates.map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt })));
-  const byId = new Map(enriched.map((item) => [item.id, item]));
-  for (const article of candidates) {
-    const result = byId.get(article.id);
-    if (!result) continue;
-    article.title = result.titleVi;
-    article.excerpt = result.summaryVi;
+async function translateInternational(articles: RawArticle[]): Promise<NewsAIStatus> {
+  const provider = getAIProvider();
+  if (["disabled", "heuristic", "mock"].includes(provider.name)) return { provider: provider.name === "disabled" ? "off" : provider.name, state: "off", translatedCount: 0 };
+  const candidates = articles.filter((article) => article.source.language === "en").sort((a, b) => b.published.getTime() - a.published.getTime()).slice(0, 4);
+  if (!candidates.length) return { provider: provider.name, state: "ok", translatedCount: 0 };
+  const settled = await Promise.allSettled(candidates.map(async (article) => ({
+    article,
+    result: await provider.summarizeCluster({ articles: [{ id: article.id, title: article.title, excerpt: article.excerpt }] }),
+  })));
+  let translatedCount = 0;
+  const meaningful = (value: string, minimum: number) => value.replace(/[^\p{L}\p{N}]/gu, "").length >= minimum;
+  for (const entry of settled) {
+    if (entry.status !== "fulfilled") continue;
+    const { article, result } = entry.value;
+    if (!meaningful(result.title, 8) || !meaningful(result.summary, 24) || !result.keyPoints.some((point) => meaningful(point, 10))) continue;
+    article.title = result.title;
+    article.excerpt = result.summary;
     article.keyPoints = result.keyPoints;
-    article.topic = result.topic;
-    article.importance = result.importance;
     article.translatedByAI = true;
+    translatedCount += 1;
   }
-  return enriched.length > 0;
+  const actualProvider = provider.name === "failover" && "lastProviderName" in provider && typeof provider.lastProviderName === "string" ? provider.lastProviderName : provider.name;
+  if (!translatedCount) return { provider: actualProvider, state: "error", translatedCount: 0 };
+  return { provider: actualProvider, state: "ok", translatedCount };
 }
 
 export async function getOfficialNews(): Promise<NewsItem[]> {
   return (await getAggregatedNews()).data;
 }
 
-export async function getAggregatedNews(): Promise<{ data: NewsItem[]; sources: string[]; aiTranslation: boolean }> {
+export async function getAggregatedNews(): Promise<AggregatedNews> {
   const feeds = feedsFromEnvironment();
   const key = feeds.map((feed) => feed.url).join("|") + `|${process.env.AI_PROVIDER ?? "mock"}`;
   const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached;
+  if (cached && cached.expiresAt > Date.now()) {
+    return { data: cached.data, sources: cached.sources, aiTranslation: cached.aiTranslation, aiStatus: cached.aiStatus, lastUpdatedAt: cached.lastUpdatedAt, cached: true, stale: false };
+  }
   const settled = await Promise.allSettled(feeds.map(fetchFeed));
   const articles = settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-  if (!articles.length) throw new Error("Không tải được các nguồn RSS");
+  if (!articles.length) {
+    if (cached) {
+      return { data: cached.data, sources: cached.sources, aiTranslation: cached.aiTranslation, aiStatus: cached.aiStatus, lastUpdatedAt: cached.lastUpdatedAt, cached: true, stale: true };
+    }
+    throw new Error("Không tải được các nguồn RSS");
+  }
   const deduplicated = [...new Map(articles.map((article) => [article.url, article])).values()];
-  let aiTranslation = false;
-  try { aiTranslation = await translateInternational(deduplicated); } catch { aiTranslation = false; }
+  await enrichMissingImages(deduplicated);
+  let aiStatus: NewsAIStatus;
+  try { aiStatus = await translateInternational(deduplicated); }
+  catch (error) {
+    console.warn("[NewsPeek AI] Translation failed:", error instanceof Error ? error.message : "unknown error");
+    const requested = process.env.AI_PROVIDER?.toLowerCase();
+    aiStatus = requested && requested !== "off" && requested !== "disabled"
+      ? { provider: requested, state: "error", translatedCount: 0 }
+      : { provider: "off", state: "off", translatedCount: 0 };
+  }
+  const aiTranslation = aiStatus.translatedCount > 0;
   // The main newsroom promises "latest", so recency is the primary order.
   // Hotness remains visible and is used separately for the home highlights.
   const data = clusterArticles(deduplicated).map(toNewsItem).sort((a, b) => {
@@ -245,7 +426,8 @@ export async function getAggregatedNews(): Promise<{ data: NewsItem[]; sources: 
     return (Number.isNaN(newest) ? 0 : newest) || b.hotness - a.hotness || b.reliability - a.reliability;
   }).slice(0, 60);
   const sources = [...new Set(deduplicated.map((article) => article.source.name))];
-  const result = { data, sources, aiTranslation, expiresAt: Date.now() + 90_000 };
-  cache.set(key, result);
-  return result;
+  const cacheTtl = aiStatus.state === "error" ? 30_000 : 5 * 60_000;
+  const lastUpdatedAt = new Date().toISOString();
+  cache.set(key, { data, sources, aiTranslation, aiStatus, lastUpdatedAt, expiresAt: Date.now() + cacheTtl });
+  return { data, sources, aiTranslation, aiStatus, lastUpdatedAt, cached: false, stale: false };
 }
