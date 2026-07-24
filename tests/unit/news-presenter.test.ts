@@ -1,37 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { newsHasSourceLanguage } from "../../components/news/news-presenter";
-import { makeStoryNewsItem } from "../fixtures/story-news";
+import { newsStatusLabel } from "../../components/news/news-presenter";
 
-test("language filters inspect every source in a mixed-language story", () => {
-  const mixedStory = makeStoryNewsItem({
-    originalLanguage: "vi",
-    sourceDetails: [
-      {
-        name: "VOV Thể thao",
-        url: "https://vov.vn/the-thao/example",
-        reliability: 90,
-        language: "vi",
-      },
-      {
-        name: "BBC Sport",
-        url: "https://bbc.com/sport/example",
-        reliability: 94,
-        language: "en",
-      },
-    ],
-  });
-
-  assert.equal(newsHasSourceLanguage(mixedStory, "vi"), true);
-  assert.equal(newsHasSourceLanguage(mixedStory, "en"), true);
+test("single-source stories never claim independent confirmation", () => {
+  assert.equal(
+    newsStatusLabel({
+      storyStatus: "reported",
+      category: "Thế giới",
+      title: "Tin một nguồn",
+      sources: ["Nguồn A"],
+    }),
+    "Một nguồn",
+  );
 });
 
-test("language filters retain the legacy lead-language fallback", () => {
-  const legacyInternationalStory = makeStoryNewsItem({
-    originalLanguage: "en",
-    sourceDetails: undefined,
-  });
+test("multiple publishers are described as reporting, not verification", () => {
+  assert.equal(
+    newsStatusLabel({
+      storyStatus: "reported",
+      category: "Việt Nam",
+      title: "Tin đa nguồn",
+      sources: ["Nguồn A", "Nguồn B"],
+    }),
+    "Nhiều nguồn đưa tin",
+  );
+});
 
-  assert.equal(newsHasSourceLanguage(legacyInternationalStory, "en"), true);
-  assert.equal(newsHasSourceLanguage(legacyInternationalStory, "vi"), false);
+test("official status describes source provenance", () => {
+  assert.equal(
+    newsStatusLabel({
+      storyStatus: "official",
+      category: "Chính trị",
+      title: "Thông báo chính thức",
+      sources: ["Cổng thông tin"],
+    }),
+    "Có nguồn chính thức",
+  );
 });

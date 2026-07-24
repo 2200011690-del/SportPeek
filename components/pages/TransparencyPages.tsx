@@ -1,7 +1,7 @@
 "use client";
 
-import React from "react";
-import { Check } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { Check, Globe2, Search, ShieldCheck } from "lucide-react";
 import { useRuntimeData } from "@/components/runtime/RuntimeDataContext";
 import { DataLoadingState } from "@/components/ui/badges";
 
@@ -144,6 +144,139 @@ export function LegalPage({ type }: { type: string }) {
 }
 
 export function SourcesPage({ followed, onFollow }: { followed: Set<string>; onFollow: (id: string, type?: "source") => void }) {
+  type SourceTab = "all" | "vietnam" | "international" | "official" | "following";
   const { sourceCatalog, loading } = useRuntimeData();
-  return <div className="legal-page sources-page"><span className="eyebrow">NEWSPEEK · MINH BẠCH</span><h1>Nguồn tin & phương pháp</h1><p className="legal-lead">Danh mục nguồn được đồng bộ trực tiếp từ hệ thống. Theo dõi nguồn sẽ trở thành một tín hiệu trong bảng tin cá nhân nhưng không thay đổi điểm tin cậy.</p>{loading ? <DataLoadingState label="Đang tải danh mục nguồn" /> : <div className="source-catalog-grid">{sourceCatalog.map((source) => <article className="content-card" key={source.id}><div className="story-source-heading"><span className="source-avatar">{getInitials(source.name)}</span><div><strong>{source.name}</strong><small>{source.language === "en" ? "Quốc tế · Tiếng Anh" : "Việt Nam · Tiếng Việt"}{source.official ? " · Chính thức" : ""}</small></div></div><dl className="profile-list"><div><dt>Độ tin cậy cấu hình</dt><dd>{source.reliability}/100</dd></div><div><dt>Cập nhật cuối</dt><dd>{source.lastFetchedAt ? formatStoryTime(source.lastFetchedAt) : "Chưa đồng bộ"}</dd></div><div><dt>Trạng thái</dt><dd className={source.active && !source.lastError ? "active-text" : ""}>{!source.active ? "Đã tắt" : source.lastError ? "Có lỗi gần nhất" : "Đang hoạt động"}</dd></div></dl><button className={`follow-button ${followed.has(source.id) ? "following" : ""}`} onClick={() => onFollow(source.id, "source")}>{followed.has(source.id) ? <><Check size={16} />Đang theo dõi</> : <>+ Theo dõi nguồn</>}</button></article>)}</div>}<section><h2>Phương pháp tổng hợp</h2><p>NewsPeek lưu metadata, trích đoạn và toàn văn do nhà xuất bản cấp qua RSS hoặc cho phép đọc công khai trên trang bài viết; gom các bài cùng sự kiện, gộp dữ kiện trùng và luôn dẫn về bài gốc. Hệ thống tôn trọng chặn trích xuất, robots và paywall, đồng thời không tải lại video.</p></section><section><h2>Giới hạn của điểm nổi bật</h2><p>Điểm nổi bật là ước tính từ độ mới, số nguồn, độ uy tín và mức ảnh hưởng; không phải lượt xem thật của tòa soạn. Bảng tin cá nhân còn dùng nguồn theo dõi, bài đã lưu và lịch sử đọc.</p></section></div>;
+  const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<SourceTab>("all");
+  const [language, setLanguage] = useState<"all" | "vi" | "en">("all");
+  const [status, setStatus] = useState<"all" | "active" | "issues">("active");
+  const filteredSources = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase("vi");
+    return sourceCatalog.filter((source) => {
+      if (normalized && !source.name.toLocaleLowerCase("vi").includes(normalized)) return false;
+      if (tab === "vietnam" && source.language !== "vi") return false;
+      if (tab === "international" && source.language !== "en") return false;
+      if (tab === "official" && !source.official) return false;
+      if (tab === "following" && !followed.has(source.id)) return false;
+      if (language !== "all" && source.language !== language) return false;
+      if (status === "active" && (!source.active || source.lastError)) return false;
+      if (status === "issues" && source.active && !source.lastError) return false;
+      return true;
+    });
+  }, [followed, language, query, sourceCatalog, status, tab]);
+  const tabs: Array<[SourceTab, string]> = [
+    ["all", "Tất cả"],
+    ["vietnam", "Việt Nam"],
+    ["international", "Quốc tế"],
+    ["official", "Chính thức"],
+    ["following", "Đang theo dõi"],
+  ];
+  return (
+    <div className="legal-page sources-page">
+      <header className="source-directory-header">
+        <span className="eyebrow">MẠNG LƯỚI NEWSPEEK</span>
+        <h1>Nguồn tin</h1>
+        <p className="legal-lead">
+          Khám phá các nhà xuất bản đang cung cấp dữ liệu cho NewsPeek. Theo dõi nguồn chỉ điều chỉnh bảng tin cá nhân, không thay đổi đánh giá nội dung.
+        </p>
+        <label className="source-search">
+          <Search size={19} aria-hidden="true" />
+          <span className="sr-only">Tìm nguồn tin</span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm theo tên nguồn…" />
+        </label>
+      </header>
+      <div className="source-directory-controls">
+        <div className="source-tabs" role="tablist" aria-label="Nhóm nguồn tin">
+          {tabs.map(([value, label]) => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === value}
+              className={tab === value ? "active" : ""}
+              key={value}
+              onClick={() => setTab(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="source-selects">
+          <label>
+            <span>Ngôn ngữ</span>
+            <select value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}>
+              <option value="all">Tất cả</option>
+              <option value="vi">Tiếng Việt</option>
+              <option value="en">Tiếng Anh</option>
+            </select>
+          </label>
+          <label>
+            <span>Trạng thái</span>
+            <select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>
+              <option value="active">Đang hoạt động</option>
+              <option value="issues">Đang tắt hoặc có lỗi</option>
+              <option value="all">Tất cả</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      {loading ? (
+        <DataLoadingState label="Đang tải danh mục nguồn" />
+      ) : filteredSources.length ? (
+        <>
+          <p className="source-result-count" aria-live="polite">{filteredSources.length} nguồn phù hợp</p>
+          <div className="source-directory-list">
+            {filteredSources.map((source) => {
+              const healthy = source.active && !source.lastError;
+              return (
+                <article className="source-row" key={source.id}>
+                  <span className="source-row-logo" aria-hidden="true">{getInitials(source.name)}</span>
+                  <div className="source-row-main">
+                    <div className="source-row-heading">
+                      <h2>{source.name}</h2>
+                      {source.official && <span title="Nguồn thuộc cơ quan hoặc tổ chức chính thức"><ShieldCheck size={14} />Chính thức</span>}
+                    </div>
+                    <p>
+                      {source.language === "vi" ? "Nhà xuất bản tiếng Việt" : "Nhà xuất bản quốc tế bằng tiếng Anh"}
+                      {" · "}
+                      <span className={healthy ? "active-text" : "warning-text"}>{healthy ? "Đang hoạt động" : "Cần kiểm tra"}</span>
+                    </p>
+                    <details>
+                      <summary>Thông tin kỹ thuật</summary>
+                      <dl>
+                        <div><dt>Điểm cấu hình</dt><dd>{source.reliability}/100</dd></div>
+                        <div><dt>Cập nhật cuối</dt><dd>{source.lastFetchedAt ? formatStoryTime(source.lastFetchedAt) : "Chưa đồng bộ"}</dd></div>
+                        <div><dt>Ngôn ngữ</dt><dd>{source.language === "vi" ? "Tiếng Việt" : "Tiếng Anh"}</dd></div>
+                      </dl>
+                    </details>
+                  </div>
+                  <button
+                    className={`follow-button ${followed.has(source.id) ? "following" : ""}`}
+                    onClick={() => onFollow(source.id, "source")}
+                  >
+                    {followed.has(source.id) ? <><Check size={16} />Đang theo dõi</> : <><Globe2 size={16} />Theo dõi</>}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <div className="source-empty">
+          <Search size={24} />
+          <strong>Không có nguồn phù hợp</strong>
+          <p>Thử đổi từ khóa hoặc bộ lọc trạng thái.</p>
+        </div>
+      )}
+      <div className="source-methodology">
+        <section>
+          <h2>Phương pháp tổng hợp</h2>
+          <p>NewsPeek gom các bài cùng sự kiện, loại bỏ phần trùng và luôn giữ liên kết tới nhà xuất bản. Hệ thống chỉ sử dụng nội dung công khai hoặc nội dung nguồn cung cấp hợp lệ.</p>
+        </section>
+        <section>
+          <h2>Điểm cấu hình có ý nghĩa gì?</h2>
+          <p>Điểm này phản ánh cấu hình vận hành của nguồn, không phải phán quyết về độ đúng của từng bài và không thay thế việc đối chiếu thông tin gốc.</p>
+        </section>
+      </div>
+    </div>
+  );
 }

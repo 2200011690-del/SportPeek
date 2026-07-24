@@ -6,6 +6,7 @@ import {
   Bell,
   Bookmark,
   BookOpen,
+  ChevronDown,
   CircleUserRound,
   Command,
   Globe2,
@@ -14,6 +15,7 @@ import {
   Moon,
   Newspaper,
   Rss,
+  Search,
   Settings,
   ShieldCheck,
   Sun,
@@ -307,5 +309,219 @@ export function AppFooter({ compact = false }: { compact?: boolean }) {
         <small>© 2026 NewsPeek Beta</small>
       </div>
     </footer>
+  );
+}
+
+const editorialPrimaryNav = [
+  { href: "/news", label: "Mới nhất" },
+  { href: "/category/viet-nam", label: "Việt Nam" },
+  { href: "/category/the-gioi", label: "Thế giới" },
+  { href: "/category/kinh-te", label: "Kinh tế" },
+  { href: "/category/cong-nghe", label: "Công nghệ" },
+];
+
+const isRouteActive = (route: string, href: string) =>
+  route === href || (href !== "/" && route.startsWith(href));
+
+export function EditorialHeader({
+  route,
+  onMenu,
+  onSearch,
+  theme,
+  onTheme,
+}: {
+  route: string;
+  onMenu: () => void;
+  onSearch: () => void;
+  theme: string;
+  onTheme: () => void;
+}) {
+  const secondaryCategories = NEWS_CATEGORIES.filter(
+    (category) =>
+      !editorialPrimaryNav.some((item) => item.href === `/category/${category.slug}`),
+  );
+  return (
+    <header className="editorial-header">
+      <div className="editorial-header-inner">
+        <button className="mobile-menu-button" onClick={onMenu} aria-label="Mở menu">
+          <Menu size={21} />
+        </button>
+        <Link className="editorial-brand" href="/" aria-label="NewsPeek — Trang chủ">
+          <span className="editorial-brand-mark" aria-hidden="true">N</span>
+          <span>NewsPeek</span>
+        </Link>
+        <nav className="desktop-navigation" aria-label="Điều hướng tin tức">
+          {editorialPrimaryNav.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={isRouteActive(route, item.href) ? "active" : ""}
+            >
+              {item.label}
+            </Link>
+          ))}
+          <details className="category-menu">
+            <summary>
+              Chuyên mục <ChevronDown size={15} aria-hidden="true" />
+            </summary>
+            <div className="category-menu-panel">
+              {secondaryCategories.map((category) => (
+                <Link
+                  href={`/category/${category.slug}`}
+                  key={category.slug}
+                  className={route === `/category/${category.slug}` ? "active" : ""}
+                >
+                  {category.label}
+                </Link>
+              ))}
+              <span className="category-menu-divider" />
+              <Link href="/sources">Nguồn tin & phương pháp</Link>
+            </div>
+          </details>
+        </nav>
+        <div className="editorial-header-actions">
+          <button className="header-search-button" onClick={onSearch} aria-label="Tìm kiếm tin tức">
+            <Search size={19} />
+            <span>Tìm kiếm</span>
+            <kbd><Command size={11} />K</kbd>
+          </button>
+          <Link className="header-action-button saved-link" href="/bookmarks" aria-label="Mở tin đã lưu">
+            <Bookmark size={19} />
+            <span>Đã lưu</span>
+          </Link>
+          <button
+            className="header-action-button theme-button"
+            onClick={onTheme}
+            aria-label={`Đổi giao diện, hiện tại: ${theme === "light" ? "Sáng" : theme === "dark" ? "Tối" : "Theo hệ thống"}`}
+            title="Đổi giao diện"
+          >
+            {theme === "light" ? <Moon size={19} /> : theme === "dark" ? <Sun size={19} /> : <BookOpen size={19} />}
+          </button>
+          <Link className="editorial-login" href="/login">
+            <CircleUserRound size={19} />
+            <span>Đăng nhập</span>
+          </Link>
+          <button className="mobile-search-button" onClick={onSearch} aria-label="Tìm kiếm">
+            <Search size={21} />
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+export function EditorialDrawer({
+  route,
+  open,
+  onClose,
+  sourceFilter,
+  onSourceFilter,
+}: {
+  route: string;
+  open: boolean;
+  onClose: () => void;
+  sourceFilter: SourceFilter;
+  onSourceFilter: (filter: SourceFilter) => void;
+}) {
+  React.useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+  return (
+    <>
+      <div className={`drawer-backdrop editorial-drawer-backdrop ${open ? "show" : ""}`} onClick={onClose} />
+      <aside className={`editorial-drawer ${open ? "open" : ""}`} inert={!open} aria-label="Menu NewsPeek">
+        <div className="editorial-drawer-heading">
+          <Link className="editorial-brand" href="/" onClick={onClose}>
+            <span className="editorial-brand-mark" aria-hidden="true">N</span>
+            <span>NewsPeek</span>
+          </Link>
+          <button onClick={onClose} aria-label="Đóng menu"><X size={21} /></button>
+        </div>
+        <nav aria-label="Điều hướng chính">
+          <Link href="/" onClick={onClose} className={route === "/" ? "active" : ""}>Trang chủ</Link>
+          {editorialPrimaryNav.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={onClose}
+              className={isRouteActive(route, item.href) ? "active" : ""}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+        <div className="editorial-drawer-section">
+          <strong>Chuyên mục khác</strong>
+          <div className="drawer-category-grid">
+            {NEWS_CATEGORIES.filter(
+              (category) =>
+                !editorialPrimaryNav.some((item) => item.href === `/category/${category.slug}`),
+            ).map((category) => (
+              <Link href={`/category/${category.slug}`} key={category.slug} onClick={onClose}>
+                {category.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+        {route === "/" && (
+          <div className="editorial-drawer-section">
+            <strong>Lọc nhanh trang chủ</strong>
+            <div className="drawer-filter-list">
+              {[
+                ["all", "Tất cả tin"],
+                ["vi", "Tin Việt Nam"],
+                ["international", "Tin quốc tế"],
+                ["official", "Có nguồn chính thức"],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={sourceFilter === id ? "active" : ""}
+                  onClick={() => {
+                    onSourceFilter(id as SourceFilter);
+                    onClose();
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="editorial-drawer-utility">
+          <Link href="/sources" onClick={onClose}><ShieldCheck size={18} />Nguồn tin</Link>
+          <Link href="/bookmarks" onClick={onClose}><Bookmark size={18} />Tin đã lưu</Link>
+          <Link href="/settings" onClick={onClose}><Settings size={18} />Cài đặt</Link>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+export function EditorialMobileNavigation({ route }: { route: string }) {
+  const items = [
+    navItems[0],
+    navItems[1],
+    navItems[2],
+    { href: "/bookmarks", label: "Đã lưu", icon: Bookmark },
+  ];
+  return (
+    <nav className="editorial-mobile-nav" aria-label="Điều hướng di động">
+      {items.map((item) => {
+        const Icon = item.icon;
+        const active = isRouteActive(route, item.href);
+        return (
+          <Link key={item.href} href={item.href} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>
+            <Icon size={20} />
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }

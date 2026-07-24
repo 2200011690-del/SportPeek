@@ -40,6 +40,28 @@ test("mobile layout has no horizontal overflow and 44px navigation targets", asy
   await close.click();
 });
 
+test("editorial layouts remain stable across all target breakpoints", async ({ page }) => {
+  for (const width of [360, 390, 768, 1024, 1280, 1440]) {
+    await page.setViewportSize({ width, height: width < 768 ? 844 : 960 });
+    await page.goto("/");
+    await expect(page.locator(".editorial-header")).toBeVisible();
+    const viewport = await page.evaluate(() => ({
+      width: window.innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(viewport.scrollWidth, `horizontal overflow at ${width}px`).toBeLessThanOrEqual(viewport.width);
+
+    if (width < 768) {
+      const targets = page.locator(".editorial-mobile-nav a");
+      await expect(targets).toHaveCount(4);
+      for (const target of await targets.all()) {
+        const box = await target.boundingBox();
+        expect(box?.height ?? 0, `short mobile target at ${width}px`).toBeGreaterThanOrEqual(44);
+      }
+    }
+  }
+});
+
 test("search UI finds a current persisted story", async ({ page, request }) => {
   const current = await stories(request);
   const expected = current[0];

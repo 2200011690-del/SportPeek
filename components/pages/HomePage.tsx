@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -43,11 +43,6 @@ function matchesSourceFilter(item: NewsItem, filter: SourceFilter): boolean {
 
 function BreakingNewsTicker({ items }: { items: NewsItem[] }) {
   const [index, setIndex] = useState(0);
-  useEffect(() => {
-    if (items.length <= 1) return;
-    const timer = setInterval(() => setIndex((prev) => (prev + 1) % items.length), 5000);
-    return () => clearInterval(timer);
-  }, [items.length]);
 
   if (!items.length) return null;
   const current = items[index];
@@ -259,22 +254,15 @@ export default function HomePage({
   const overallHot = rankFeaturedNews(newsItems)
     .filter((item) => item.id !== hero?.id)
     .slice(0, 6);
-  const dateKey = (value?: string) =>
-    value
-      ? new Intl.DateTimeFormat("en-CA", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          timeZone: "Asia/Ho_Chi_Minh",
-        }).format(new Date(value))
-      : "";
-  const todayKey = dateKey(new Date().toISOString());
-  const todayItems = sortLatestNews(
-    newsItems.filter(
-      (item) =>
-        dateKey(item.updatedTimestamp ?? item.publishedTimestamp) === todayKey,
-    ),
-  ).slice(0, 5);
+  const topicCategories = NEWS_CATEGORIES.filter((category) =>
+    filteredNews.some((item) => item.category === category.label),
+  ).slice(0, 8);
+  const categoryModules = NEWS_CATEGORIES.map((category) => ({
+    category,
+    items: sortLatestNews(
+      filteredNews.filter((item) => item.category === category.label),
+    ).slice(0, 3),
+  })).filter((module) => module.items.length).slice(0, 3);
   const today = new Intl.DateTimeFormat("vi-VN", {
     weekday: "long",
     day: "numeric",
@@ -319,6 +307,18 @@ export default function HomePage({
             <p>Chọn một nhóm nguồn khác để tiếp tục theo dõi.</p>
           </div>
         )}
+        {topicCategories.length > 0 && (
+          <nav className="topic-chips" aria-label="Chủ đề đang được quan tâm">
+            <span>Đang quan tâm</span>
+            <div>
+              {topicCategories.map((category) => (
+                <Link href={`/category/${category.slug}`} key={category.slug}>
+                  {category.label}
+                </Link>
+              ))}
+            </div>
+          </nav>
+        )}
         {feedItems.length > 0 && (
           <section className="home-continuous-feed" aria-label="Tin mới nhất">
             <div className="home-feed-label">
@@ -334,6 +334,27 @@ export default function HomePage({
             </Link>
           </section>
         )}
+        {categoryModules.length > 0 && (
+          <section className="home-category-modules" aria-labelledby="featured-categories-heading">
+            <div className="home-category-modules-heading">
+              <div>
+                <span>Đọc theo chuyên mục</span>
+                <h2 id="featured-categories-heading">Chuyên mục nổi bật</h2>
+              </div>
+              <Link href="/news">Tất cả chuyên mục <ArrowRight size={15} /></Link>
+            </div>
+            <div className="home-category-module-grid">
+              {categoryModules.map(({ category, items }) => (
+                <article key={category.slug}>
+                  <Link className="category-module-title" href={`/category/${category.slug}`}>
+                    {category.label}<ArrowRight size={15} />
+                  </Link>
+                  <DenseNewsList items={items} />
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
       <aside className="right-rail home-right-rail">
         <section className="rail-card hot-news-rail">
@@ -343,15 +364,6 @@ export default function HomePage({
             action="Tất cả"
           />
           <DenseNewsList items={overallHot} numbered />
-        </section>
-        <section className="rail-card today-news-rail">
-          <SectionHeading eyebrow="CẬP NHẬT TRONG NGÀY" title="Tin hôm nay" />
-          <DenseNewsList
-            items={(todayItems.length
-              ? todayItems
-              : sortLatestNews(newsItems)
-            ).slice(0, 5)}
-          />
         </section>
         <section className="rail-card compact-live-rail">
           <SectionHeading

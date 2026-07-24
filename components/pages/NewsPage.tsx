@@ -49,10 +49,7 @@ export function NewsCard({
   onBookmark: (id: string) => void;
 }) {
   const sourceCount = independentSourceCount(item);
-  const articleCount = item.sourceDetails?.length ?? sourceCount;
-  const officialCount =
-    item.sourceDetails?.filter((source) => source.isOfficialSource).length ?? 0;
-  const primarySource = item.sources[0] ?? "";
+  const primarySource = item.sources[0] ?? "NewsPeek";
   const favicon = publisherFaviconUrl(primarySource);
   return (
     <article className={`news-card ${featured ? "featured" : ""}`}>
@@ -64,12 +61,13 @@ export function NewsCard({
       <NewsVisual item={item} />
       <div className="news-card-body">
         <div className="meta-row">
+          <span className="category-label">{item.category}</span>
           <span
             className={`story-status story-status-${item.storyStatus ?? "reported"}`}
+            title="Trạng thái phản ánh số lượng và loại nguồn, không phải kết luận kiểm chứng của NewsPeek."
           >
             {newsStatusLabel(item)}
           </span>
-          <span>{newsTimeLabel(item)}</span>
         </div>
         <h3>{item.title}</h3>
         <p>{conciseNewsSummary(item)}</p>
@@ -92,8 +90,11 @@ export function NewsCard({
                 "NP"
               )}
             </span>
-            {articleCount} bài · {sourceCount} nguồn độc lập
-            {officialCount ? ` · ${officialCount} chính thức` : ""}
+            <strong>{primarySource}</strong>
+            <span aria-hidden="true">·</span>
+            <span>{newsTimeLabel(item)}</span>
+            <span aria-hidden="true">·</span>
+            <span>{sourceCount} nguồn</span>
           </span>
           <button
             type="button"

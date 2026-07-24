@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, Clock3, ExternalLink, LoaderCircle, Newspaper, Sparkles } from "lucide-react";
+import { Bookmark, BookOpen, Clock3, ExternalLink, LoaderCircle, Newspaper, Share2, Sparkles } from "lucide-react";
 import { EmptyState } from "@/components/ui/badges";
 import {
   fetchStoryDetail,
@@ -17,11 +17,11 @@ import type { StoryArticleContent, StoryCluster, StoryDetailPayload } from "@/li
 import { storyDisplaySummaryParagraphs } from "@/lib/stories/summary";
 
 const storyStatusLabels = {
-  official: "Đã xác nhận",
+  official: "Có nguồn chính thức",
   reported: "Nhiều nguồn đưa tin",
   rumor: "Chưa xác nhận",
   unverified: "Chưa kiểm chứng",
-  developing: "Đang cập nhật",
+  developing: "Đang phát triển",
   disputed: "Các nguồn chưa thống nhất",
   completed: "Đã hoàn tất",
   correction: "Đã đính chính",
@@ -33,7 +33,7 @@ function storyStatusLabel(
   title: string,
   sourceCount: number,
 ): string {
-  if (status === "reported" && sourceCount < 2) return "Một nguồn đưa tin";
+  if (status === "reported" && sourceCount < 2) return "Một nguồn";
   void category;
   void title;
   return storyStatusLabels[status];
@@ -96,6 +96,8 @@ const articleContentResolved = (article: StoryArticleContent) =>
 export default function RichNewsDetail({
   slug,
   initialData,
+  bookmarks,
+  onBookmark,
 }: {
   slug: string;
   bookmarks: Set<string>;
@@ -113,6 +115,7 @@ export default function RichNewsDetail({
   const [scrollProgress, setScrollProgress] = useState(0);
   const [readerFontSize, setReaderFontSize] = useState<"sm" | "md" | "lg">("md");
   const [articleSelection, setArticleSelection] = useState({ slug, articleId: "" });
+  const [shareStatus, setShareStatus] = useState("");
 
   useEffect(() => {
     const handleScroll = () => {
@@ -308,6 +311,23 @@ export default function RichNewsDetail({
   const updatedAt = story.lastMaterialUpdateAt ?? story.updatedAt;
   const hasMaterialUpdate =
     Date.parse(updatedAt) - Date.parse(publishedAt) >= 5 * 60_000;
+  const primarySourceUrl = sourceLinks[0]?.originalUrl;
+  const bookmarked = bookmarks.has(story.id);
+
+  const shareStory = async () => {
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: story.title, url });
+        setShareStatus("Đã mở bảng chia sẻ.");
+      } else {
+        await navigator.clipboard.writeText(url);
+        setShareStatus("Đã sao chép liên kết.");
+      }
+    } catch {
+      setShareStatus("");
+    }
+  };
 
   const openAISummary = async () => {
     setReadingPreference({ slug, mode: "summary" });
@@ -323,15 +343,17 @@ export default function RichNewsDetail({
   };
 
   return (
-    <main className="article-page simple-news-detail">
+    <div className="article-page simple-news-detail">
       <div
         className="reading-progress-bar"
         style={{ width: `${scrollProgress}%` }}
         aria-hidden="true"
       />
-      <Link className="simple-news-back" href="/news">
-        ← Quay lại tin tức
-      </Link>
+      <nav className="article-breadcrumb" aria-label="Đường dẫn bài viết">
+        <Link href="/">Trang chủ</Link>
+        <span aria-hidden="true">/</span>
+        <Link href="/news">{story.category}</Link>
+      </nav>
       {readerState.status === "stale" && (
         <div className="simple-news-stale" role="status">
           Đang hiển thị bản lưu gần nhất vì nguồn tin tạm thời gián đoạn.
@@ -351,6 +373,9 @@ export default function RichNewsDetail({
             <span>{story.category}</span>
           </div>
           <h1>{story.title}</h1>
+          {summaryParagraphs.length > 0 && (
+            <p className="article-dek">{summaryParagraphs.slice(0, 2).join(" ")}</p>
+          )}
           <div className="simple-news-meta">
             <span>
               <Clock3 size={15} aria-hidden="true" />
@@ -368,6 +393,23 @@ export default function RichNewsDetail({
               {story.articles.length} bài · {publisherCount} nguồn
             </span>
           </div>
+          <div className="article-actions" aria-label="Thao tác bài viết">
+            <button type="button" className={bookmarked ? "active" : ""} onClick={() => onBookmark(story.id)}>
+              <Bookmark size={17} fill={bookmarked ? "currentColor" : "none"} />
+              {bookmarked ? "Đã lưu" : "Lưu bài"}
+            </button>
+            <button type="button" onClick={() => void shareStory()}>
+              <Share2 size={17} />
+              Chia sẻ
+            </button>
+            {primarySourceUrl && (
+              <a href={primarySourceUrl} target="_blank" rel="noopener noreferrer" className="primary-source-action">
+                Đọc bài gốc
+                <ExternalLink size={16} />
+              </a>
+            )}
+          </div>
+          {shareStatus && <span className="article-share-status" role="status">{shareStatus}</span>}
         </header>
         {imageUrl && imageUrl !== failedImageUrl && (
           <figure className="simple-news-image">
@@ -585,7 +627,24 @@ export default function RichNewsDetail({
             <p>Chưa có liên kết nguồn hợp lệ.</p>
           )}
         </section>
+        {readerState.data.relatedStories.length > 0 && (
+          <section className="article-related" aria-labelledby="related-stories-heading">
+            <div className="article-related-heading">
+              <span>Đọc tiếp</span>
+              <h2 id="related-stories-heading">Tin liên quan</h2>
+            </div>
+            <div className="article-related-grid">
+              {readerState.data.relatedStories.slice(0, 4).map((related) => (
+                <Link href={`/news/${related.slug}`} key={related.id}>
+                  <span>{related.category}</span>
+                  <strong>{related.title}</strong>
+                  <small>{related.sourceCount} nguồn</small>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
       </article>
-    </main>
+    </div>
   );
 }

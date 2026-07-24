@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { Be_Vietnam_Pro, Space_Grotesk } from "next/font/google";
+import { Be_Vietnam_Pro, Noto_Serif } from "next/font/google";
 import { isInternalMode } from "@/lib/config";
 import "./globals.css";
+import "./editorial.css";
 
 const vietnam = Be_Vietnam_Pro({ variable: "--font-vietnam", subsets: ["latin", "vietnamese"], weight: ["400", "500", "600", "700", "800"] });
-const display = Space_Grotesk({ variable: "--font-display", subsets: ["latin", "vietnamese"], weight: ["500", "600", "700"] });
+const editorial = Noto_Serif({ variable: "--font-editorial", subsets: ["latin", "vietnamese"], weight: ["500", "600", "700"] });
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
@@ -18,8 +19,8 @@ export const metadata: Metadata = {
   robots: isInternalMode() ? { index: false, follow: false, noarchive: true, nosnippet: true } : undefined,
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#090b0d", colorScheme: "dark light" };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#f6f7f9", colorScheme: "light dark" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="vi" data-theme="dark" suppressHydrationWarning><body className={`${vietnam.variable} ${display.variable}`}>{children}</body></html>;
+  return <html lang="vi" data-theme="light" suppressHydrationWarning><body className={`${vietnam.variable} ${editorial.variable}`}>{children}</body></html>;
 }

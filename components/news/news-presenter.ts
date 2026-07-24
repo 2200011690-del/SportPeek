@@ -71,15 +71,15 @@ export function newsStatusLabel(
   const sourceCount = independentSourceCount(item);
   switch (item.storyStatus) {
     case "official":
-      return "Đã xác nhận";
+      return "Có nguồn chính thức";
     case "reported":
-      return sourceCount >= 2 ? "Nhiều nguồn xác nhận" : "Một nguồn đưa tin";
+      return sourceCount >= 2 ? "Nhiều nguồn đưa tin" : "Một nguồn";
     case "rumor":
       return "Chưa xác nhận";
     case "unverified":
       return "Chưa kiểm chứng";
     case "developing":
-      return "Đang cập nhật";
+      return "Đang phát triển";
     case "disputed":
       return "Các nguồn chưa thống nhất";
     case "completed":
@@ -87,7 +87,7 @@ export function newsStatusLabel(
     case "correction":
       return "Đã đính chính";
     default:
-      return sourceCount >= 2 ? "Nhiều nguồn đưa tin" : item.category;
+      return sourceCount >= 2 ? "Nhiều nguồn đưa tin" : "Một nguồn";
   }
 }
 

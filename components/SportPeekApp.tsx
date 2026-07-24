@@ -39,12 +39,17 @@ import SettingsPage from "@/components/pages/SettingsPage";
 import AuthPage from "@/components/pages/AuthPage";
 import { SourcesPage, LegalPage } from "@/components/pages/TransparencyPages";
 
-import { AppSidebar, Header, MobileNavigation, SystemStatusBanner, AppFooter } from "@/components/layout/Shell";
+import {
+  AppFooter,
+  EditorialDrawer,
+  EditorialHeader,
+  EditorialMobileNavigation,
+} from "@/components/layout/Shell";
 import { SearchCommand } from "@/components/ui/Search";
 import { EmptyState } from "@/components/ui/badges";
 
 export default function SportPeekApp({ route, signupAllowed = false, initialStory = null, initialData = null }: { route: string; signupAllowed?: boolean; initialStory?: StoryDetailPayload | null; initialData?: InitialRuntimeData | null }) {
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState("light");
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [homeSourceFilter, setHomeSourceFilter] = useState<SourceFilter>("all");
@@ -80,7 +85,7 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
     queueMicrotask(() => {
       try {
         const storedTheme = localStorage.getItem(STORAGE_KEYS.theme) ?? localStorage.getItem(STORAGE_KEYS.legacyTheme);
-        if (storedTheme === "dark" || storedTheme === "light" || storedTheme === "sepia") setTheme(storedTheme);
+        if (storedTheme === "dark" || storedTheme === "light" || storedTheme === "system") setTheme(storedTheme);
       } catch { /* ignore invalid device-local data */ }
       setPreferencesLoaded(true);
     });
@@ -97,7 +102,28 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
       });
     }
   }, []);
-  useEffect(() => { document.documentElement.dataset.theme = theme; if (preferencesLoaded) localStorage.setItem(STORAGE_KEYS.theme, theme); }, [theme, preferencesLoaded]);
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      document.documentElement.dataset.theme = theme === "system"
+        ? media.matches ? "dark" : "light"
+        : theme;
+    };
+    applyTheme();
+    if (preferencesLoaded) localStorage.setItem(STORAGE_KEYS.theme, theme);
+    if (theme === "system") media.addEventListener("change", applyTheme);
+    return () => media.removeEventListener("change", applyTheme);
+  }, [theme, preferencesLoaded]);
+  useEffect(() => {
+    const updateTheme = (event: Event) => {
+      const nextTheme = (event as CustomEvent<unknown>).detail;
+      if (nextTheme === "light" || nextTheme === "dark" || nextTheme === "system") {
+        setTheme(nextTheme);
+      }
+    };
+    window.addEventListener("newspeek-theme-change", updateTheme);
+    return () => window.removeEventListener("newspeek-theme-change", updateTheme);
+  }, []);
   useEffect(() => { const key = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSearchOpen(true); } }; window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key); }, []);
   useEffect(() => {
     let active = true;
@@ -185,16 +211,15 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
     <RuntimeDataContext.Provider value={runtimeData}>
       <div className={`app-shell ${route === "/" ? "home-shell" : ""}`}>
         <a href="#main-content" className="skip-link">Bỏ qua nội dung điều hướng</a>
-        <AppSidebar route={route} open={menuOpen} onClose={() => setMenuOpen(false)} sourceFilter={homeSourceFilter} onSourceFilter={setHomeSourceFilter} />
+        <EditorialDrawer route={route} open={menuOpen} onClose={() => setMenuOpen(false)} sourceFilter={homeSourceFilter} onSourceFilter={setHomeSourceFilter} />
         <div className="app-column">
-          <Header onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} theme={theme} onTheme={() => setTheme(theme === "dark" ? "light" : theme === "light" ? "sepia" : "dark")} />
-          <SystemStatusBanner />
+          <EditorialHeader route={route} onMenu={() => setMenuOpen(true)} onSearch={() => setSearchOpen(true)} theme={theme} onTheme={() => setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")} />
           <main id="main-content" className="content-wrap" tabIndex={-1}>
             {page}
           </main>
           <AppFooter compact={route === "/"} />
         </div>
-        <MobileNavigation route={route} />
+        <EditorialMobileNavigation route={route} />
         <SearchCommand open={searchOpen} onClose={() => setSearchOpen(false)} />
       </div>
     </RuntimeDataContext.Provider>
