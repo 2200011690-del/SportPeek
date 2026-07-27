@@ -37,7 +37,14 @@ export type HealthSnapshot = {
       processing: number;
       failed: number;
       deadLetter: number;
+      currentFailures: number;
+      historicalFailures: number;
       longestPendingAgeMinutes: number | null;
+    };
+    sources: {
+      active: number;
+      erroring: number;
+      stale: number;
     };
     aiBacklog: number;
     lastSuccessfulAiProvider: string | null;
@@ -47,7 +54,78 @@ export type HealthSnapshot = {
     failureRate24h: number | null;
     noNewArticlesWarning: boolean;
   };
+  alerts?: OperationalAlert[];
 };
+
+export type OperationalAlert = {
+  code: "NO_NEW_ARTICLES" | "PIPELINE_FAILURE_RATE" | "QUEUE_GROWTH" | "SOURCE_ERRORS" | "SOURCE_STALE" | "AI_BACKLOG" | "HISTORICAL_FAILURES";
+  severity: "critical" | "warning" | "info";
+  scope: "current" | "historical";
+  message: string;
+};
+
+type OperationalMetrics = NonNullable<HealthSnapshot["metrics"]>;
+
+export function buildOperationalAlerts(metrics: OperationalMetrics): OperationalAlert[] {
+  const alerts: OperationalAlert[] = [];
+  if (metrics.noNewArticlesWarning) {
+    alerts.push({
+      code: "NO_NEW_ARTICLES",
+      severity: "critical",
+      scope: "current",
+      message: `Không ghi nhận bài mới trong ${metrics.latestArticleAgeMinutes ?? "?"} phút.`,
+    });
+  }
+  if ((metrics.failureRate1h ?? 0) >= 0.3) {
+    alerts.push({
+      code: "PIPELINE_FAILURE_RATE",
+      severity: "critical",
+      scope: "current",
+      message: `Tỷ lệ tác vụ lỗi trong 1 giờ là ${Math.round((metrics.failureRate1h ?? 0) * 100)}%.`,
+    });
+  }
+  if (metrics.queue.pending >= 250 || (metrics.queue.longestPendingAgeMinutes ?? 0) >= 60) {
+    alerts.push({
+      code: "QUEUE_GROWTH",
+      severity: "warning",
+      scope: "current",
+      message: `Hàng đợi có ${metrics.queue.pending} bài; bài chờ lâu nhất ${metrics.queue.longestPendingAgeMinutes ?? 0} phút.`,
+    });
+  }
+  if (metrics.sources.erroring > 0) {
+    alerts.push({
+      code: "SOURCE_ERRORS",
+      severity: "warning",
+      scope: "current",
+      message: `${metrics.sources.erroring}/${metrics.sources.active} nguồn đang báo lỗi gần nhất.`,
+    });
+  }
+  if (metrics.sources.stale > 0) {
+    alerts.push({
+      code: "SOURCE_STALE",
+      severity: "warning",
+      scope: "current",
+      message: `${metrics.sources.stale} nguồn đã quá hạn cập nhật.`,
+    });
+  }
+  if (metrics.aiBacklog >= 250) {
+    alerts.push({
+      code: "AI_BACKLOG",
+      severity: "warning",
+      scope: "current",
+      message: `AI còn ${metrics.aiBacklog} cụm chờ xử lý.`,
+    });
+  }
+  if (metrics.queue.historicalFailures > 0) {
+    alerts.push({
+      code: "HISTORICAL_FAILURES",
+      severity: "info",
+      scope: "historical",
+      message: `${metrics.queue.historicalFailures} bản ghi lỗi cũ được giữ lại để kiểm toán; chúng không nằm trong hàng đợi hiện tại.`,
+    });
+  }
+  return alerts;
+}
 
 export type AIJobHealthRecord = {
   status: string;
@@ -370,13 +448,15 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
     processingArticleCount,
     failedArticleCount,
     deadLetterArticleCount,
+    currentFailedArticleCount,
+    historicalRetryableArticleCount,
     longestPendingArticleRow,
     jobs1h,
     jobs24h,
   ] = await Promise.all([
     client
       .from("news_sources")
-      .select("id,last_error", { count: "exact" })
+      .select("id,last_error,last_fetched_at,fetch_interval_minutes", { count: "exact" })
       .eq("is_active", true),
     client
       .from("ingestion_jobs")
@@ -445,6 +525,18 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
       .gte("processing_attempts", 5),
     client
       .from("raw_articles")
+      .select("id", { count: "exact", head: true })
+      .eq("processing_status", "failed")
+      .lt("processing_attempts", 5)
+      .gte("fetched_at", new Date(Date.now() - 24 * 3600_000).toISOString()),
+    client
+      .from("raw_articles")
+      .select("id", { count: "exact", head: true })
+      .eq("processing_status", "failed")
+      .lt("processing_attempts", 5)
+      .lt("fetched_at", new Date(Date.now() - 24 * 3600_000).toISOString()),
+    client
+      .from("raw_articles")
       .select("published_at")
       .eq("processing_status", "pending")
       .order("published_at", { ascending: true })
@@ -463,6 +555,12 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
   const sourceErrors = (sources.data ?? []).filter(
     (item) => item.last_error,
   ).length;
+  const staleSources = (sources.data ?? []).filter((item) => {
+    if (!item.last_fetched_at) return true;
+    const fetchedAt = Date.parse(item.last_fetched_at);
+    const allowedAge = Math.max(30, (item.fetch_interval_minutes ?? 15) * 4) * 60_000;
+    return !Number.isFinite(fetchedAt) || Date.now() - fetchedAt > allowedAge;
+  }).length;
   const rssEvaluation = evaluatePipelineHealth({
     jobs: (rssJob.data ?? []) as PipelineJobHealthRecord[],
     successMaxAgeMs: 60 * 60_000,
@@ -608,28 +706,39 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
     services.ai.state,
   ];
   const state = overallHealthState(considered);
+  const metrics: OperationalMetrics = {
+    latestArticleAgeMinutes,
+    latestStoryAgeMinutes,
+    queue: {
+      pending: pendingArticleCount.count ?? 0,
+      processing: processingArticleCount.count ?? 0,
+      failed: failedArticleCount.count ?? 0,
+      deadLetter: deadLetterArticleCount.count ?? 0,
+      currentFailures: currentFailedArticleCount.count ?? 0,
+      historicalFailures:
+        (historicalRetryableArticleCount.count ?? 0)
+        + (deadLetterArticleCount.count ?? 0),
+      longestPendingAgeMinutes,
+    },
+    sources: {
+      active: sources.count ?? 0,
+      erroring: sourceErrors,
+      stale: staleSources,
+    },
+    aiBacklog: backlogCount,
+    lastSuccessfulAiProvider,
+    successRate1h,
+    failureRate1h,
+    successRate24h,
+    failureRate24h,
+    noNewArticlesWarning,
+  };
   const resultSnapshot: HealthSnapshot = {
     state,
     generatedAt,
     services,
-    metrics: {
-      latestArticleAgeMinutes,
-      latestStoryAgeMinutes,
-      queue: {
-        pending: pendingArticleCount.count ?? 0,
-        processing: processingArticleCount.count ?? 0,
-        failed: failedArticleCount.count ?? 0,
-        deadLetter: deadLetterArticleCount.count ?? 0,
-        longestPendingAgeMinutes,
-      },
-      aiBacklog: backlogCount,
-      lastSuccessfulAiProvider,
-      successRate1h,
-      failureRate1h,
-      successRate24h,
-      failureRate24h,
-      noNewArticlesWarning,
-    },
+    metrics,
+    alerts: buildOperationalAlerts(metrics),
   };
 
   if (

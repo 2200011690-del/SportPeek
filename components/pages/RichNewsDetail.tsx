@@ -114,6 +114,7 @@ export default function RichNewsDetail({
   }>({ slug, mode: "full" });
   const [scrollProgress, setScrollProgress] = useState(0);
   const [readerFontSize, setReaderFontSize] = useState<"sm" | "md" | "lg">("md");
+  const [readerWidth, setReaderWidth] = useState<"focused" | "standard" | "wide">("standard");
   const [articleSelection, setArticleSelection] = useState({ slug, articleId: "" });
   const [shareStatus, setShareStatus] = useState("");
 
@@ -126,6 +127,15 @@ export default function RichNewsDetail({
     };
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const storedFont = window.localStorage.getItem("newspeek.reader.font");
+      const storedWidth = window.localStorage.getItem("newspeek.reader.width");
+      if (storedFont === "sm" || storedFont === "md" || storedFont === "lg") setReaderFontSize(storedFont);
+      if (storedWidth === "focused" || storedWidth === "standard" || storedWidth === "wide") setReaderWidth(storedWidth);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
   const [aiResult, setAiResult] = useState<{ slug: string; story: StoryCluster | null }>({
     slug,
@@ -313,6 +323,18 @@ export default function RichNewsDetail({
     Date.parse(updatedAt) - Date.parse(publishedAt) >= 5 * 60_000;
   const primarySourceUrl = sourceLinks[0]?.originalUrl;
   const bookmarked = bookmarks.has(story.id);
+  const readingWordCount = readingMode === "full"
+    ? selectedContent?.wordCount ?? 0
+    : summaryParagraphs.join(" ").split(/\s+/).filter(Boolean).length;
+  const readingMinutes = Math.max(1, Math.ceil(readingWordCount / 220));
+  const updateFontSize = (value: "sm" | "md" | "lg") => {
+    setReaderFontSize(value);
+    window.localStorage.setItem("newspeek.reader.font", value);
+  };
+  const updateReaderWidth = (value: "focused" | "standard" | "wide") => {
+    setReaderWidth(value);
+    window.localStorage.setItem("newspeek.reader.width", value);
+  };
 
   const shareStory = async () => {
     const url = window.location.href;
@@ -392,6 +414,7 @@ export default function RichNewsDetail({
               <Newspaper size={15} aria-hidden="true" />
               {story.articles.length} bài · {publisherCount} nguồn
             </span>
+            <span>{readingMinutes} phút đọc</span>
           </div>
           <div className="article-actions" aria-label="Thao tác bài viết">
             <button type="button" className={bookmarked ? "active" : ""} onClick={() => onBookmark(story.id)}>
@@ -468,7 +491,7 @@ export default function RichNewsDetail({
             <button
               type="button"
               className={readerFontSize === "sm" ? "active" : ""}
-              onClick={() => setReaderFontSize("sm")}
+              onClick={() => updateFontSize("sm")}
               aria-label="Cỡ chữ nhỏ"
             >
               A-
@@ -476,7 +499,7 @@ export default function RichNewsDetail({
             <button
               type="button"
               className={readerFontSize === "md" ? "active" : ""}
-              onClick={() => setReaderFontSize("md")}
+              onClick={() => updateFontSize("md")}
               aria-label="Cỡ chữ vừa"
             >
               A
@@ -484,17 +507,44 @@ export default function RichNewsDetail({
             <button
               type="button"
               className={readerFontSize === "lg" ? "active" : ""}
-              onClick={() => setReaderFontSize("lg")}
+              onClick={() => updateFontSize("lg")}
               aria-label="Cỡ chữ lớn"
             >
               A+
             </button>
           </div>
+          <div className="reader-width-adjuster" role="group" aria-label="Độ rộng cột đọc">
+            <span className="adjuster-label">Khổ đọc:</span>
+            {([
+              ["focused", "Hẹp"],
+              ["standard", "Vừa"],
+              ["wide", "Rộng"],
+            ] as const).map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                className={readerWidth === value ? "active" : ""}
+                onClick={() => updateReaderWidth(value)}
+                aria-pressed={readerWidth === value}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
+        <nav className="article-toc" aria-label="Mục lục bài viết">
+          <strong>Trong bài</strong>
+          <a href={readingMode === "full" ? "#full-article-heading" : "#ai-summary-heading"}>
+            {readingMode === "full" ? "Nội dung đầy đủ" : "Tóm tắt AI"}
+          </a>
+          {story.timeline.length ? <a href="#story-timeline-heading">Dòng thời gian</a> : null}
+          <a href="#source-links-heading">Nguồn đối chiếu</a>
+          {readerState.data.relatedStories.length ? <a href="#related-stories-heading">Đọc tiếp</a> : null}
+        </nav>
 
         {readingMode === "full" ? (
           <section
-            className={`simple-news-summary article-full-reader font-size-${readerFontSize}`}
+            className={`simple-news-summary article-full-reader font-size-${readerFontSize} reader-width-${readerWidth}`}
             aria-labelledby="full-article-heading"
           >
             <div className="simple-news-summary-heading">
@@ -559,7 +609,7 @@ export default function RichNewsDetail({
           </section>
         ) : (
           <section
-            className={`simple-news-summary article-ai-summary font-size-${readerFontSize}`}
+            className={`simple-news-summary article-ai-summary font-size-${readerFontSize} reader-width-${readerWidth}`}
             aria-labelledby="ai-summary-heading"
           >
             <div className="simple-news-summary-heading">
@@ -587,6 +637,23 @@ export default function RichNewsDetail({
                 </button>
               </div>
             )}
+          </section>
+        )}
+        {story.timeline.length > 0 && (
+          <section className="article-timeline" aria-labelledby="story-timeline-heading">
+            <div className="simple-news-summary-heading">
+              <h2 id="story-timeline-heading">Dòng thời gian sự kiện</h2>
+              <span>{story.timeline.length} cập nhật</span>
+            </div>
+            <ol>
+              {story.timeline.slice(-12).map((item) => (
+                <li key={item.id}>
+                  <time dateTime={item.occurredAt}>{formatDateTime(item.occurredAt)}</time>
+                  <p>{item.description}</p>
+                  <small>{item.sourceArticleIds.length} bài nguồn hỗ trợ</small>
+                </li>
+              ))}
+            </ol>
           </section>
         )}
         <section

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Be_Vietnam_Pro, Noto_Serif } from "next/font/google";
+import { headers } from "next/headers";
 import { isInternalMode } from "@/lib/config";
 import "./globals.css";
 import "./editorial.css";
@@ -21,6 +22,18 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#f6f7f9", colorScheme: "light dark" };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="vi" data-theme="light" suppressHydrationWarning><body className={`${vietnam.variable} ${editorial.variable}`}>{children}</body></html>;
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const analyticsToken = process.env.NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN?.trim();
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+  return <html lang="vi" data-theme="light" suppressHydrationWarning><body className={`${vietnam.variable} ${editorial.variable}`}>
+    {children}
+    {analyticsToken ? (
+      <script
+        nonce={nonce}
+        defer
+        src="https://static.cloudflareinsights.com/beacon.min.js"
+        data-cf-beacon={JSON.stringify({ token: analyticsToken })}
+      />
+    ) : null}
+  </body></html>;
 }

@@ -15,6 +15,7 @@ import {
   processStories,
   summarizePersistedStories,
 } from "../lib/stories/processor";
+import { publicPageCacheControl } from "../lib/cache/public-page";
 
 interface Env {
   ASSETS: Fetcher;
@@ -114,6 +115,8 @@ const worker = {
       "max-age=31536000; includeSubDomains; preload",
     );
     newHeaders.set("X-Content-Type-Options", "nosniff");
+    const cacheControl = publicPageCacheControl(request, response);
+    if (cacheControl) newHeaders.set("Cache-Control", cacheControl);
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,

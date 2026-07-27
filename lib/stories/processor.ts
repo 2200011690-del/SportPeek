@@ -417,7 +417,23 @@ function summaryEvidenceText(article: SummaryArticle): string {
   const combined = excerpt && !fullContent.toLowerCase().includes(excerpt.toLowerCase())
     ? `${excerpt} ${fullContent}`
     : fullContent;
-  return combined.split(/\s+/).slice(0, 700).join(" ");
+  return selectLongArticleEvidence(combined);
+}
+
+/** Samples the beginning, middle and ending so long articles do not lose later updates. */
+export function selectLongArticleEvidence(value: string, limit = 700): string {
+  const words = cleanEvidenceText(value).split(/\s+/).filter(Boolean);
+  const safeLimit = Math.min(900, Math.max(120, Math.floor(limit)));
+  if (words.length <= safeLimit) return words.join(" ");
+  const headCount = Math.floor(safeLimit * 0.4);
+  const middleCount = Math.floor(safeLimit * 0.3);
+  const tailCount = safeLimit - headCount - middleCount;
+  const middleStart = Math.max(headCount, Math.floor((words.length - middleCount) / 2));
+  return [
+    ...words.slice(0, headCount),
+    ...words.slice(middleStart, middleStart + middleCount),
+    ...words.slice(-tailCount),
+  ].join(" ");
 }
 
 function toArticle(row: RawRow): ArticleRecord {

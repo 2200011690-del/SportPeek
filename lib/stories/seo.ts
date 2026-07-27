@@ -108,6 +108,19 @@ export function buildNewsArticleJsonLd(story: StoryCluster, baseUrl = getSiteBas
   };
 }
 
+export function buildStoryBreadcrumbJsonLd(story: StoryCluster, baseUrl = getSiteBaseUrl()): Record<string, unknown> {
+  const canonical = absoluteStoryUrl(story, baseUrl);
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Trang chủ", item: baseUrl.toString() },
+      { "@type": "ListItem", position: 2, name: story.category, item: new URL("/news", baseUrl).toString() },
+      { "@type": "ListItem", position: 3, name: story.title, item: canonical },
+    ],
+  };
+}
+
 export function serializeJsonLd(value: Record<string, unknown>): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }

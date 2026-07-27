@@ -6,7 +6,7 @@ import SportPeekApp from "@/components/SportPeekApp";
 import { storyService } from "@/lib/application/story-service";
 import { isInternalMode, isPublicSignupAllowed } from "@/lib/config";
 import { newsCategory } from "@/lib/news/categories";
-import { buildNewsArticleJsonLd, buildStoryMetadata, serializeJsonLd } from "@/lib/stories/seo";
+import { buildNewsArticleJsonLd, buildStoryBreadcrumbJsonLd, buildStoryMetadata, serializeJsonLd } from "@/lib/stories/seo";
 import { loadStoryArticleContents } from "@/lib/articles/content";
 import { getInitialData } from "@/lib/application/ssr-data";
 
@@ -113,8 +113,10 @@ export default async function CatchAllPage({ params }: PageProps) {
     ? { ...storyData, articleContents: articleContents ?? [] }
     : storyData;
   const jsonLd = story ? serializeJsonLd(buildNewsArticleJsonLd(story)) : null;
+  const breadcrumbJsonLd = story ? serializeJsonLd(buildStoryBreadcrumbJsonLd(story)) : null;
   return <>
     {jsonLd ? <script nonce={nonce} id="newspeek-newsarticle" type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} /> : null}
+    {breadcrumbJsonLd ? <script nonce={nonce} id="newspeek-breadcrumbs" type="application/ld+json" dangerouslySetInnerHTML={{ __html: breadcrumbJsonLd }} /> : null}
     <SportPeekApp route={route} signupAllowed={isPublicSignupAllowed()} initialStory={initialStory} initialData={initialData} />
   </>;
 }

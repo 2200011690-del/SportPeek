@@ -17,6 +17,28 @@ function claimSimilarity(left: string, right: string): number {
   return Math.max(duplicateSimilarity(left, right), containment);
 }
 
+function highRiskAnchors(value: string): string[] {
+  const numeric = value.match(/\b\d+(?:[.,:/-]\d+)*%?\b/g) ?? [];
+  const quoted = [...value.matchAll(/[“"'‘]([^”"'’]{3,80})[”"'’]/g)]
+    .map((match) => match[1].replace(/\s+/g, " ").trim());
+  return [...new Set([...numeric, ...quoted])];
+}
+
+function evidenceText(article: ClusterArticleInput): string {
+  return `${article.title} ${article.excerpt}`.replace(/\s+/g, " ").trim();
+}
+
+function highRiskAnchorsAreGrounded(claim: string, articles: ClusterArticleInput[]): boolean {
+  const evidence = articles.map(evidenceText).join(" ").toLocaleLowerCase("vi");
+  return highRiskAnchors(claim)
+    .every((anchor) => evidence.includes(anchor.toLocaleLowerCase("vi")));
+}
+
+function claimIsGrounded(claim: string, articles: ClusterArticleInput[]): boolean {
+  if (!highRiskAnchorsAreGrounded(claim, articles)) return false;
+  return articles.some((article) => claimSimilarity(claim, evidenceText(article)) >= 0.12);
+}
+
 export function dedupeClaims(values: string[], threshold = 0.76): string[] {
   const selected: string[] = [];
   for (const raw of values) {
@@ -62,13 +84,17 @@ export function sanitizeClusterSummary(output: ClusterSummary, articles: Cluster
   }
 
   const summary = dedupeSummaryText(output.summary);
+  if (!highRiskAnchorsAreGrounded(summary, articles)) {
+    throw new Error("AI summary contains claims that are not grounded in source evidence");
+  }
   const evidenceLength = articles.reduce((sum, article) => sum + article.title.length + article.excerpt.length, 0);
   const minimumLength = Math.min(80, Math.max(12, Math.floor(evidenceLength * 0.4)));
   if (summary.length < minimumLength) throw new Error("AI summary is too short after claim deduplication");
   const keyPoints = dedupeClaims(output.keyPoints, 0.74).slice(0, 5);
   if (!keyPoints.length) throw new Error("AI summary has no distinct source-backed key points");
 
-  const citations = (output.citations ?? [])
+  const articlesById = new Map(articles.map((article) => [article.id, article]));
+  const suppliedCitations = (output.citations ?? [])
     .map((citation) => {
       const validIds = [...new Set(citation.sourceArticleIds)].filter((id) => allowed.has(id));
       return {
@@ -76,7 +102,25 @@ export function sanitizeClusterSummary(output: ClusterSummary, articles: Cluster
         sourceArticleIds: validIds,
       };
     })
-    .filter((c) => c.fact && c.sourceArticleIds.length > 0);
+    .filter((citation) => {
+      const citedArticles = citation.sourceArticleIds
+        .map((id) => articlesById.get(id))
+        .filter((article): article is ClusterArticleInput => Boolean(article));
+      return citation.fact
+        && citedArticles.length > 0
+        && claimIsGrounded(citation.fact, citedArticles);
+    });
+  const citations = suppliedCitations.length
+    ? suppliedCitations
+    : keyPoints.flatMap((fact) => {
+        const sourceArticleIds = articles
+          .filter((article) => claimIsGrounded(fact, [article]))
+          .map((article) => article.id);
+        return sourceArticleIds.length ? [{ fact, sourceArticleIds }] : [];
+      });
+  if (!citations.length) {
+    throw new Error("AI summary has no verifiable source-backed citations");
+  }
 
   return {
     title: output.title.replace(/\s+/g, " ").trim(),

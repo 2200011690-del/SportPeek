@@ -6,7 +6,7 @@ const routes = [
   "", "/for-you", "/news", "/category/viet-nam", "/category/the-gioi",
   "/category/kinh-te", "/category/cong-nghe", "/category/chinh-tri",
   "/category/suc-khoe", "/category/khoa-hoc", "/category/van-hoa-giai-tri",
-  "/category/the-thao", "/terms", "/privacy", "/copyright", "/sources",
+  "/category/the-thao", "/terms", "/privacy", "/copyright", "/sources", "/rss",
 ];
 
 export const revalidate = 300;

@@ -179,23 +179,23 @@ test("fetch respects paywall restriction with error return", async () => {
 
 test("citations sanitization keeps valid source IDs", () => {
   const articles = [
-    { id: "art1", title: "A1", excerpt: "E1" },
-    { id: "art2", title: "A2", excerpt: "E2" },
+    { id: "art1", title: "Source one reports a policy decision", excerpt: "The policy decision was announced after a public meeting." },
+    { id: "art2", title: "Source two confirms the policy decision", excerpt: "The same policy decision takes effect this week." },
   ];
   const summaryOutput = {
-    title: "Beautiful Story Summary",
-    summary: "This is a detailed summary with more than eighty characters to make sure it complies with Zod length requirements.",
-    keyPoints: ["Point 1 of high interest", "Point 2 of high interest"],
+    title: "Policy decision announced after public meeting",
+    summary: "The policy decision was announced after a public meeting and takes effect this week, according to the two source reports.",
+    keyPoints: ["The policy decision was announced after a public meeting.", "The decision takes effect this week."],
     sourceIds: ["art1", "art2"],
     citations: [
-      { fact: "Fact 1 from Source 1", sourceArticleIds: ["art1"] },
-      { fact: "Fact 2 from Source 2", sourceArticleIds: ["art2"] },
+      { fact: "The policy decision was announced after a public meeting.", sourceArticleIds: ["art1"] },
+      { fact: "The decision takes effect this week.", sourceArticleIds: ["art2"] },
       { fact: "Invalid Fact", sourceArticleIds: ["unknown-id"] },
     ],
   };
 
   const result = sanitizeClusterSummary(summaryOutput, articles);
   assert.equal(result.citations?.length, 2);
-  assert.equal(result.citations?.[0].fact, "Fact 1 from Source 1");
+  assert.equal(result.citations?.[0].fact, "The policy decision was announced after a public meeting.");
   assert.deepEqual(result.citations?.[0].sourceArticleIds, ["art1"]);
 });

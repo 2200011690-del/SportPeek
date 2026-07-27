@@ -17,6 +17,7 @@ import { bookmarkSchema, followSchema, profileSchema, readingHistorySchema, sear
 import { normalizeSearchText } from "@/lib/ui-logic";
 import { NEWS_CATEGORIES } from "@/lib/news/categories";
 import { loadStoryArticleContents } from "@/lib/articles/content";
+import { buildSearchSuggestions } from "@/lib/search/suggestions";
 
 type Context = { params: Promise<{ path: string[] }> };
 const clientKey = (request: NextRequest) =>
@@ -211,12 +212,24 @@ export async function GET(request: NextRequest, { params }: Context) {
         : [];
       const normQ = normalizeSearchText(q);
 
+      const categories = include("categories") ? NEWS_CATEGORIES.filter((item) => normalizeSearchText(item.label).includes(normQ)) : [];
+      const sources = include("sources") ? catalogSources.filter((item) => normalizeSearchText(item.name).includes(normQ)) : [];
       return NextResponse.json({
         news: newsItems,
-        categories: include("categories") ? NEWS_CATEGORIES.filter((item) => normalizeSearchText(item.label).includes(normQ)) : [],
-        sources: include("sources") ? catalogSources.filter((item) => normalizeSearchText(item.name).includes(normQ)) : [],
+        categories,
+        sources,
+        suggestions: buildSearchSuggestions({
+          query: q,
+          newsTitles: newsItems.map((item) => item.title),
+          categories,
+          sources,
+        }),
+        query: { original: q, normalized: normQ },
         demo: false, status: archiveResult.status, meta: archiveResult.meta, error: archiveResult.error ?? null,
-      }, { status: repositoryHttpStatus(archiveResult.status) });
+      }, {
+        status: repositoryHttpStatus(archiveResult.status),
+        headers: { "cache-control": "public, s-maxage=60, stale-while-revalidate=180" },
+      });
     } catch (error) {
       const safe = toSafeError(error); return NextResponse.json({ status: "error", error: safe }, { status: safe.status });
     }

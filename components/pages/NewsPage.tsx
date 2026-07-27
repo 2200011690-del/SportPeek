@@ -36,6 +36,11 @@ import { matchesNewsCategory, newsCategory } from "@/lib/news/categories";
 import type { NewsItem } from "@/lib/types";
 
 type NewsFeedView = "featured" | "latest";
+type ArchiveResponse = {
+  data: NewsItem[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+};
+const archiveResponseCache = new Map<string, { storedAt: number; value: ArchiveResponse }>();
 
 export function NewsCard({
   item,
@@ -50,6 +55,11 @@ export function NewsCard({
 }) {
   const sourceCount = independentSourceCount(item);
   const primarySource = item.sources[0] ?? "NewsPeek";
+  const primarySourceDetail = item.sourceDetails?.find((source) => source.name === primarySource)
+    ?? item.sourceDetails?.[0];
+  const primarySourceLabel = primarySourceDetail?.isOfficialSource
+    ? "Chính thức"
+    : "Nhà xuất bản";
   const favicon = publisherFaviconUrl(primarySource);
   return (
     <article className={`news-card ${featured ? "featured" : ""}`}>
@@ -91,6 +101,9 @@ export function NewsCard({
               )}
             </span>
             <strong>{primarySource}</strong>
+            <em className={`source-kind ${primarySourceDetail?.isOfficialSource ? "official" : ""}`}>
+              {primarySourceLabel}
+            </em>
             <span aria-hidden="true">·</span>
             <span>{newsTimeLabel(item)}</span>
             <span aria-hidden="true">·</span>
@@ -210,25 +223,27 @@ export function NewsPage({
       if (archiveCategory) params.set("category", archiveCategory);
       if (source) params.set("source", source);
       if (minHotness > 0) params.set("minHotness", String(minHotness));
+      const cacheKey = params.toString();
+      const cached = archiveResponseCache.get(cacheKey);
+      if (cached && Date.now() - cached.storedAt < 60_000) {
+        setArchiveItems(cached.value.data);
+        setArchivePagination(cached.value.pagination);
+        setArchiveError(false);
+        setArchiveLoading(false);
+        return;
+      }
       setArchiveLoading(true);
-      void fetch(`/api/news/archive?${params.toString()}`, {
-        cache: "no-store",
+      void fetch(`/api/news/archive?${cacheKey}`, {
+        cache: "default",
         signal: AbortSignal.timeout(12_000),
       })
         .then(async (response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.json() as Promise<{
-            data: NewsItem[];
-            pagination: {
-              page: number;
-              pageSize: number;
-              total: number;
-              totalPages: number;
-            };
-          }>;
+          return response.json() as Promise<ArchiveResponse>;
         })
         .then((response) => {
           if (active) {
+            archiveResponseCache.set(cacheKey, { storedAt: Date.now(), value: response });
             setArchiveItems(response.data);
             setArchivePagination(response.pagination);
             setArchiveError(false);

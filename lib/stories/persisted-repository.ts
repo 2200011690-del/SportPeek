@@ -45,6 +45,10 @@ type PersistedStoryRow = {
   ai_generated?: boolean;
   ai_provider?: string | null;
 };
+type RankedPersistedStoryRow = PersistedStoryRow & {
+  search_rank?: number | null;
+  total_count?: number | string | null;
+};
 
 const FRESH_STORY_COLUMNS = "id,slug,payload,first_published_at,last_material_update_at,last_source_seen_at,last_updated_at,lifecycle_status,summary_version,summary_generated_at,ai_generated,ai_provider";
 const LEGACY_STORY_COLUMNS = "id,slug,payload,first_published_at,last_updated_at,ai_generated,ai_provider";
@@ -241,6 +245,14 @@ export function buildStorySearchTerms(query: string): string[] {
   ].slice(0, 8);
 }
 
+function rankedSearchUnavailable(error: { code?: string; message?: string; details?: string } | null | undefined): boolean {
+  if (!error) return false;
+  const text = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+  return error.code === "PGRST202"
+    || error.code === "42883"
+    || text.includes("search_story_clusters");
+}
+
 export async function loadPersistedStoryArchive(page: number, pageSize: number, filters: StoryArchiveFilters = {}): Promise<StoryArchivePage> {
   const safePage = Math.max(1, Math.floor(page));
   const safePageSize = Math.min(48, Math.max(1, Math.floor(pageSize)));
@@ -251,6 +263,41 @@ export async function loadPersistedStoryArchive(page: number, pageSize: number, 
   const category = filters.category?.trim().slice(0, 160);
   const source = filters.source?.trim().slice(0, 160);
   const minHotness = Math.min(100, Math.max(0, Math.floor(filters.minHotness ?? 0)));
+
+  if (queryTerm) {
+    const ranked = await client.rpc("search_story_clusters", {
+      p_query: queryTerm,
+      p_limit: safePageSize,
+      p_offset: from,
+      p_category: category ?? null,
+      p_source: source ?? null,
+      p_date_from: filters.dateFrom ?? null,
+      p_date_to: filters.dateTo ?? null,
+      p_language: filters.language ?? null,
+      p_geography: filters.geography ?? null,
+      p_min_hotness: minHotness,
+      p_sort: filters.sort ?? null,
+    });
+    if (!ranked.error) {
+      const rows = (ranked.data ?? []) as unknown as RankedPersistedStoryRow[];
+      const stories = rows.flatMap((row): StoryCluster[] => {
+        const story = storyFromRow(row);
+        return story ? [story] : [];
+      });
+      const rawTotal = rows[0]?.total_count ?? 0;
+      const total = typeof rawTotal === "number" ? rawTotal : Number.parseInt(String(rawTotal), 10) || 0;
+      return {
+        stories,
+        page: safePage,
+        pageSize: safePageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+      };
+    }
+    if (!rankedSearchUnavailable(ranked.error)) {
+      throw new ProviderError("Không thể tìm trong kho tin.", "supabase");
+    }
+  }
   
   let freshQuery = client.from("story_clusters").select(FRESH_STORY_COLUMNS, { count: "exact" });
   for (const term of normalizedQueryTerms) {

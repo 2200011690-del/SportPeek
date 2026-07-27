@@ -9,7 +9,7 @@ export function createContentSecurityPolicy(
     "style-src-attr 'none'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    "connect-src 'self' https://*.supabase.co https://api.telegram.org",
+    "connect-src 'self' https://*.supabase.co https://api.telegram.org https://cloudflareinsights.com",
     "worker-src 'self'",
     "manifest-src 'self'",
     "object-src 'none'",

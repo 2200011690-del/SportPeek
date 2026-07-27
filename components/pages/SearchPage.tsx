@@ -9,11 +9,13 @@ import { NewsListItem } from "@/components/pages/NewsPage";
 import { NEWS_CATEGORIES } from "@/lib/news/categories";
 import { filterNewsItems, normalizeSearchText } from "@/lib/ui-logic";
 import type { NewsItem, NewsSourceCatalogItem } from "@/lib/types";
+import type { SearchSuggestion } from "@/lib/search/suggestions";
 
 type SearchResults = {
   news: NewsItem[];
   categories: Array<(typeof NEWS_CATEGORIES)[number]>;
   sources: NewsSourceCatalogItem[];
+  suggestions: SearchSuggestion[];
 };
 
 type SearchState =
@@ -71,6 +73,7 @@ export default function SearchPage() {
             news: Array.isArray(payload.news) ? payload.news : [],
             categories: Array.isArray(payload.categories) ? payload.categories : [],
             sources: Array.isArray(payload.sources) ? payload.sources : [],
+            suggestions: Array.isArray(payload.suggestions) ? payload.suggestions : [],
           },
         });
       } catch {
@@ -103,6 +106,24 @@ export default function SearchPage() {
         />
         <kbd><Command size={12} />K</kbd>
       </label>
+      {remoteResults?.suggestions.length ? (
+        <div className="search-suggestions" aria-label="Gợi ý tìm kiếm">
+          <span>Gợi ý:</span>
+          {remoteResults.suggestions.map((suggestion) => suggestion.href ? (
+            <Link href={suggestion.href} key={`${suggestion.type}-${suggestion.label}`}>
+              {suggestion.label}
+            </Link>
+          ) : (
+            <button
+              type="button"
+              key={`${suggestion.type}-${suggestion.label}`}
+              onClick={() => setQuery(suggestion.label)}
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="sr-only" role="status" aria-live="polite">
         {searching
           ? "Đang tìm trong toàn bộ kho tin."
