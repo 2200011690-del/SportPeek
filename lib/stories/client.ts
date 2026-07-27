@@ -18,6 +18,7 @@ const configuredTimeoutMs = Number(process.env.NEXT_PUBLIC_STORY_DETAIL_TIMEOUT_
 const configuredRetries = Number(process.env.NEXT_PUBLIC_STORY_DETAIL_RETRY_COUNT ?? 1);
 export const storyDetailTimeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs >= 1_000 ? configuredTimeoutMs : 12_000;
 export const storyDetailRetryCount = Number.isFinite(configuredRetries) ? Math.min(1, Math.max(0, configuredRetries)) : 1;
+const storyAiSummaryTimeoutMs = 30_000;
 
 export function mapStoryEnvelopeToState(envelope: StoryDetailEnvelope): StoryReaderState {
   if ((envelope.status === "success" || envelope.status === "stale") && envelope.data) {
@@ -50,14 +51,23 @@ type FetchStoryOptions = {
   retries?: number;
 };
 
-export async function requestStoryAISummary(slug: string, options: Pick<FetchStoryOptions, "fetcher"> = {}): Promise<StoryCluster | null> {
+export async function requestStoryAISummary(
+  slug: string,
+  options: Pick<FetchStoryOptions, "fetcher" | "timeoutMs"> = {},
+): Promise<StoryCluster | null> {
   const fetcher = options.fetcher ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? storyAiSummaryTimeoutMs,
+  );
   try {
     const response = await fetcher(`/api/stories/${encodeURIComponent(slug)}/summarize`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
       cache: "no-store",
+      signal: controller.signal,
     });
     const body: unknown = await response.json().catch(() => null);
     if (!response.ok || !body || typeof body !== "object") return null;
@@ -67,6 +77,8 @@ export async function requestStoryAISummary(slug: string, options: Pick<FetchSto
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

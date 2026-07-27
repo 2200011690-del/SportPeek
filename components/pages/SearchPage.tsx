@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { Command, Search, Tag } from "lucide-react";
 import { useRuntimeData } from "@/components/runtime/RuntimeDataContext";
@@ -8,25 +8,83 @@ import { SectionHeading, DataLoadingState, EmptyState } from "@/components/ui/ba
 import { NewsListItem } from "@/components/pages/NewsPage";
 import { NEWS_CATEGORIES } from "@/lib/news/categories";
 import { filterNewsItems, normalizeSearchText } from "@/lib/ui-logic";
+import type { NewsItem, NewsSourceCatalogItem } from "@/lib/types";
+
+type SearchResults = {
+  news: NewsItem[];
+  categories: Array<(typeof NEWS_CATEGORIES)[number]>;
+  sources: NewsSourceCatalogItem[];
+};
+
+type SearchState =
+  | { query: string; status: "loading" | "error"; results: null }
+  | { query: string; status: "success"; results: SearchResults };
 
 export default function SearchPage() {
   const { newsItems, loading, sourceCatalog } = useRuntimeData();
   const [query, setQuery] = useState("");
   const normalized = normalizeSearchText(query);
-  const newsResults = normalized.length >= 2 ? filterNewsItems(newsItems, { query }) : [];
-  const categoryResults =
+  const queryKey = query.trim();
+  const [searchState, setSearchState] = useState<SearchState | null>(null);
+  const currentSearch = searchState?.query === queryKey ? searchState : null;
+  const remoteResults =
+    currentSearch?.status === "success" ? currentSearch.results : null;
+  const searching = currentSearch?.status === "loading";
+  const searchError = currentSearch?.status === "error";
+  const localNewsResults =
+    normalized.length >= 2 ? filterNewsItems(newsItems, { query }) : [];
+  const localCategoryResults =
     normalized.length >= 2
       ? NEWS_CATEGORIES.filter((category) =>
           normalizeSearchText(category.label).includes(normalized),
         )
       : [];
-  const sourceResults =
+  const localSourceResults =
     normalized.length >= 2
       ? sourceCatalog.filter((source) =>
           normalizeSearchText(source.name).includes(normalized),
         )
       : [];
+  const newsResults = remoteResults?.news ?? localNewsResults;
+  const categoryResults = remoteResults?.categories ?? localCategoryResults;
+  const sourceResults = remoteResults?.sources ?? localSourceResults;
   const total = newsResults.length + categoryResults.length + sourceResults.length;
+
+  useEffect(() => {
+    if (normalized.length < 2) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearchState({ query: queryKey, status: "loading", results: null });
+      try {
+        const response = await fetch(
+          `/api/search?${new URLSearchParams({ q: queryKey, type: "all" })}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) throw new Error("Search request failed");
+        const payload = await response.json() as Partial<SearchResults>;
+        if (controller.signal.aborted) return;
+        setSearchState({
+          query: queryKey,
+          status: "success",
+          results: {
+            news: Array.isArray(payload.news) ? payload.news : [],
+            categories: Array.isArray(payload.categories) ? payload.categories : [],
+            sources: Array.isArray(payload.sources) ? payload.sources : [],
+          },
+        });
+      } catch {
+        if (!controller.signal.aborted) {
+          setSearchState({ query: queryKey, status: "error", results: null });
+        }
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [normalized, queryKey]);
 
   return (
     <div className="page-content">
@@ -45,6 +103,18 @@ export default function SearchPage() {
         />
         <kbd><Command size={12} />K</kbd>
       </label>
+      <div className="sr-only" role="status" aria-live="polite">
+        {searching
+          ? "Đang tìm trong toàn bộ kho tin."
+          : normalized.length >= 2
+            ? `Đã tìm thấy ${total} kết quả.`
+            : ""}
+      </div>
+      {searchError ? (
+        <p className="search-fallback-notice">
+          Không thể tìm toàn bộ kho tin lúc này; đang hiển thị kết quả gần nhất đã tải.
+        </p>
+      ) : null}
       {loading ? (
         <DataLoadingState />
       ) : normalized.length < 2 ? (

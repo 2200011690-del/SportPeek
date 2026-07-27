@@ -111,3 +111,24 @@ test("reader accepts an on-demand AI summary returned by the story endpoint", as
   assert.equal(updated?.id, story.id);
   assert.equal(updated?.aiGenerated, true);
 });
+
+test("on-demand AI summary returns control when the provider request stalls", async () => {
+  let aborted = false;
+  const result = await requestStoryAISummary("story-alpha-001", {
+    timeoutMs: 10,
+    fetcher: async (_url, init) =>
+      await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            reject(new DOMException("Aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      }),
+  });
+
+  assert.equal(result, null);
+  assert.equal(aborted, true);
+});

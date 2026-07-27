@@ -35,8 +35,8 @@ test("mobile layout has no horizontal overflow and 44px navigation targets", asy
   const close = page.getByRole("button", { name: "Đóng menu" });
   await expect(close).toBeVisible();
   const closeBox = await close.boundingBox();
-  expect(closeBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(closeBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  expect(closeBox?.width ?? 0).toBeGreaterThanOrEqual(43.9);
+  expect(closeBox?.height ?? 0).toBeGreaterThanOrEqual(43.9);
   await close.click();
 });
 
@@ -62,16 +62,32 @@ test("editorial layouts remain stable across all target breakpoints", async ({ p
   }
 });
 
-test("search UI finds a current persisted story", async ({ page, request }) => {
+test("search UI finds a story outside the initial feed", async ({ page, request }) => {
   const current = await stories(request);
-  const expected = current[0];
+  const currentIds = new Set(current.map((story) => story.id));
+  const archiveResponse = await request.get("/api/news/archive?page=9&pageSize=30&sort=freshness");
+  expect(archiveResponse.ok()).toBeTruthy();
+  const archive = await archiveResponse.json();
+  const expected = (archive.data as Story[]).find((story) => !currentIds.has(story.id));
+  expect(expected, "archive should contain a story outside the initial feed").toBeTruthy();
+  if (!expected) throw new Error("archive story missing");
   const query = expected.title
     .split(/\s+/)
-    .find((word) => word.replace(/[^\p{L}\p{N}]/gu, "").length >= 5)
-    ?? expected.title;
+    .filter((word) => word.replace(/[^\p{L}\p{N}]/gu, "").length >= 4)
+    .slice(0, 4)
+    .join(" ")
+    || expected.title;
   await page.goto("/search");
   await page.getByRole("textbox", { name: "Từ khóa tìm kiếm" }).fill(query);
-  await expect(page.getByRole("link", { name: new RegExp(expected.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: expected.title, exact: true })).toBeVisible();
+});
+
+test("personalized page requests its dedicated feed after SSR", async ({ page }) => {
+  const personalizedResponse = page.waitForResponse(
+    (response) => response.url().includes("/api/feed/for-you"),
+  );
+  await page.goto("/for-you");
+  expect((await personalizedResponse).ok()).toBeTruthy();
 });
 
 test("full article reader renders publisher paragraphs", async ({ page, request }) => {

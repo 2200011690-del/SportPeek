@@ -134,8 +134,13 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
       try {
         const loadForYou = route === "/for-you";
         const loadSources = route === "/sources";
+        const loadNews = route === "/"
+          || route === "/news"
+          || route === "/bookmarks"
+          || route === "/for-you"
+          || route.startsWith("/category/");
         const requests = await Promise.allSettled([
-          fetchRuntime<NewsItem[]>("/api/news"),
+          loadNews ? fetchRuntime<NewsItem[]>("/api/news") : Promise.resolve(null),
           fetchRuntime<HealthSnapshot>("/api/health"),
           loadForYou ? fetchRuntime<NewsItem[]>("/api/feed/for-you") : Promise.resolve(null),
           loadSources ? fetchRuntime<NewsSourceCatalogItem[]>("/api/sources") : Promise.resolve(null),
@@ -170,7 +175,7 @@ export default function SportPeekApp({ route, signupAllowed = false, initialStor
         });
       } finally { loading = false; }
     };
-    if (!initialData) {
+    if (!initialData || route === "/for-you" || route === "/sources") {
       void load();
     }
     const refreshTimer = window.setInterval(() => {

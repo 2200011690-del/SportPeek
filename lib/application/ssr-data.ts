@@ -34,12 +34,20 @@ export async function getInitialData(route: string, categoryId?: string) {
     const category = route.startsWith("/category") && categoryId
       ? newsCategory(categoryId)?.label
       : null;
+    const latestFeedRoutes = new Set([
+      "/",
+      "/news",
+      "/bookmarks",
+      "/for-you",
+    ]);
     const dataPromise = category
       ? cachedCategoryArchive(category)
-      : cachedLatestStories();
+      : latestFeedRoutes.has(route)
+        ? cachedLatestStories()
+        : Promise.resolve(null);
     const [health, sources, result] = await Promise.all([
       cachedHealthSnapshot(),
-      cachedSourceCatalog(),
+      route === "/sources" ? cachedSourceCatalog() : Promise.resolve([]),
       dataPromise,
     ]);
 
@@ -51,11 +59,9 @@ export async function getInitialData(route: string, categoryId?: string) {
     if (category) {
       const archiveResult = result as ArchiveResult;
       newsData = (archiveResult.data?.stories ?? []).map(storyToNewsItem);
-    } else {
+    } else if (result) {
       const latestResult = result as LatestResult;
-      const fullFeedRoutes = new Set(["/", "/news", "/search", "/bookmarks", "/for-you"]);
-      const limit = fullFeedRoutes.has(route) ? 40 : 12;
-      newsData = (latestResult.data ?? []).slice(0, limit).map(storyToNewsItem);
+      newsData = (latestResult.data ?? []).slice(0, 40).map(storyToNewsItem);
       aiStatus = latestResult.diagnostics?.aiStatus ?? { provider: "off" as const, state: "off" as const, translatedCount: 0 };
       aiTranslation = latestResult.diagnostics?.aiTranslation ?? false;
       sourcesList = latestResult.diagnostics?.sources ?? [];

@@ -13,6 +13,7 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
+  assets: { directory: "dist/client", binding: "ASSETS" },
   ai: { binding: "AI" },
   d1_databases: d1
     ? [
