@@ -270,6 +270,34 @@ function admin() {
     );
   return client;
 }
+
+export function buildStorySearchText(
+  story: Pick<
+    StoryCluster,
+    | "title"
+    | "summary"
+    | "category"
+    | "sourceNames"
+    | "articles"
+    | "geography"
+    | "region"
+  >,
+): string {
+  return normalizeSearchText(
+    [
+      story.title,
+      story.summary,
+      story.category,
+      story.geography,
+      story.region,
+      ...story.sourceNames,
+      ...story.articles.map((article) => article.title),
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+}
+
 function one<T>(value: T | T[] | null): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
@@ -885,7 +913,7 @@ async function persistDrafts(
         geography: story.geography ?? null,
         region: story.region ?? "Việt Nam",
         source_names: story.sourceNames,
-        search_text: normalizeSearchText(`${story.title} ${story.summary} ${story.category} ${story.sourceNames.join(" ")}`),
+        search_text: buildStorySearchText(story),
         payload: story,
       }),
     );
@@ -1570,6 +1598,7 @@ export async function summarizePersistedStoryById(
         ai_generated: true,
         ai_provider: selectedProvider,
         review_status: "auto",
+        search_text: buildStorySearchText(next),
         payload: next,
       })
       .eq("id", row.id);
@@ -1832,6 +1861,7 @@ export async function summarizePersistedStories(
             ai_generated: true,
             ai_provider: selectedProvider,
             review_status: "auto",
+            search_text: buildStorySearchText(next),
             payload: next,
           })
           .eq("id", rowIdByStoryId.get(story.id) ?? story.id);
