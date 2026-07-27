@@ -14,6 +14,10 @@ test("runtime search queries the current RSS feed", { skip: !base && "Set E2E_BA
   assert.equal(searchResponse.status, 200);
   const result = await searchResponse.json();
   assert.ok(result.news.some((item) => item.id === expected.id), `search should find ${expected.id}`);
+  const boundedResponse = await fetch(`${base}/api/search?${new URLSearchParams({ q: query, type: "news", limit: "3" })}`);
+  assert.equal(boundedResponse.status, 200);
+  const bounded = await boundedResponse.json();
+  assert.ok(bounded.news.length > 0 && bounded.news.length <= 3);
 });
 
 test("news API reports the real AI state", { skip: !base && "Set E2E_BASE_URL to a running NewsPeek instance" }, async () => {

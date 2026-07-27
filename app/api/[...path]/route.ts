@@ -201,14 +201,15 @@ export async function GET(request: NextRequest, { params }: Context) {
       const language = request.nextUrl.searchParams.get("language")?.trim() || undefined;
       const geography = request.nextUrl.searchParams.get("geography")?.trim() || undefined;
       const sort = (request.nextUrl.searchParams.get("sort")?.trim() as "freshness" | "hotness" | "reliability") || undefined;
+      const limit = Math.min(48, boundedNewsLimit(request.nextUrl.searchParams.get("limit"), 30));
 
       const [archiveResult, catalogSources] = await Promise.all([
-        include("news") && q ? storyService.getArchive(1, 30, { query: q, category: categoryFilter, source: sourceFilter, dateFrom, dateTo, language, geography, sort }) : storyService.getFeed(),
+        include("news") && q ? storyService.getArchive(1, limit, { query: q, category: categoryFilter, source: sourceFilter, dateFrom, dateTo, language, geography, sort }) : storyService.getFeed(),
         include("sources") ? readNewsSourceCatalog() : Promise.resolve([]),
       ]);
 
       const newsItems = include("news")
-        ? (archiveResult.data && "stories" in archiveResult.data ? archiveResult.data.stories : (archiveResult.data as StoryCluster[] ?? [])).map(storyToNewsItem)
+        ? (archiveResult.data && "stories" in archiveResult.data ? archiveResult.data.stories : (archiveResult.data as StoryCluster[] ?? [])).slice(0, limit).map(storyToNewsItem)
         : [];
       const normQ = normalizeSearchText(q);
 
