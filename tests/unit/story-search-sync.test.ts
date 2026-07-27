@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildStorySearchText } from "../../lib/stories/processor";
+import { buildStorySearchTerms } from "../../lib/stories/persisted-repository";
 
 const migration = readFileSync(
   new URL(
@@ -45,4 +46,18 @@ test("database trigger rebuilds search text whenever AI updates the payload", ()
   assert.match(migration, /payload->>'title'/i);
   assert.match(migration, /payload->'articles'/i);
   assert.match(migration, /update public\.story_clusters/i);
+});
+
+test("natural multi-word searches match words separated by other title text", () => {
+  assert.deepEqual(buildStorySearchTerms("killed injured after mows"), [
+    "killed",
+    "injured",
+    "after",
+    "mows",
+  ]);
+  assert.ok(
+    buildStorySearchTerms("killed injured after mows").every((term) =>
+      "one killed 16 injured after van mows into crowd".includes(term),
+    ),
+  );
 });

@@ -231,19 +231,31 @@ async function findPersistedStory(column: "slug" | "id", value: string): Promise
 export const loadPersistedStoryBySlug = (slug: string) => findPersistedStory("slug", slug);
 export const loadPersistedStoryById = (id: string) => findPersistedStory("id", id);
 
+export function buildStorySearchTerms(query: string): string[] {
+  return [
+    ...new Set(
+      normalizeSearchText(query)
+        .split(" ")
+        .filter(Boolean),
+    ),
+  ].slice(0, 8);
+}
+
 export async function loadPersistedStoryArchive(page: number, pageSize: number, filters: StoryArchiveFilters = {}): Promise<StoryArchivePage> {
   const safePage = Math.max(1, Math.floor(page));
   const safePageSize = Math.min(48, Math.max(1, Math.floor(pageSize)));
   const from = (safePage - 1) * safePageSize;
   const client = persistedClient();
   const queryTerm = filters.query?.trim().slice(0, 120);
-  const normalizedQueryTerm = queryTerm ? normalizeSearchText(queryTerm) : "";
+  const normalizedQueryTerms = queryTerm ? buildStorySearchTerms(queryTerm) : [];
   const category = filters.category?.trim().slice(0, 160);
   const source = filters.source?.trim().slice(0, 160);
   const minHotness = Math.min(100, Math.max(0, Math.floor(filters.minHotness ?? 0)));
   
   let freshQuery = client.from("story_clusters").select(FRESH_STORY_COLUMNS, { count: "exact" });
-  if (normalizedQueryTerm) freshQuery = freshQuery.ilike("search_text", `%${normalizedQueryTerm}%`);
+  for (const term of normalizedQueryTerms) {
+    freshQuery = freshQuery.ilike("search_text", `%${term}%`);
+  }
   if (category) freshQuery = freshQuery.eq("category", category);
   if (source) {
     const normSource = normalizeSearchText(source);
@@ -320,15 +332,18 @@ export function createPersistedStoryRepository(loader: PersistedStoryLoader = lo
   const findBySlug = access.findBySlug ?? (async (slug: string) => (await loader()).stories.find((story) => story.slug === slug || story.legacySlugs.includes(slug)) ?? null);
   const findById = access.findById ?? (async (id: string) => (await loader()).stories.find((story) => story.id === id) ?? null);
   const readArchive = access.readArchive ?? (async (page: number, pageSize: number, filters: StoryArchiveFilters = {}) => {
-    const query = filters.query?.trim().toLocaleLowerCase("vi") ?? "";
+    const queryTerms = buildStorySearchTerms(filters.query ?? "");
     const category = filters.category?.trim().toLocaleLowerCase("vi") ?? "";
     const source = filters.source?.trim().toLocaleLowerCase("vi") ?? "";
-    const stories = sortStoriesByMaterialFreshness((await loader()).stories.map(restoreOriginalStoryLanguage)).filter((story) =>
-      (!query || `${story.title} ${story.summary} ${story.summaryLong}`.toLocaleLowerCase("vi").includes(query))
-      && (!category || story.category.toLocaleLowerCase("vi") === category)
-      && (!source || story.sourceNames.some((name) => name.toLocaleLowerCase("vi") === source))
-      && (story.hotnessScore ?? 0) >= (filters.minHotness ?? 0),
-    );
+    const stories = sortStoriesByMaterialFreshness((await loader()).stories.map(restoreOriginalStoryLanguage)).filter((story) => {
+      const searchText = normalizeSearchText(
+        `${story.title} ${story.summary} ${story.summaryLong}`,
+      );
+      return queryTerms.every((term) => searchText.includes(term))
+        && (!category || story.category.toLocaleLowerCase("vi") === category)
+        && (!source || story.sourceNames.some((name) => name.toLocaleLowerCase("vi") === source))
+        && (story.hotnessScore ?? 0) >= (filters.minHotness ?? 0);
+    });
     const safePage = Math.max(1, Math.floor(page)); const safePageSize = Math.max(1, Math.floor(pageSize)); const from = (safePage - 1) * safePageSize;
     return { stories: stories.slice(from, from + safePageSize), page: safePage, pageSize: safePageSize, total: stories.length, totalPages: Math.max(1, Math.ceil(stories.length / safePageSize)) };
   });
