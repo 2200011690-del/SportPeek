@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { isInternalMode } from "@/lib/config";
 import "./globals.css";
 import "./editorial.css";
+import "./newspeek-2026.css";
 
 const vietnam = Be_Vietnam_Pro({ variable: "--font-vietnam", subsets: ["latin", "vietnamese"], weight: ["400", "500", "600", "700", "800"] });
 const editorial = Noto_Serif({ variable: "--font-editorial", subsets: ["latin", "vietnamese"], weight: ["500", "600", "700"] });
@@ -15,12 +16,12 @@ export const metadata: Metadata = {
   applicationName: "NewsPeek",
   manifest: "/manifest.json",
   alternates: { canonical: "/" },
-  openGraph: { type: "website", locale: "vi_VN", siteName: "NewsPeek", title: "NewsPeek — Tin quan trọng, hiểu nhanh", description: "Tin Việt Nam và quốc tế được tổng hợp thông minh, minh bạch nguồn.", images: [{ url: "/og.png", width: 1740, height: 909, alt: "NewsPeek — Tin quan trọng, hiểu nhanh" }] },
-  twitter: { card: "summary_large_image", title: "NewsPeek", description: "Tin Việt Nam và quốc tế được tổng hợp thông minh.", images: ["/og.png"] },
+  openGraph: { type: "website", locale: "vi_VN", siteName: "NewsPeek", title: "NewsPeek — Tin quan trọng, hiểu nhanh", description: "Tin Việt Nam và quốc tế được tổng hợp thông minh, minh bạch nguồn.", images: [{ url: "/og-2026.png", width: 1731, height: 909, alt: "NewsPeek — Tin quan trọng. Hiểu nhanh." }] },
+  twitter: { card: "summary_large_image", title: "NewsPeek", description: "Tin Việt Nam và quốc tế được tổng hợp thông minh.", images: ["/og-2026.png"] },
   robots: isInternalMode() ? { index: false, follow: false, noarchive: true, nosnippet: true } : undefined,
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#f6f7f9", colorScheme: "light dark" };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#f3f0e8", colorScheme: "light dark" };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const analyticsToken = process.env.NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN?.trim();
