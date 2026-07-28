@@ -9,7 +9,10 @@ test("runtime search queries the current RSS feed", { skip: !base && "Set E2E_BA
   const feed = await feedResponse.json();
   assert.ok(Array.isArray(feed.data) && feed.data.length > 0);
   const expected = feed.data[0];
-  const query = expected.title.split(/\s+/).find((word) => word.replace(/[^\p{L}\p{N}]/gu, "").length >= 5) ?? expected.title;
+  // A single common word (for example "những") can legitimately match more
+  // stories than the endpoint's bounded result window. The complete current
+  // title is deterministic and still exercises the production search index.
+  const query = expected.title;
   const searchResponse = await fetch(`${base}/api/search?${new URLSearchParams({ q: query, type: "news" })}`);
   assert.equal(searchResponse.status, 200);
   const result = await searchResponse.json();
