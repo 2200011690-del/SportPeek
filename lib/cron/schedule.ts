@@ -41,17 +41,17 @@ export function runScheduledPipelineTask(
 /**
  * Keep batches below the Worker CPU ceiling. Story creation is deliberately
  * source-backed only; remote summaries are handled by the separate AI phase.
- * Three of every four story runs prioritize breaking news; the fourth drains
- * the oldest active-source backlog.
+ * Every other story run prioritizes breaking news; the alternating run drains
+ * the oldest active-source backlog, including retryable failures.
  */
 export function scheduledStoryProcessingOptions(timestampMs = Date.now()) {
   if (!Number.isFinite(timestampMs)) {
     throw new TypeError("Scheduled timestamp must be finite");
   }
   const minute = new Date(timestampMs).getUTCMinutes();
-  // Story phases occur every three minutes. Minute 7 in each 12-minute window
-  // is therefore exactly one of every four story runs.
-  const drainBacklog = minute % 12 === 7;
+  // Story phases occur every three minutes. Minutes congruent to 1 modulo 6
+  // are therefore exactly every other story run.
+  const drainBacklog = minute % 6 === 1;
   return {
     useAi: false,
     aiLimit: 0,

@@ -36,6 +36,7 @@ export type HealthSnapshot = {
       pending: number;
       processing: number;
       failed: number;
+      retryableTotal: number;
       deadLetter: number;
       currentFailures: number;
       historicalFailures: number;
@@ -152,6 +153,13 @@ export type PipelineHealthEvaluation = {
   state: HealthState;
   lastUpdatedAt: string | null;
   latestStatus: string | null;
+};
+
+export type RssSourceHealthEvaluation = {
+  state: HealthState;
+  errorThreshold: number;
+  hasWarning: boolean;
+  hasIncident: boolean;
 };
 
 export const AI_HEALTH_SUCCESS_MAX_AGE_MS = 30 * 60_000;
@@ -370,6 +378,27 @@ export function evaluatePipelineHealth(input: {
   return result("degraded", latestActive?.job.started_at ?? null);
 }
 
+export function evaluateRssSourceHealth(input: {
+  pipelineState: HealthState;
+  activeSources: number;
+  erroringSources: number;
+}): RssSourceHealthEvaluation {
+  const activeSources = Math.max(0, Math.floor(input.activeSources));
+  const erroringSources = Math.max(0, Math.floor(input.erroringSources));
+  const errorThreshold = Math.max(3, Math.ceil(activeSources * 0.1));
+  const hasWarning = erroringSources > 0;
+  const hasIncident =
+    input.pipelineState === "operational" &&
+    erroringSources >= errorThreshold;
+
+  return {
+    state: hasIncident ? "degraded" : input.pipelineState,
+    errorThreshold,
+    hasWarning,
+    hasIncident,
+  };
+}
+
 function aiHealthMessage(
   evaluation: AIHealthEvaluation,
   backlogCount: number,
@@ -567,27 +596,33 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
     queryFailed: Boolean(rssJob.error || sources.error),
   });
   const rssUpdated = rssEvaluation.lastUpdatedAt;
-  const rssState = sourceErrors > 0 && rssEvaluation.state === "operational"
-    ? "degraded"
-    : rssEvaluation.state;
+  const activeSourceCount = sources.count ?? 0;
+  const rssSourceEvaluation = evaluateRssSourceHealth({
+    pipelineState: rssEvaluation.state,
+    activeSources: activeSourceCount,
+    erroringSources: sourceErrors,
+  });
+  const rssState = rssSourceEvaluation.state;
   const rssLabel = rssState === "operational"
-    ? `RSS · ${sources.count ?? 0} nguồn`
-    : rssState === "degraded" && sourceErrors > 0
-      ? `RSS lỗi ${sourceErrors} nguồn`
+    ? `RSS hoạt động · ${activeSourceCount} nguồn`
+    : rssSourceEvaluation.hasIncident
+      ? `RSS cần kiểm tra · ${sourceErrors}/${activeSourceCount} nguồn lỗi`
       : rssState === "degraded"
         ? "RSS pipeline đang tự phục hồi"
         : "RSS chưa mới";
-  const rssMessage = sourceErrors > 0
-    ? `${sourceErrors} nguồn có lỗi gần nhất.`
-    : rssState === "degraded"
+  const rssMessage = rssSourceEvaluation.hasIncident
+    ? `${sourceErrors}/${activeSourceCount} nguồn có lỗi gần nhất, đạt ngưỡng sự cố ${rssSourceEvaluation.errorThreshold} nguồn.`
+    : rssEvaluation.state === "degraded"
       ? rssEvaluation.latestStatus === "failed"
         ? "Tác vụ RSS gần nhất bị gián đoạn; cron sẽ tự thử lại trong tối đa ba phút."
         : "Tác vụ RSS vượt thời gian dự kiến và đang được thu hồi lease tự động."
-      : rssState === "stale"
+      : rssEvaluation.state === "stale"
         ? "Chưa có lần đồng bộ RSS thành công trong 60 phút."
-        : rssState === "unavailable"
+        : rssEvaluation.state === "unavailable"
           ? "Không đọc được trạng thái RSS từ Supabase."
-          : "Raw article được đồng bộ vào Supabase.";
+          : rssSourceEvaluation.hasWarning
+            ? `RSS vẫn hoạt động; ${sourceErrors}/${activeSourceCount} nguồn có cảnh báo gần nhất, dưới ngưỡng sự cố ${rssSourceEvaluation.errorThreshold} nguồn.`
+            : "Raw article được đồng bộ vào Supabase.";
 
   const storyEvaluation = evaluatePipelineHealth({
     jobs: (storyJob.data ?? []) as PipelineJobHealthRecord[],
@@ -712,7 +747,8 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot> {
     queue: {
       pending: pendingArticleCount.count ?? 0,
       processing: processingArticleCount.count ?? 0,
-      failed: failedArticleCount.count ?? 0,
+      failed: currentFailedArticleCount.count ?? 0,
+      retryableTotal: failedArticleCount.count ?? 0,
       deadLetter: deadLetterArticleCount.count ?? 0,
       currentFailures: currentFailedArticleCount.count ?? 0,
       historicalFailures:

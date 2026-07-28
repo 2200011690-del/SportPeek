@@ -40,18 +40,26 @@ test("scheduled runner awaits the selected task and propagates failures", async 
 });
 
 test("scheduled story batches never invoke remote AI and alternate freshness with backlog fairness", () => {
-  const newest = scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, 22));
-  const oldest = scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, 31));
-  assert.equal(newest.limit, 12);
-  assert.equal(newest.candidateLimit, 96);
-  assert.equal(newest.leaseSeconds, 240);
-  assert.equal(newest.aiLimit, 0);
-  assert.equal(newest.matchAiLimit, 0);
-  assert.equal(newest.oldestFirst, false);
-  assert.equal(newest.includeFailed, false);
-  assert.equal(oldest.oldestFirst, true);
-  assert.equal(oldest.includeFailed, true);
-  assert.equal(newest.useAi, false);
+  const options = [19, 22, 25, 28].map((minute) =>
+    scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, minute))
+  );
+  assert.deepEqual(
+    options.map(({ oldestFirst, includeFailed }) => ({ oldestFirst, includeFailed })),
+    [
+      { oldestFirst: true, includeFailed: true },
+      { oldestFirst: false, includeFailed: false },
+      { oldestFirst: true, includeFailed: true },
+      { oldestFirst: false, includeFailed: false },
+    ],
+  );
+  for (const option of options) {
+    assert.equal(option.limit, 12);
+    assert.equal(option.candidateLimit, 96);
+    assert.equal(option.leaseSeconds, 240);
+    assert.equal(option.aiLimit, 0);
+    assert.equal(option.matchAiLimit, 0);
+    assert.equal(option.useAi, false);
+  }
 });
 
 test("pipeline recovery lease cannot block more than one recurring phase", () => {
@@ -59,11 +67,11 @@ test("pipeline recovery lease cannot block more than one recurring phase", () =>
   assert.ok(SCHEDULED_PIPELINE_STALL_MS < 2 * 3 * 60_000);
 });
 
-test("exactly one of every four story phases drains failed backlog", () => {
+test("exactly every other story phase drains failed backlog", () => {
   const storyMinutes = Array.from({ length: 60 }, (_, minute) => minute)
     .filter((minute) => minute % 3 === 1);
   const drainMinutes = storyMinutes.filter((minute) =>
     scheduledStoryProcessingOptions(Date.UTC(2026, 6, 15, 1, minute)).includeFailed
   );
-  assert.deepEqual(drainMinutes, [7, 19, 31, 43, 55]);
+  assert.deepEqual(drainMinutes, [1, 7, 13, 19, 25, 31, 37, 43, 49, 55]);
 });

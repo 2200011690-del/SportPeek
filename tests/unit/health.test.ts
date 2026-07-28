@@ -4,6 +4,7 @@ import {
   AI_HEALTH_SUCCESS_MAX_AGE_MS,
   evaluateAIHealth,
   evaluatePipelineHealth,
+  evaluateRssSourceHealth,
   overallHealthState,
   type AIJobHealthRecord,
   type PipelineJobHealthRecord,
@@ -182,4 +183,62 @@ test("pipeline health is stale only when its last success exceeds the freshness 
     }).state,
     "unavailable",
   );
+});
+
+test("RSS source warnings do not degrade a healthy pipeline below the incident threshold", () => {
+  const result = evaluateRssSourceHealth({
+    pipelineState: "operational",
+    activeSources: 38,
+    erroringSources: 1,
+  });
+
+  assert.equal(result.state, "operational");
+  assert.equal(result.errorThreshold, 4);
+  assert.equal(result.hasWarning, true);
+  assert.equal(result.hasIncident, false);
+});
+
+test("RSS source errors degrade a healthy pipeline at ten percent with a three-source floor", () => {
+  assert.deepEqual(
+    evaluateRssSourceHealth({
+      pipelineState: "operational",
+      activeSources: 38,
+      erroringSources: 4,
+    }),
+    {
+      state: "degraded",
+      errorThreshold: 4,
+      hasWarning: true,
+      hasIncident: true,
+    },
+  );
+  assert.equal(
+    evaluateRssSourceHealth({
+      pipelineState: "operational",
+      activeSources: 10,
+      erroringSources: 2,
+    }).state,
+    "operational",
+  );
+  assert.equal(
+    evaluateRssSourceHealth({
+      pipelineState: "operational",
+      activeSources: 10,
+      erroringSources: 3,
+    }).state,
+    "degraded",
+  );
+});
+
+test("RSS source evaluation preserves non-operational pipeline states", () => {
+  for (const state of ["degraded", "stale", "unavailable"] as const) {
+    assert.equal(
+      evaluateRssSourceHealth({
+        pipelineState: state,
+        activeSources: 38,
+        erroringSources: 1,
+      }).state,
+      state,
+    );
+  }
 });

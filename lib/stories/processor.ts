@@ -1659,12 +1659,45 @@ export async function summarizePersistedStories(
   const limit = Math.min(100, Math.max(1, options.limit ?? 20));
   const backfillJobId = randomUUID();
   if (!options.dryRun) {
+    const nowIso = new Date().toISOString();
+    const leaseCutoff = new Date(Date.now() - 10 * 60_000).toISOString();
+    const staleBackfills = await client
+      .from("ingestion_jobs")
+      .update({
+        status: "failed",
+        error_code: "LEASE_EXPIRED",
+        error_message: "AI backfill exceeded its execution lease.",
+        completed_at: nowIso,
+      })
+      .eq("job_type", "ai:backfill")
+      .eq("status", "processing")
+      .lt("started_at", leaseCutoff);
+    if (staleBackfills.error)
+      throw new ProviderError(
+        "Không thể thu hồi AI backfill quá hạn.",
+        "supabase",
+      );
+
+    // Database maintenance is intentionally best-effort here: an older Worker
+    // may briefly run before the matching migration reaches production.
+    const maintenance = await client.rpc("maintain_newspeek_job_history", {
+      p_now: nowIso,
+      p_force: false,
+    });
+    if (
+      maintenance.error &&
+      !["42883", "PGRST202"].includes(maintenance.error.code ?? "")
+    )
+      console.warn(
+        `[Job Maintenance] ${maintenance.error.message ?? "Unknown maintenance failure"}`,
+      );
+
     const { data: activeJobs, error: activeCheckError } = await client
       .from("ingestion_jobs")
       .select("id")
       .eq("job_type", "ai:backfill")
       .eq("status", "processing")
-      .gt("started_at", new Date(Date.now() - 10 * 60_000).toISOString())
+      .gt("started_at", leaseCutoff)
       .limit(1);
     if (activeCheckError)
       throw new ProviderError("Không thể kiểm tra trạng thái job.", "supabase");
@@ -1686,7 +1719,6 @@ export async function summarizePersistedStories(
     if (started.error)
       throw new ProviderError("Không thể tạo AI backfill job.", "supabase");
 
-    const leaseCutoff = new Date(Date.now() - 10 * 60_000).toISOString();
     const released = await client
       .from("ai_jobs")
       .update({
