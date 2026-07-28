@@ -201,7 +201,7 @@ h3 {
   background: var(--np-ink);
   color: var(--np-paper);
   padding: 11px 18px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .skip-link:focus {
@@ -255,7 +255,7 @@ h3 {
   color: var(--np-ink);
   font-family: var(--font-vietnam), sans-serif;
   font-size: 25px;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: -0.055em;
   line-height: 1;
   text-decoration: none;
@@ -273,7 +273,7 @@ h3 {
   color: #fff;
   font-family: var(--font-editorial), Georgia, serif;
   font-size: 25px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: -0.08em;
   box-shadow: 5px 5px 0 var(--np-cobalt);
 }
@@ -300,7 +300,7 @@ h3 {
   background: transparent;
   color: var(--np-ink-soft);
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.015em;
   text-decoration: none;
   white-space: nowrap;
@@ -533,7 +533,7 @@ h3 {
   padding: 10px 12px;
   border-radius: 12px;
   color: var(--np-ink);
-  font-weight: 720;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -665,7 +665,7 @@ h3 {
 .source-directory-header .eyebrow {
   color: var(--np-signal);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -679,7 +679,7 @@ h3 {
   min-height: 46px;
   padding: 0 18px;
   border-radius: 999px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .primary-button {
@@ -742,7 +742,7 @@ h3 {
   background: var(--np-signal);
   color: #fff;
   font-size: 10px;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -757,7 +757,7 @@ h3 {
   color: inherit;
   font-family: var(--font-editorial), Georgia, serif;
   font-size: 15px;
-  font-weight: 650;
+  font-weight: 600;
   text-overflow: ellipsis;
   text-decoration: none;
   white-space: nowrap;
@@ -889,7 +889,7 @@ h3 {
   margin-bottom: 12px;
   color: var(--np-signal);
   font-size: 10px;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: 0.13em;
   text-transform: uppercase;
 }
@@ -935,7 +935,7 @@ h3 {
   background: var(--np-ink);
   color: var(--np-paper);
   font-size: 13px;
-  font-weight: 780;
+  font-weight: 800;
   text-decoration: none;
 }
 
@@ -1024,7 +1024,7 @@ h3 {
   flex: 0 0 auto;
   color: var(--np-ink);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -1050,7 +1050,7 @@ h3 {
   background: var(--np-paper);
   color: var(--np-ink-soft);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
   text-decoration: none;
   white-space: nowrap;
 }
@@ -1090,7 +1090,7 @@ h3 {
   margin-bottom: 4px;
   color: var(--np-signal);
   font-size: 10px;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: 0.13em;
   text-transform: uppercase;
 }
@@ -1108,7 +1108,7 @@ h3 {
 .home-category-modules-heading > a {
   color: var(--np-cobalt);
   font-size: 12px;
-  font-weight: 780;
+  font-weight: 800;
   text-decoration: none;
 }
 
@@ -1210,7 +1210,7 @@ h3 {
   border-radius: 999px;
   background: transparent;
   color: var(--np-ink);
-  font-weight: 750;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -1233,7 +1233,7 @@ h3 {
   margin-bottom: 14px;
   color: var(--np-ink);
   font-size: 20px;
-  font-weight: 820;
+  font-weight: 800;
 }
 
 .dense-news-list {
@@ -1257,13 +1257,86 @@ h3 {
 .dense-news-index {
   color: var(--np-signal);
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 800;
 }
 
 .dense-news-list strong {
   font-family: var(--font-editorial), Georgia, serif;
   font-size: 15px;
   line-height: 1.35;
+}
+
+/*
+ * Category modules use a decorative dot rather than a numeric rank. The
+ * transitional stylesheet hides this index cell, so the grid contract must be
+ * restored here or the headline falls into the 28px index column.
+ */
+.home-category-module-grid .dense-news-list a {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  min-height: 100px;
+  gap: 13px;
+  padding: 17px 0;
+}
+
+.home-category-module-grid .dense-news-index {
+  display: grid;
+  width: 18px;
+  min-width: 18px;
+  min-height: 24px;
+  place-items: start center;
+  padding-top: 8px;
+}
+
+.home-category-module-grid .dense-news-index i {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--np-signal);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--np-signal) 13%, transparent);
+}
+
+.home-category-module-grid .dense-news-list a > span:last-child {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 7px;
+}
+
+.home-category-module-grid .dense-news-list strong {
+  display: -webkit-box;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--np-ink);
+  font-size: clamp(16px, 1.35vw, 19px);
+  line-height: 1.38;
+  text-wrap: pretty;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.home-category-module-grid .dense-news-list small {
+  display: block;
+  color: var(--np-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.45;
+}
+
+.home-category-module-grid > article:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.home-category-module-grid > article:last-child:nth-child(odd) .dense-news-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 24px;
+}
+
+.home-category-module-grid > article:last-child:nth-child(odd) .dense-news-list a {
+  align-content: start;
 }
 
 .home-right-rail {
@@ -1314,7 +1387,7 @@ h3 {
   background: transparent;
   color: var(--np-muted);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
   text-decoration: none;
   white-space: nowrap;
 }
@@ -1530,12 +1603,12 @@ h3 {
   background: var(--np-ink);
   color: var(--np-paper);
   font-size: 9px;
-  font-weight: 850;
+  font-weight: 800;
 }
 
 .news-card-footer .icon-button {
-  min-width: 42px;
-  min-height: 42px;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .news-card-footer .icon-button.active {
@@ -1771,7 +1844,7 @@ h3 {
   background: var(--np-paper);
   color: var(--np-ink);
   font-size: 12px;
-  font-weight: 740;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -1847,7 +1920,7 @@ h3 {
   background: transparent;
   color: var(--np-muted);
   font-size: 12px;
-  font-weight: 740;
+  font-weight: 700;
 }
 
 .article-reading-modes button.active {
@@ -1863,7 +1936,7 @@ h3 {
 .article-reading-modes small {
   color: var(--np-signal);
   font-size: 9px;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: .08em;
   text-transform: uppercase;
 }
@@ -2029,7 +2102,7 @@ h3 {
   background: transparent;
   color: var(--np-muted);
   font-size: 11px;
-  font-weight: 740;
+  font-weight: 700;
 }
 
 .article-source-tabs button.active {
@@ -2126,7 +2199,7 @@ h3 {
 .article-related-heading > span {
   color: var(--np-signal);
   font-size: 10px;
-  font-weight: 850;
+  font-weight: 800;
   letter-spacing: .12em;
   text-transform: uppercase;
 }
@@ -2215,7 +2288,7 @@ h3 {
   background: transparent;
   color: var(--np-muted);
   font-size: 12px;
-  font-weight: 730;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -2281,7 +2354,7 @@ h3 {
   background: var(--np-ink);
   color: var(--np-paper);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 800;
 }
 
 .source-row-heading {
@@ -2358,7 +2431,7 @@ h3 {
   background: transparent;
   color: var(--np-ink);
   font-size: 11px;
-  font-weight: 730;
+  font-weight: 700;
 }
 
 .source-row .follow-button.following {
@@ -2442,7 +2515,7 @@ h3 {
   background: transparent;
   color: var(--np-muted);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
   text-align: left;
 }
 
@@ -2481,7 +2554,7 @@ h3 {
 .form-field > span {
   color: var(--np-ink-soft);
   font-size: 11px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .form-field input,
@@ -2804,7 +2877,7 @@ h3 {
 .form-options a,
 .auth-switch a {
   color: var(--np-cobalt);
-  font-weight: 730;
+  font-weight: 700;
 }
 
 .auth-submit,
@@ -2818,7 +2891,7 @@ h3 {
   gap: 9px;
   margin-top: 18px;
   border-radius: 999px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .oauth-button,
@@ -3172,7 +3245,7 @@ h3 {
     border-radius: 16px;
     color: var(--np-muted);
     font-size: 9px;
-    font-weight: 740;
+    font-weight: 700;
     text-decoration: none;
   }
 
@@ -3376,6 +3449,14 @@ h3 {
   .home-category-module-grid,
   .home-right-rail,
   .source-methodology {
+    grid-template-columns: 1fr;
+  }
+
+  .home-category-module-grid > article:last-child:nth-child(odd) {
+    grid-column: auto;
+  }
+
+  .home-category-module-grid > article:last-child:nth-child(odd) .dense-news-list {
     grid-template-columns: 1fr;
   }
 

@@ -45,6 +45,15 @@ test("editorial layouts remain stable across all target breakpoints", async ({ p
     await page.setViewportSize({ width, height: width < 768 ? 844 : 960 });
     await page.goto("/");
     await expect(page.locator(".editorial-header")).toBeVisible();
+    const categoryHeadline = page
+      .locator(".home-category-module-grid .dense-news-list a > span:last-child")
+      .first();
+    await expect(categoryHeadline).toBeVisible();
+    const categoryHeadlineBox = await categoryHeadline.boundingBox();
+    expect(
+      categoryHeadlineBox?.width ?? 0,
+      `category headline collapsed at ${width}px`,
+    ).toBeGreaterThan(180);
     const viewport = await page.evaluate(() => ({
       width: window.innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
