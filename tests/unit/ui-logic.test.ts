@@ -3,7 +3,6 @@ import test from "node:test";
 import type { NewsItem } from "../../lib/types";
 import {
   filterNewsItems,
-  isTransferNews,
   normalizeSearchText,
   paginateItems,
   personalizedNewsItems,
@@ -13,50 +12,50 @@ import {
 const makeNews = (
   id: string,
   title: string,
-  team: string,
+  category: string,
+  source: string,
   hotness = 60,
 ): NewsItem => ({
   id,
   title,
   slug: id,
-  summary: `Cập nhật về ${team}`,
+  summary: `Cập nhật về ${category}`,
   keyPoints: [],
-  category: "Bóng đá",
-  competition: "Premier League",
-  team,
+  category,
+  primaryTopic: category,
+  region: category === "Thế giới" ? "Quốc tế" : "Việt Nam",
   publishedAt: "vừa xong",
   hotness,
   reliability: 80,
-  sources: ["Nguồn thử nghiệm"],
+  sources: [source],
   imageTone: "green",
 });
 
 const items = [
-  makeNews("arsenal", "Arsenal hoàn tất thương vụ mới", "Arsenal", 75),
-  makeNews("liverpool", "Liverpool chuẩn bị trận đấu", "Liverpool", 82),
-  makeNews("vietnam", "Đội tuyển Việt Nam hội quân", "Việt Nam", 65),
+  makeNews("ai", "AI tạo sinh có cập nhật mới", "Công nghệ", "BBC Technology", 75),
+  makeNews("market", "Thị trường chứng khoán tăng điểm", "Kinh tế", "VnExpress", 82),
+  makeNews("vietnam", "Việt Nam công bố chính sách mới", "Việt Nam", "Tuổi Trẻ", 65),
 ];
 
 test("search normalizes Vietnamese accents", () => {
-  assert.equal(normalizeSearchText("Đội tuyển Việt Nam"), "doi tuyen viet nam");
-  assert.deepEqual(filterNewsItems(items, { query: "Viet Nam" }).map((item) => item.id), ["vietnam"]);
+  assert.equal(normalizeSearchText("Chính sách Việt Nam"), "chinh sach viet nam");
+  assert.deepEqual(filterNewsItems(items, { query: "Chinh sach" }).map((item) => item.id), ["vietnam"]);
 });
 
-test("news filters combine query, team and hotness", () => {
-  assert.deepEqual(filterNewsItems(items, { team: "Arsenal", minHotness: 70 }).map((item) => item.id), ["arsenal"]);
-  assert.equal(filterNewsItems(items, { team: "Arsenal", minHotness: 80 }).length, 0);
+test("news filters combine category, source and hotness", () => {
+  assert.deepEqual(filterNewsItems(items, { category: "Công nghệ", source: "BBC Technology", minHotness: 70 }).map((item) => item.id), ["ai"]);
+  assert.equal(filterNewsItems(items, { category: "Công nghệ", minHotness: 80 }).length, 0);
 });
 
-test("personalization moves followed-team stories ahead of generic hot stories", () => {
-  assert.equal(personalizedNewsItems(items, ["Arsenal"])[0].id, "arsenal");
+test("personalization moves followed-source stories ahead of generic hot stories", () => {
+  assert.equal(personalizedNewsItems(items, ["BBC Technology"])[0].id, "ai");
 });
 
 test("related news never fills with unrelated stories", () => {
-  assert.deepEqual(relatedNewsItems(items, ["Arsenal"]).map((item) => item.id), ["arsenal"]);
-  assert.equal(relatedNewsItems(items, ["Real Madrid"]).length, 0);
+  assert.deepEqual(relatedNewsItems(items, ["AI tạo sinh"]).map((item) => item.id), ["ai"]);
+  assert.equal(relatedNewsItems(items, ["Nông nghiệp"]).length, 0);
 });
 
-test("transfer detection and pagination use real content", () => {
-  assert.equal(isTransferNews(items[0]), true);
+test("pagination returns the requested page", () => {
   assert.deepEqual(paginateItems(items, 2, 2), { items: [items[2]], page: 2, totalPages: 2 });
 });

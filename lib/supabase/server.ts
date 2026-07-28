@@ -27,15 +27,15 @@ export async function createClient() {
 export async function getCurrentUserRole() {
   const client = await createClient();
   if (!client)
-    return { mode: "demo" as const, user: null, role: "admin" as const };
+    return { mode: "unconfigured" as const, user: null, role: null };
   const {
     data: { user },
   } = await client.auth.getUser();
   if (!user) return { mode: "supabase" as const, user: null, role: null };
   const { data } = await client
     .from("profiles")
-    .select("role")
+    .select("internal_role")
     .eq("id", user.id)
     .single();
-  return { mode: "supabase" as const, user, role: data?.role ?? "user" };
+  return { mode: "supabase" as const, user, role: data?.internal_role ?? "member" };
 }

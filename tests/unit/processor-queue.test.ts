@@ -1,0 +1,179 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  aiRetryDelayMs,
+  selectIndependentSummaryInput,
+  selectStoryCategory,
+  storyCandidateWindow,
+  trustedStoryCategoryCandidates,
+} from "../../lib/stories/processor";
+import type { ClusterableArticle } from "../../lib/stories/clustering";
+
+function article(
+  index: number,
+  overrides: Partial<ClusterableArticle> = {},
+): ClusterableArticle {
+  return {
+    id: `article-${index}`,
+    sourceId: `source-${index}`,
+    sourceName: `Publisher ${index}`,
+    title: `Distinct football update ${index}`,
+    excerpt: `Source-backed details for event ${index}.`,
+    publishedAt: new Date(Date.UTC(2026, 6, 17, 10, index)).toISOString(),
+    ...overrides,
+  };
+}
+
+test("AI prompt input excludes syndicated copies and caps independent sources", () => {
+  const articles = Array.from({ length: 10 }, (_, index) => article(index));
+  articles.splice(
+    1,
+    0,
+    article(99, {
+      id: "syndicated-copy",
+      sourceId: "copy-publisher",
+      isSyndicated: true,
+    }),
+  );
+  const selected = selectIndependentSummaryInput(articles);
+  assert.equal(selected.length, 8);
+  assert.equal(
+    selected.some((item) => item.id === "syndicated-copy"),
+    false,
+  );
+  assert.equal(new Set(selected.map((item) => item.sourceName)).size, 8);
+});
+
+test("AI retry delay backs off from five minutes to one day", () => {
+  assert.equal(aiRetryDelayMs(1), 5 * 60_000);
+  assert.equal(aiRetryDelayMs(2), 30 * 60_000);
+  assert.equal(aiRetryDelayMs(3), 2 * 3_600_000);
+  assert.equal(aiRetryDelayMs(4), 12 * 3_600_000);
+  assert.equal(aiRetryDelayMs(99), 24 * 3_600_000);
+});
+
+test("story candidate window bounds database candidates around the claimed batch", () => {
+  const window = storyCandidateWindow([
+    { publishedAt: "2026-07-18T10:00:00.000Z" },
+    { publishedAt: "2026-07-18T12:00:00.000Z" },
+  ]);
+  assert.deepEqual(window, {
+    from: "2026-07-15T10:00:00.000Z",
+    to: "2026-07-21T12:00:00.000Z",
+  });
+  assert.equal(storyCandidateWindow([{ publishedAt: "invalid" }]), null);
+});
+
+test("content-inferred category wins over a broad source-declared category", () => {
+  assert.equal(
+    selectStoryCategory(
+      "Ngân hàng trung ương điều chỉnh lãi suất và thị trường tài chính phản ứng",
+      ["Thế giới"],
+      "vi",
+    ),
+    "Kinh tế",
+  );
+  assert.equal(
+    selectStoryCategory("Bản tin mới", ["Công nghệ"], "vi"),
+    "Công nghệ",
+  );
+  assert.equal(selectStoryCategory("Latest update", [], "en"), "Thế giới");
+});
+
+test("mixed homepage metadata cannot force every article into one category", () => {
+  assert.deepEqual(
+    trustedStoryCategoryCandidates([
+      {
+        sourceName: "VietnamPlus Trang chủ",
+        rawMetadata: {
+          categories: [],
+          publisherCategoriesDiscarded: "Y tế",
+        },
+      },
+    ]),
+    [],
+  );
+  assert.deepEqual(
+    trustedStoryCategoryCandidates([
+      { sourceName: "BBC Health", rawMetadata: { categories: [] } },
+    ]),
+    ["Sức khỏe"],
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Trung Quốc phản ứng về án phạt EU đối với sàn thương mại điện tử",
+      [],
+      "vi",
+    ),
+    "Kinh tế",
+  );
+  assert.equal(
+    selectStoryCategory("An Giang tổ chức chương trình hiến máu", [], "vi"),
+    "Sức khỏe",
+  );
+  assert.equal(
+    selectStoryCategory("Dự báo thời tiết: Trung Bộ nắng nóng gay gắt", [], "vi"),
+    "Khoa học",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Nhà máy nhiệt điện hợp tác với doanh nghiệp Hàn Quốc",
+      [],
+      "vi",
+    ),
+    "Kinh tế",
+  );
+  assert.equal(
+    selectStoryCategory("Tăng cường năng lực sẵn sàng chiến đấu quốc phòng", [], "vi"),
+    "Chính trị",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Khánh Hòa tổ chức hoạt động tri ân các anh hùng liệt sỹ",
+      [],
+      "vi",
+    ),
+    "Việt Nam",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Nguy cơ căng thẳng trên Biển Đỏ",
+      [],
+      "vi",
+      "Thế giới",
+    ),
+    "Thế giới",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Kinh tế Việt Nam ghi nhận mức tăng trưởng ấn tượng",
+      [],
+      "vi",
+    ),
+    "Kinh tế",
+  );
+  assert.equal(
+    selectStoryCategory("AI định hình lại hạ tầng số quốc gia", [], "vi"),
+    "Công nghệ",
+  );
+  assert.equal(
+    selectStoryCategory(
+      "Diễn tập nâng cao năng lực sẵn sàng chiến đấu từ cơ sở",
+      [],
+      "vi",
+    ),
+    "Chính trị",
+  );
+  assert.equal(
+    selectStoryCategory("Hà Tĩnh đón các dòng vốn đầu tư mới", [], "vi"),
+    "Kinh tế",
+  );
+  assert.equal(
+    selectStoryCategory("Indonesia thắng đậm, đội tuyển giành vé vào chung kết", [], "vi"),
+    "Thể thao",
+  );
+  assert.equal(
+    selectStoryCategory("Nghiên cứu phương án phát triển nhà ở xã hội tại thủ đô", [], "vi"),
+    "Việt Nam",
+  );
+});

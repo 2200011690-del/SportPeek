@@ -2,26 +2,32 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sportpeek",
   "compatibility_date": "2026-05-22",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
+  "compatibility_flags": ["nodejs_compat"],
   "main": "./worker/index.ts",
   "assets": {
     "directory": "dist/client",
     "not_found_handling": "none",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+  },
+  "triggers": {
+    "crons": ["* * * * *"],
   },
   "images": {
-    "binding": "IMAGES"
+    "binding": "IMAGES",
+  },
+  "ai": {
+    "binding": "AI",
   },
   "vars": {
-    "NEXT_PUBLIC_APP_URL": "https://sportpeek.2200011690.workers.dev",
+    "NEXT_PUBLIC_APP_URL": "https://newspeek.2200011690.workers.dev",
     "NEXT_PUBLIC_SUPABASE_URL": "https://atlvqdryzgsohbjglxng.supabase.co",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_r5Ul01CZq9gJ-NhtbBP6DA_YmfNGYJg",
-    "AI_PROVIDER": "mock",
-    "SPORTS_DATA_PROVIDER": "football-data",
-    "FOOTBALL_DATA_BASE_URL": "https://api.football-data.org/v4",
-    "FOOTBALL_DATA_COMPETITIONS": "PL,CL,PD,SA,BL1,FL1,DED,PPL,BSA,ELC,WC",
-    "NEWS_PROVIDER": "aggregated-rss"
-  }
+    "AI_PROVIDER": "failover",
+    "AI_PROVIDER_CHAIN": "gemini,groq,cloudflare",
+    "GEMINI_MODEL": "gemini-3.1-flash-lite",
+    "GROQ_MODEL": "openai/gpt-oss-20b",
+    "CLOUDFLARE_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
+    "NEWS_PROVIDER": "aggregated-rss",
+    "SUPABASE_RUNTIME_USE_PUBLIC_KEY": "false",
+  },
 }
