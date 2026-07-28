@@ -20,7 +20,7 @@ export const summarySchema = z.object({
   citations: z.array(z.object({
     fact: z.string().min(1),
     sourceArticleIds: z.array(z.string()).min(1)
-  })).optional()
+  })).min(1)
 });
 export const matchEvaluationSchema = z.object({ sameEvent: z.boolean(), confidence: z.number().min(0).max(1), reason: z.string() });
 export const timelineSchema = z.array(z.object({ occurredAt: z.string().datetime({ offset: true }), content: z.string().min(1), updateType: z.string(), supportingArticleIds: z.array(z.string()).min(1) }));

@@ -3,6 +3,7 @@ import test from "node:test";
 import { FailoverAIProvider } from "../../lib/ai/failover";
 import { evidenceFingerprint, needsClusterSummary, sanitizeClusterSummary, selectClusterSummary } from "../../lib/ai/grounding";
 import { HeuristicAIProvider } from "../../lib/ai/heuristic";
+import { providerJsonSchema, summarySchema } from "../../lib/ai/remote-base";
 
 test("AI failover advances to the next provider and records the winner", async () => {
   const failing = new HeuristicAIProvider();
@@ -16,6 +17,26 @@ test("AI failover advances to the next provider and records the winner", async (
   assert.equal(provider.lastProviderName, "second");
 });
 
+test("AI failover always returns a source-backed summary when every remote provider fails", async () => {
+  const first = new HeuristicAIProvider();
+  Object.defineProperty(first, "name", { value: "unavailable-a" });
+  first.summarizeCluster = async () => { throw new Error("quota exceeded"); };
+  const second = new HeuristicAIProvider();
+  Object.defineProperty(second, "name", { value: "unavailable-b" });
+  second.summarizeCluster = async () => { throw new Error("network timeout"); };
+  const provider = new FailoverAIProvider([first, second]);
+  const result = await provider.summarizeCluster({
+    articles: [{
+      id: "article-1",
+      title: "Thành phố mở tuyến metro mới",
+      excerpt: "Tuyến metro mới bắt đầu phục vụ hành khách từ sáng nay sau thời gian chạy thử.",
+    }],
+  });
+  assert.equal(provider.lastProviderName, "heuristic");
+  assert.match(result.summary, /Tuyến metro mới bắt đầu phục vụ hành khách/);
+  assert.deepEqual(result.citations?.[0].sourceArticleIds, ["article-1"]);
+});
+
 test("AI summary validation removes repeated claims and rejects invented sources", () => {
   const articles = [{ id: "a", title: "Arsenal thắng trận", excerpt: "Arsenal thắng trận với tỷ số 2-0 trong trận đấu tối nay." }];
   const cleaned = sanitizeClusterSummary({
@@ -27,6 +48,35 @@ test("AI summary validation removes repeated claims and rejects invented sources
   assert.equal(cleaned.keyPoints.length, 1);
   assert.equal((cleaned.summary.match(/Arsenal thắng trận với tỷ số 2-0/g) ?? []).length, 1);
   assert.throws(() => sanitizeClusterSummary({ ...cleaned, sourceIds: ["invented"] }, articles), /unknown source IDs/);
+});
+
+test("AI summary validation removes an unsupported claim instead of discarding grounded content", () => {
+  const articles = [{
+    id: "source-1",
+    title: "Thành phố mở tuyến metro mới",
+    excerpt: "Tuyến metro mới bắt đầu phục vụ hành khách từ sáng nay sau thời gian chạy thử. Đại diện thành phố cho biết lịch vận hành sẽ được công bố trong tuần.",
+  }];
+  const cleaned = sanitizeClusterSummary({
+    title: "Thành phố mở tuyến metro mới",
+    summary: "Tuyến metro mới bắt đầu phục vụ hành khách từ sáng nay sau thời gian chạy thử. Tuyến metro đã phục vụ 999.999 hành khách. Đại diện thành phố cho biết lịch vận hành sẽ được công bố trong tuần.",
+    keyPoints: [
+      "Tuyến metro mới bắt đầu phục vụ hành khách từ sáng nay.",
+      "Tuyến metro đã phục vụ 999.999 hành khách.",
+    ],
+    sourceIds: ["source-1"],
+  }, articles);
+  assert.doesNotMatch(cleaned.summary, /999\.999/);
+  assert.equal(cleaned.keyPoints.length, 1);
+  assert.ok(cleaned.citations?.length);
+});
+
+test("Groq strict summary schema requires citations", () => {
+  const schema = providerJsonSchema(summarySchema) as {
+    required?: string[];
+    properties?: Record<string, unknown>;
+  };
+  assert.ok(schema.required?.includes("citations"));
+  assert.ok(schema.properties?.citations);
 });
 
 test("last good AI summary wins over heuristic fallback when remote AI is unavailable", () => {

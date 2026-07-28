@@ -83,14 +83,19 @@ export function sanitizeClusterSummary(output: ClusterSummary, articles: Cluster
     throw new Error("AI returned missing or unknown source IDs");
   }
 
-  const summary = dedupeSummaryText(output.summary);
-  if (!highRiskAnchorsAreGrounded(summary, articles)) {
-    throw new Error("AI summary contains claims that are not grounded in source evidence");
-  }
+  const summary = dedupeClaims(
+    sentences(output.summary).filter((claim) => claimIsGrounded(claim, articles)),
+    0.78,
+  ).join(" ").trim();
   const evidenceLength = articles.reduce((sum, article) => sum + article.title.length + article.excerpt.length, 0);
   const minimumLength = Math.min(80, Math.max(12, Math.floor(evidenceLength * 0.4)));
-  if (summary.length < minimumLength) throw new Error("AI summary is too short after claim deduplication");
-  const keyPoints = dedupeClaims(output.keyPoints, 0.74).slice(0, 5);
+  if (summary.length < minimumLength) {
+    throw new Error("AI summary has too little grounded content after unsafe claims were removed");
+  }
+  const keyPoints = dedupeClaims(
+    output.keyPoints.filter((claim) => claimIsGrounded(claim, articles)),
+    0.74,
+  ).slice(0, 5);
   if (!keyPoints.length) throw new Error("AI summary has no distinct source-backed key points");
 
   const articlesById = new Map(articles.map((article) => [article.id, article]));

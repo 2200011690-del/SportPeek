@@ -47,7 +47,7 @@ test("operations alerts distinguish current incidents from historical failures",
   assert.ok(alerts.some((item) => item.code === "HISTORICAL_FAILURES" && item.scope === "historical"));
 });
 
-test("AI grounding creates citations and rejects invented high-risk numbers", () => {
+test("AI grounding creates citations and removes invented high-risk numbers", () => {
   const articles = [{
     id: "source-1",
     title: "Thành phố mở tuyến metro mới",
@@ -60,12 +60,14 @@ test("AI grounding creates citations and rejects invented high-risk numbers", ()
     sourceIds: ["source-1"],
   }, articles);
   assert.ok(grounded.citations?.length);
-  assert.throws(() => sanitizeClusterSummary({
+  const cleaned = sanitizeClusterSummary({
     title: "Thành phố mở tuyến metro mới",
-    summary: "Tuyến metro mới phục vụ 999.999 hành khách từ sáng nay sau thời gian chạy thử.",
+    summary: "Tuyến metro mới phục vụ 999.999 hành khách từ sáng nay sau thời gian chạy thử. Tuyến metro mới bắt đầu phục vụ hành khách từ sáng nay sau thời gian chạy thử.",
     keyPoints: ["Tuyến metro mới bắt đầu phục vụ hành khách từ sáng nay."],
     sourceIds: ["source-1"],
-  }, articles), /not grounded/);
+  }, articles);
+  assert.doesNotMatch(cleaned.summary, /999\.999/);
+  assert.match(cleaned.summary, /bắt đầu phục vụ hành khách/);
 });
 
 test("long article evidence samples the beginning, middle and ending", () => {
