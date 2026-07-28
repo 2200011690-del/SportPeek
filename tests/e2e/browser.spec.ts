@@ -71,6 +71,53 @@ test("editorial layouts remain stable across all target breakpoints", async ({ p
   }
 });
 
+test("today layout keeps a compact hierarchy on desktop and mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/");
+
+  const heroHeading = page.locator(".home-hero-content h1");
+  await expect(heroHeading).toBeVisible();
+  const heroHeadingBox = await heroHeading.boundingBox();
+  expect(heroHeadingBox?.height ?? Infinity).toBeLessThan(240);
+
+  const sublead = page.locator(".sublead-news-card").first();
+  await expect(sublead).toBeVisible();
+  const subleadBox = await sublead.boundingBox();
+  const subleadVisualBox = await sublead.locator(".news-visual").boundingBox();
+  const subleadHeadingBox = await sublead.locator("h3").boundingBox();
+  expect(subleadBox?.height ?? Infinity).toBeLessThan(450);
+  expect(
+    (subleadHeadingBox?.y ?? Infinity)
+      - ((subleadVisualBox?.y ?? 0) + (subleadVisualBox?.height ?? 0)),
+  ).toBeLessThan(100);
+
+  const tickerContrast = await page.locator(".breaking-news-ticker .ticker-title").evaluate(
+    (title) => {
+      const ticker = title.closest(".breaking-news-ticker");
+      return {
+        text: getComputedStyle(title).color,
+        background: ticker ? getComputedStyle(ticker).backgroundColor : "",
+      };
+    },
+  );
+  expect(tickerContrast.text).not.toBe(tickerContrast.background);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  const feedHeading = page.locator(".home-feed-heading");
+  const mobileTitle = feedHeading.locator("h2");
+  const feedHeadingBox = await feedHeading.boundingBox();
+  const mobileTitleBox = await mobileTitle.boundingBox();
+  expect(
+    (mobileTitleBox?.y ?? Infinity) + (mobileTitleBox?.height ?? Infinity),
+  ).toBeLessThanOrEqual(
+    (feedHeadingBox?.y ?? 0) + (feedHeadingBox?.height ?? 0),
+  );
+
+  const mobileHeroHeadingBox = await heroHeading.boundingBox();
+  expect(mobileHeroHeadingBox?.height ?? Infinity).toBeLessThan(160);
+});
+
 test("search UI finds a story outside the initial feed", async ({ page, request }) => {
   const current = await stories(request);
   const currentIds = new Set(current.map((story) => story.id));
